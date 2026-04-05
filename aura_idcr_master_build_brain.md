@@ -76,6 +76,11 @@ If work is completed, blocked, or partial, update:
 - blockers,
 - next step.
 
+### Git commits and attribution (all sessions)
+- Write commit messages that describe **what changed** in neutral, professional language.
+- Do **not** attribute commits to a specific editor, assistant product, or automated tool in the message body, trailers, or footers (for example avoid co-author lines or tags that name those tools).
+- This keeps the repository history clean for judges, collaborators, and future agents reading `git log`.
+
 ---
 
 ## 4) What the system must do
@@ -726,12 +731,12 @@ Use these statuses exactly:
 - Done
 
 ### Phase 0 — Scope Freeze and Contracts
-- [ ] Final variable schema — **Not Started**
-- [ ] Scenario schema — **Not Started**
-- [ ] Alarm dictionary — **Not Started**
-- [ ] Module/data contracts — **Not Started**
-- [ ] UI wireframes / layout agreement — **Not Started**
-- [ ] KPI definitions — **Not Started**
+- [x] Final variable schema — **Done**
+- [x] Scenario schema — **Done**
+- [x] Alarm dictionary — **Done**
+- [x] Module/data contracts — **Done**
+- [x] UI wireframes / layout agreement — **Done**
+- [x] KPI definitions — **Done**
 
 ### Phase 1 — First End-to-End Slice
 - [ ] Plant twin skeleton — **Not Started**
@@ -780,18 +785,17 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Start with **Phase 0** only.
+Phase 0 is now frozen through the contract package in `docs/`.
 
-Do not jump into coding random features yet.
-The immediate next deliverables should be:
-1. final variable schema,
-2. scenario schema,
-3. alarm dictionary,
-4. module/data contracts,
-5. HMI region wireframe,
-6. KPI definition sheet.
+The immediate next deliverables should move to **Phase 1 — First End-to-End Slice**:
+1. build the plant twin skeleton against the canonical variable schema,
+2. build the baseline HMI shell against the HMI layout agreement,
+3. build the basic alarm list from the alarm dictionary,
+4. build the control input path against the scenario action contract,
+5. build the session logging backbone against the shared event taxonomy,
+6. run one deterministic scenario end to end using the shared scenario schema.
 
-Without these, later implementation will drift and separate agent sessions will become inconsistent.
+Do not skip these interfaces or invent alternate schemas during Phase 1.
 
 ---
 
@@ -841,7 +845,25 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
 
 ### Entries
-_No entries yet._
+- Date: 2026-04-04
+- Agent/session: GPT-5.4 Phase 0 contracts session
+- Task worked on: Phase 0 scope freeze and implementation-ready contract package
+- Status: Done
+- What changed:
+  - Added `docs/aura_variable_schema.md`
+  - Added `docs/aura_scenario_schema.md`
+  - Added `docs/aura_alarm_dictionary.md`
+  - Added `docs/aura_module_contracts.md`
+  - Added `docs/aura_hmi_wireframe.md`
+  - Added `docs/aura_kpi_definitions.md`
+  - Updated `docs/README.md` to index the Phase 0 package
+  - Marked all Phase 0 task-board items done
+- What remains:
+  - Phase 1 runtime implementation against the frozen Phase 0 docs
+- Blockers:
+  - None in repo; future sessions should keep the docs authoritative unless the human explicitly changes scope
+- Next recommended step:
+  - Begin Phase 1 with one deterministic end-to-end slice built directly from the Phase 0 contracts
 
 ---
 
