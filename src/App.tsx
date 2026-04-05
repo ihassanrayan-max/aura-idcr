@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
+import type { SessionMode } from "./contracts/aura";
 import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
 import { formatSupportModeLabel } from "./runtime/supportModePolicy";
 import {
@@ -74,6 +75,19 @@ function validationBadgeTone(outcome: "pass" | "soft_warning" | "hard_prevent"):
   }
 }
 
+function formatDemoKpiValue(value: number, unit: string): string {
+  if (unit === "count" || unit === "index") {
+    return String(Math.round(value));
+  }
+  if (unit === "ratio") {
+    return value.toFixed(4);
+  }
+  if (unit === "sec") {
+    return value.toFixed(1);
+  }
+  return String(value);
+}
+
 function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "neutral" | "alert" {
   switch (priority) {
     case "standard":
@@ -90,6 +104,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   const [isRunning, setIsRunning] = useState(true);
   const [feedwaterDemand, setFeedwaterDemand] = useState(82);
   const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
+  const [selectedSessionMode, setSelectedSessionMode] = useState<SessionMode>("adaptive");
 
   useEffect(() => {
     if (!autoRun || !isRunning || snapshot.outcome) {
@@ -124,6 +139,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   const presentationPolicy = useMemo(
     () =>
       buildPresentationPolicy({
+        session_mode: snapshot.session_mode,
         support_mode: snapshot.support_mode,
         support_policy: snapshot.support_policy,
         support_refinement: snapshot.support_refinement,
@@ -131,6 +147,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         pending_action_confirmation: snapshot.pending_action_confirmation,
       }),
     [
+      snapshot.session_mode,
       snapshot.last_validation_result,
       snapshot.pending_action_confirmation,
       snapshot.support_mode,
@@ -218,7 +235,20 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         <div className="status-grid">
           <div className="status-cell">
             <span className="status-label">Session Mode</span>
-            <strong>{snapshot.session_mode}</strong>
+            <div className="session-mode-row">
+              <strong>{snapshot.session_mode}</strong>
+              <label className="muted session-mode-label" htmlFor="session-mode-select">
+                Next run
+              </label>
+              <select
+                id="session-mode-select"
+                value={selectedSessionMode}
+                onChange={(event) => setSelectedSessionMode(event.target.value as SessionMode)}
+              >
+                <option value="adaptive">adaptive</option>
+                <option value="baseline">baseline</option>
+              </select>
+            </div>
           </div>
           <div className="status-cell">
             <span className="status-label">Support Mode</span>
@@ -586,7 +616,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               onClick={() => {
                 setIsRunning(true);
                 setFeedwaterDemand(82);
-                store.reset();
+                store.setSessionMode(selectedSessionMode);
               }}
             >
               Reset session
@@ -744,6 +774,23 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             <h2>Supervisor / Log Preview</h2>
             <p className="muted">Structured runtime event stream for replay-ready verification.</p>
           </div>
+          {snapshot.kpi_summary ? (
+            <div className="kpi-summary-block" data-testid="kpi-summary-block">
+              <h3 className="kpi-summary-title">Session KPI summary</h3>
+              <p className="muted">
+                Completeness: {snapshot.kpi_summary.completeness} · Generated {snapshot.kpi_summary.generated_at_iso}
+              </p>
+              <ul className="kpi-metric-list">
+                {snapshot.kpi_summary.metrics
+                  .filter((entry) => entry.audience === "demo_facing")
+                  .map((entry) => (
+                    <li key={entry.kpi_id}>
+                      <strong>{entry.label}</strong>: {formatDemoKpiValue(entry.value, entry.unit)} {entry.unit}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="log-list">
             {recentEvents.map((event) => (
               <article key={event.event_id} className="log-card">

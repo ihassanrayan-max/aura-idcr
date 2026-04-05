@@ -12,7 +12,9 @@ import type {
   PlantTick,
   ReasoningSnapshot,
   ScenarioDefinition,
+  KpiSummary,
   ScenarioOutcome,
+  SessionMode,
   SessionSnapshot,
   SupportMode,
   SupportPolicySnapshot,
@@ -44,13 +46,19 @@ import { buildFirstResponseLane } from "../runtime/procedureLane";
 import { buildReasoningSnapshot, createReasoningRuntimeState, type ReasoningRuntimeState } from "../runtime/reasoningEngine";
 import { SessionLogger } from "../runtime/sessionLogger";
 import { buildSupportRefinement } from "../runtime/supportRefinement";
-import { createSupportModeRuntimeState, resolveSupportModePolicy } from "../runtime/supportModePolicy";
+import {
+  buildBaselineMonitoringSupport,
+  createSupportModeRuntimeState,
+  resolveSupportModePolicy,
+} from "../runtime/supportModePolicy";
 import { validateAction } from "../runtime/actionValidator";
+import { computeKpiSummary } from "../runtime/kpiSummary";
 
 type SessionStoreOptions = {
   scenario?: ScenarioDefinition;
   session_index?: number;
   tick_duration_sec?: number;
+  session_mode?: SessionMode;
 };
 
 type ActionRequestParams = {
@@ -144,6 +152,7 @@ export class AuraSessionStore {
   private readonly scenario: ScenarioDefinition;
   private readonly session_id: string;
   private readonly tick_duration_sec: number;
+  private session_mode: SessionMode;
   private readonly listeners = new Set<() => void>();
   private readonly logger: SessionLogger;
 
@@ -161,6 +170,7 @@ export class AuraSessionStore {
     this.scenario = options.scenario ?? scnAlarmCascadeRootCause;
     this.session_id = `session_${String(options.session_index ?? 1).padStart(3, "0")}`;
     this.tick_duration_sec = options.tick_duration_sec ?? 5;
+    this.session_mode = options.session_mode ?? "adaptive";
     this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
@@ -256,16 +266,22 @@ export class AuraSessionStore {
       operator_state,
       previous_combined_risk: params.previous_snapshot?.combined_risk,
     });
-    const support_mode_result = resolveSupportModePolicy({
-      plant_state: params.plant_state,
-      alarm_set: params.alarm_set,
-      alarm_intelligence: phase2_state.alarm_intelligence,
-      reasoning_snapshot: phase2_state.reasoning_snapshot,
-      operator_state,
-      combined_risk,
-      previous_mode: params.previous_snapshot?.support_mode ?? this.support_mode_runtime_state.current_mode,
-      runtime_state: this.support_mode_runtime_state,
-    });
+    const support_mode_result =
+      this.session_mode === "baseline"
+        ? buildBaselineMonitoringSupport({
+            alarm_set: params.alarm_set,
+            operator_state,
+          })
+        : resolveSupportModePolicy({
+            plant_state: params.plant_state,
+            alarm_set: params.alarm_set,
+            alarm_intelligence: phase2_state.alarm_intelligence,
+            reasoning_snapshot: phase2_state.reasoning_snapshot,
+            operator_state,
+            combined_risk,
+            previous_mode: params.previous_snapshot?.support_mode ?? this.support_mode_runtime_state.current_mode,
+            runtime_state: this.support_mode_runtime_state,
+          });
     const support_refinement_result = buildSupportRefinement({
       first_response_lane: phase2_state.first_response_lane,
       reasoning_snapshot: phase2_state.reasoning_snapshot,
@@ -293,7 +309,7 @@ export class AuraSessionStore {
       tick_id: "tick_0000",
       session_id: this.session_id,
       scenario_id: this.scenario.scenario_id,
-      session_mode: "baseline",
+      session_mode: this.session_mode,
       sim_time_sec: 0,
       phase_id: initial_phase.phase_id,
       plant_state: { ...this.scenario.initial_plant_state },
@@ -337,7 +353,7 @@ export class AuraSessionStore {
       source_module: "scenario_engine",
       phase_id: initial_phase.phase_id,
       payload: {
-        session_mode: "baseline",
+        session_mode: this.session_mode,
         scenario_id: this.scenario.scenario_id,
         expected_outcome_window_sec: this.scenario.expected_duration_sec,
       },
@@ -443,7 +459,7 @@ export class AuraSessionStore {
 
     return {
       session_id: this.session_id,
-      session_mode: "baseline",
+      session_mode: this.session_mode,
       support_mode: phase3_state.support_mode,
       scenario: this.scenario,
       current_phase: initial_phase,
@@ -473,6 +489,7 @@ export class AuraSessionStore {
       executed_actions: [],
       last_validation_result: undefined,
       pending_action_confirmation: undefined,
+      kpi_summary: undefined,
       logging_active: true,
       validation_status_available: true,
     };
@@ -534,6 +551,11 @@ export class AuraSessionStore {
 
   getSnapshot(): SessionSnapshot {
     return this.snapshot;
+  }
+
+  setSessionMode(mode: SessionMode): void {
+    this.session_mode = mode;
+    this.reset();
   }
 
   reset(): void {
@@ -691,6 +713,7 @@ export class AuraSessionStore {
       reasoning_snapshot: this.snapshot.reasoning_snapshot,
       combined_risk: this.snapshot.combined_risk,
       operator_state: this.snapshot.operator_state,
+      session_mode: this.snapshot.session_mode,
       support_mode: this.snapshot.support_mode,
       first_response_lane: this.snapshot.first_response_lane,
       validation_sequence: this.validation_sequence,
@@ -815,7 +838,7 @@ export class AuraSessionStore {
       tick_id: next_tick_id,
       session_id: this.session_id,
       scenario_id: this.scenario.scenario_id,
-      session_mode: "baseline",
+      session_mode: this.session_mode,
       sim_time_sec,
       phase_id: current_phase.phase_id,
       plant_state: {
@@ -907,7 +930,7 @@ export class AuraSessionStore {
       trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
     });
     let support_mode_event_id: string | undefined;
-    if (phase3_state.support_mode !== this.snapshot.support_mode) {
+    if (this.session_mode === "adaptive" && phase3_state.support_mode !== this.snapshot.support_mode) {
       const support_mode_event = this.logger.append({
         sim_time_sec,
         event_type: "support_mode_changed",
@@ -987,6 +1010,7 @@ export class AuraSessionStore {
       };
     }
 
+    let kpi_summary: KpiSummary | undefined = this.snapshot.kpi_summary;
     if (outcome) {
       this.logger.append({
         sim_time_sec,
@@ -1011,6 +1035,29 @@ export class AuraSessionStore {
         phase_id: current_phase.phase_id,
         payload: {
           final_outcome: outcome.outcome,
+        },
+        trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+      });
+      const generated_at_iso = new Date(outcome.sim_time_sec * 1000).toISOString();
+      kpi_summary = computeKpiSummary(this.logger.list(), {
+        session_id: this.session_id,
+        scenario_id: this.scenario.scenario_id,
+        session_mode: this.session_mode,
+        generated_at_iso,
+      });
+      this.logger.append({
+        sim_time_sec,
+        event_type: "kpi_summary_generated",
+        source_module: "evaluation",
+        phase_id: current_phase.phase_id,
+        payload: {
+          kpi_summary_id: kpi_summary.kpi_summary_id,
+          session_id: kpi_summary.session_id,
+          scenario_id: kpi_summary.scenario_id,
+          session_mode: kpi_summary.session_mode,
+          generated_at_iso: kpi_summary.generated_at_iso,
+          completeness: kpi_summary.completeness,
+          metrics: kpi_summary.metrics,
         },
         trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
       });
@@ -1046,6 +1093,7 @@ export class AuraSessionStore {
       alarm_history,
       events: this.logger.list(),
       outcome,
+      kpi_summary,
     };
     this.emit();
     return this.snapshot;
@@ -1073,5 +1121,5 @@ export function useAuraSessionSnapshot(store: AuraSessionStore): SessionSnapshot
 }
 
 export function createDefaultSessionStore(): AuraSessionStore {
-  return new AuraSessionStore();
+  return new AuraSessionStore({ session_mode: "adaptive" });
 }

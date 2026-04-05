@@ -768,9 +768,9 @@ Use these statuses exactly:
 - [ ] Override logic — **Not Started**
 
 ### Phase 5 — Evaluation Harness
-- [ ] Baseline vs adaptive run selector — **Not Started**
+- [x] Baseline vs adaptive run selector — **Done** (Phase 5 Slice A: `SessionMode` threaded through store/logs/ticks; reset uses selected mode; default live run remains `adaptive`)
 - [ ] Replay view — **Not Started**
-- [ ] KPI aggregation — **Not Started**
+- [x] KPI aggregation — **Done** (Phase 5 Slice A: `computeKpiSummary` from canonical `SessionLogEvent[]`, `kpi_summary_generated` on terminal outcome, demo KPI shortlist in payload)
 - [ ] Comparison reporting — **Not Started**
 - [ ] Judge-friendly results summary — **Not Started**
 
@@ -843,6 +843,22 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
 
 ### Entries
+- Date: 2026-04-05
+- Agent/session: Phase 5 Slice A implementation session
+- Task worked on: Baseline vs adaptive session mode, baseline gating for assistance/validator, KPI foundation from canonical logs
+- Status: Done
+- What changed:
+  - Added `KpiSummary` / `KpiMetric` to `src/contracts/aura.ts`, pure `computeKpiSummary` in `src/runtime/kpiSummary.ts`, and `kpi_summary_generated` emission with deterministic timestamps from terminal `sim_time_sec`
+  - Threaded `session_mode` through `AuraSessionStore`, `session_started`, `PlantTick`, and `setSessionMode`; default live store remains `adaptive`
+  - Baseline mode holds `monitoring_support` without `support_mode_changed` events and uses validator pass-through for bounded actions; adaptive preserves existing Phase 4 behavior
+  - Updated `App.tsx` with session-mode selector on reset and compact demo KPI readout; presentation shell label Phase 5 Slice A
+  - Extended tests in `sessionStore.test.tsx`, `kpiSummary.test.ts`, and updated validator/presentation tests
+- What remains:
+  - Phase 4 supervisor override slice (still not implemented), Phase 5 replay/comparison/judge summary
+- Blockers: None
+- Next recommended step:
+  - Optional narrow Phase 4 override slice, or Phase 5 replay view slice, per human priority
+
 - Date: 2026-04-04
 - Agent/session: GPT-5.4 Phase 0 contracts session
 - Task worked on: Phase 0 scope freeze and implementation-ready contract package

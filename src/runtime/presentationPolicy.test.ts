@@ -77,6 +77,7 @@ function makePendingConfirmation(): PendingActionConfirmation {
 
 function buildPolicy(mode: SupportMode, overrides?: Partial<Parameters<typeof buildPresentationPolicy>[0]>) {
   return buildPresentationPolicy({
+    session_mode: "adaptive",
     support_mode: mode,
     support_policy: makeSupportPolicy(),
     support_refinement: makeSupportRefinement(),

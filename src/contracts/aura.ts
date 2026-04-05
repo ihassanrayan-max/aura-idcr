@@ -381,6 +381,25 @@ export type ExecutedAction = ActionRequest & {
   applied: boolean;
 };
 
+export type KpiMetric = {
+  kpi_id: string;
+  label: string;
+  value: number;
+  unit: string;
+  audience: "internal_only" | "demo_facing";
+  dependency_event_types: SessionLogEventType[];
+};
+
+export type KpiSummary = {
+  kpi_summary_id: string;
+  session_id: string;
+  scenario_id: string;
+  session_mode: SessionMode;
+  generated_at_iso: string;
+  completeness: "partial" | "complete";
+  metrics: KpiMetric[];
+};
+
 export type SessionSnapshot = {
   session_id: string;
   session_mode: SessionMode;
@@ -404,6 +423,7 @@ export type SessionSnapshot = {
   last_validation_result?: ActionValidationResult;
   pending_action_confirmation?: PendingActionConfirmation;
   outcome?: ScenarioOutcome;
+  kpi_summary?: KpiSummary;
   logging_active: boolean;
   validation_status_available: boolean;
 };

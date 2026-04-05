@@ -2,6 +2,7 @@ import type {
   ActionValidationResult,
   FirstResponseItem,
   PendingActionConfirmation,
+  SessionMode,
   SupportMode,
   SupportPolicySnapshot,
   SupportRefinementSnapshot,
@@ -40,6 +41,7 @@ export type PresentationPolicy = {
 };
 
 type BuildPresentationPolicyParams = {
+  session_mode: SessionMode;
   support_mode: SupportMode;
   support_policy: SupportPolicySnapshot;
   support_refinement: SupportRefinementSnapshot;
@@ -202,8 +204,11 @@ export function buildPresentationPolicy(params: BuildPresentationPolicyParams): 
     Boolean(params.pending_action_confirmation) ||
     Boolean(params.last_validation_result && params.last_validation_result.outcome !== "pass");
 
+  const session_mode_label =
+    params.session_mode === "baseline" ? "Baseline session (no adaptive assistance)" : "Adaptive session (full assistance)";
+
   return {
-    shell_slice_label: "AURA-IDCR Phase 4 Slice 3",
+    shell_slice_label: `AURA-IDCR Phase 5 Slice A · ${session_mode_label}`,
     shell_mode_summary: `${formatSupportModeLabel(params.support_mode)} is shaping emphasis strength, watch-now prominence, and caution density while ${params.support_policy.critical_visibility.summary.toLowerCase()}`,
     status_tone: status.tone,
     validation_status_label: status.label,

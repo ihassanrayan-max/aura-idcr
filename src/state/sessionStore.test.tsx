@@ -127,6 +127,10 @@ describe("AuraSessionStore", () => {
     expect(eventTypes).toContain("reasoning_snapshot_published");
     expect(eventTypes).toContain("diagnosis_committed");
     expect(eventTypes).toContain("scenario_outcome_recorded");
+    expect(eventTypes).toContain("session_ended");
+    expect(eventTypes).toContain("kpi_summary_generated");
+    expect(snapshot.kpi_summary).toBeDefined();
+    expect(snapshot.kpi_summary?.completeness).toBe("complete");
   });
 
   it("reduces visible overload with grouped alarms and keeps the dominant hypothesis stable", () => {
@@ -164,6 +168,51 @@ describe("AuraSessionStore", () => {
     expect(onsetLaneItems).toContain("fw_action_ack");
     expect(recoveryLaneItems).not.toContain("fw_action_ack");
     expect(recoveryLaneItems).toContain("fw_watch_recovery");
+  });
+
+  it("logs session_mode on session_started and uses adaptive as the default store configuration", () => {
+    const store = new AuraSessionStore({ session_index: 27, tick_duration_sec: 5 });
+    const started = store.getSnapshot().events.find((event) => event.event_type === "session_started");
+    expect(started?.payload.session_mode).toBe("adaptive");
+    expect(store.getSnapshot().session_mode).toBe("adaptive");
+    expect(store.getSnapshot().plant_tick.session_mode).toBe("adaptive");
+  });
+
+  it("keeps baseline session mode free of support_mode_changed events and monitoring support", () => {
+    const store = new AuraSessionStore({ session_index: 28, tick_duration_sec: 5, session_mode: "baseline" });
+    expect(store.getSnapshot().session_mode).toBe("baseline");
+    const sessionStarted = store.getSnapshot().events.find((event) => event.event_type === "session_started");
+    expect(sessionStarted?.payload.session_mode).toBe("baseline");
+
+    for (let tick = 0; tick < 12; tick += 1) {
+      store.advanceTick();
+    }
+
+    const transitionEvents = store.getSnapshot().events.filter((event) => event.event_type === "support_mode_changed");
+    expect(transitionEvents.length).toBe(0);
+    expect(store.getSnapshot().support_mode).toBe("monitoring_support");
+  });
+
+  it("passes feedwater actions through in baseline session mode without soft-warning holds", () => {
+    const store = new AuraSessionStore({ session_index: 29, tick_duration_sec: 5, session_mode: "baseline" });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    const applied = store.requestAction({
+      action_id: "act_adjust_feedwater",
+      requested_value: 70,
+      ui_region: "plant_mimic",
+      reason_note: "Baseline pass-through test",
+    });
+    const snapshot = store.getSnapshot();
+
+    expect(applied).toBe(true);
+    expect(snapshot.pending_action_confirmation).toBeUndefined();
+    expect(snapshot.last_validation_result?.outcome).toBe("pass");
+    expect(snapshot.last_validation_result?.reason_code).toBe("baseline_session_pass_through");
+    expect(snapshot.executed_actions).toHaveLength(1);
   });
 
   it("holds a soft warning action until the operator explicitly confirms it", () => {
@@ -305,7 +354,7 @@ describe("AuraSessionStore", () => {
     render(<App store={store} autoRun={false} />);
 
     expect(screen.getByText("Support State / Combined Risk")).toBeInTheDocument();
-    expect(screen.getByText(/AURA-IDCR Phase 4 Slice 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/AURA-IDCR Phase 5 Slice A/i)).toBeInTheDocument();
     expect(screen.getByText("Workload")).toBeInTheDocument();
     expect(screen.getByText("Attention Stability")).toBeInTheDocument();
     expect(screen.getByText("Signal Confidence")).toBeInTheDocument();
@@ -376,6 +425,7 @@ describe("AuraSessionStore", () => {
 
     const protectedSnapshot = {
       ...store.getSnapshot(),
+      session_mode: "adaptive" as const,
       outcome: undefined,
       last_validation_result: {
         validation_result_id: "val_9999",

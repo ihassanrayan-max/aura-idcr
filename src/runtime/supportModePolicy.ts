@@ -81,7 +81,7 @@ function listToSentence(items: string[]): string {
   return `${items[0]}, ${items[1]}, and ${items[2]}`;
 }
 
-function buildCriticalVisibilityGuardrailState(alarm_set: AlarmSet): CriticalVisibilityGuardrailState {
+export function buildCriticalVisibilityGuardrailState(alarm_set: AlarmSet): CriticalVisibilityGuardrailState {
   const always_visible_alarm_ids = alarm_set.active_alarms
     .filter((alarm) => alarm.visibility_rule === "always_visible")
     .map((alarm) => alarm.alarm_id);
@@ -311,6 +311,30 @@ export function createSupportModeRuntimeState(initial_mode: SupportMode = "monit
   return {
     current_mode: initial_mode,
     pending_downshift_ticks: 0,
+  };
+}
+
+export function buildBaselineMonitoringSupport(params: {
+  alarm_set: AlarmSet;
+  operator_state: OperatorStateSnapshot;
+}): {
+  support_mode: SupportMode;
+  support_policy: SupportPolicySnapshot;
+  runtime_state: ReturnType<typeof createSupportModeRuntimeState>;
+} {
+  const guardrails = buildCriticalVisibilityGuardrailState(params.alarm_set);
+  return {
+    support_mode: "monitoring_support",
+    support_policy: {
+      current_mode_reason:
+        "Monitoring Support stays active in baseline session mode because graded adaptive assistance is disabled; critical visibility remains enforced.",
+      transition_reason: "Baseline session mode does not escalate assistance modes.",
+      mode_change_summary: "No support-mode changes in baseline session mode.",
+      support_behavior_changes: supportBehaviorChanges("monitoring_support"),
+      degraded_confidence_effect: degradedConfidenceEffect(params.operator_state, "monitoring_support"),
+      critical_visibility: guardrails,
+    },
+    runtime_state: createSupportModeRuntimeState("monitoring_support"),
   };
 }
 

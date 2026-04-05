@@ -77,6 +77,48 @@ pre {
   margin: 0;
 }
 
+.session-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.session-mode-label {
+  margin: 0;
+}
+
+.session-mode-row select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #35536c;
+  background: #0b1a28;
+  color: #e7eef7;
+}
+
+.kpi-summary-block {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(104, 153, 196, 0.25);
+  border-radius: 8px;
+  background: rgba(12, 28, 42, 0.6);
+}
+
+.kpi-summary-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.kpi-metric-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.kpi-metric-list li {
+  margin-bottom: 0.25rem;
+}
+
 .muted {
   color: #9cb3c8;
 }

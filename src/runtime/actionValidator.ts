@@ -8,6 +8,7 @@ import type {
   OperatorStateSnapshot,
   PlantStateSnapshot,
   ReasoningSnapshot,
+  SessionMode,
   SupportMode,
 } from "../contracts/aura";
 import { formatSupportModeLabel } from "./supportModePolicy";
@@ -20,6 +21,7 @@ type ValidateActionParams = {
   reasoning_snapshot: ReasoningSnapshot;
   combined_risk: CombinedRiskSnapshot;
   operator_state: OperatorStateSnapshot;
+  session_mode: SessionMode;
   support_mode: SupportMode;
   first_response_lane: FirstResponseLane;
   validation_sequence: number;
@@ -98,6 +100,14 @@ export function validateAction(params: ValidateActionParams): ActionValidationRe
       params,
       "bounded_acknowledgement_pass",
       "This action stays inside the bounded scenario and does not change plant progression.",
+    );
+  }
+
+  if (params.session_mode === "baseline") {
+    return passResult(
+      params,
+      "baseline_session_pass_through",
+      "Baseline session mode keeps bounded actions pass-through without adaptive interception.",
     );
   }
 

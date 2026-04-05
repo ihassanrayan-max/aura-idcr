@@ -37,6 +37,7 @@ function buildValidationContext(requested_value: number) {
     reasoning_snapshot: snapshot.reasoning_snapshot,
     combined_risk: snapshot.combined_risk,
     operator_state: snapshot.operator_state,
+    session_mode: snapshot.session_mode,
     support_mode: snapshot.support_mode,
     first_response_lane: snapshot.first_response_lane,
   };
