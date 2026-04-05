@@ -762,7 +762,7 @@ Use these statuses exactly:
 
 ### Phase 4 — Adaptive Assistance + Interceptor
 - [x] Assistance mode logic — **Done**
-- [ ] Adaptive UI behavior — **Partial**
+- [x] Adaptive UI behavior — **Done**
 - [x] Action validator / interceptor — **Done**
 - [x] Critical-visibility guarantees — **Done**
 - [ ] Override logic — **Not Started**
@@ -785,13 +785,13 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Phase 4 slice 2 is now implemented for the deterministic feedwater-side / Loss of Feedwater scenario family.
+Phase 4 slice 3 is now implemented for the deterministic feedwater-side / Loss of Feedwater scenario family.
 
-The immediate next recommended step should stay narrow and inside remaining Phase 4 scope:
-1. finish the still-partial bounded adaptive UI behavior around validator/support cues inside the existing shell,
-2. add only compact supervisor-facing intervention markers if the human explicitly wants that slice,
-3. continue to defer override workflows, replay/reporting expansion, KPI dashboards, and evaluation harness work unless the human explicitly opens that scope,
-4. keep the validator deterministic, quiet by default, and bounded to the current feedwater-side scenario family.
+The immediate next recommended step should remain explicit and scope-controlled:
+1. treat Phase 4 as effectively complete for the current bounded operator-facing scope of assistance modes, adaptive UI behavior, action validation, and critical visibility,
+2. keep override workflows explicitly deferred unless the human opens that narrow scope on purpose,
+3. continue to defer replay/reporting expansion, KPI dashboards, and evaluation harness work unless the human explicitly opens that scope,
+4. if the human wants to stay in Phase 4, limit further work to compact supervisor/intervention presentation or bounded override logic rather than broad redesign.
 
 Do not replace the current Phase 2 storyline/procedure structures, and do not jump into broad evaluation or stretch features unless the human explicitly opens that phase.
 
@@ -969,6 +969,24 @@ Use this section to track meaningful progress across sessions.
   - None in the current Phase 4 slice 2 implementation
 - Next recommended step:
   - If the human wants to stay in Phase 4, take the next narrow slice on remaining bounded adaptive UI behavior and compact supervisor-facing intervention markers while continuing to defer override workflows and later-phase evaluation work
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 4 slice 3 session
+- Task worked on: Phase 4 slice 3 bounded adaptive UI behavior, operator-facing mode presentation cleanup, and remaining Phase 4 completion pass for the bounded feedwater-side scenario family
+- Status: Done
+- What changed:
+  - Added `src/runtime/presentationPolicy.ts` to deterministically derive mode-aware presentation cues from existing support mode, support-policy, support-refinement, and validator state without introducing a new shell or changing the plant/runtime loop
+  - Updated `src/App.tsx` so the existing shell now uses mode-aware presentation behavior for header messaging, validation-status wording, procedure-lane item ordering, watch-now prominence, support-card ordering, and validator result prominence while keeping all major operator regions visible
+  - Updated `src/styles.css` so monitoring support, guided support, and protected response now have visibly different bounded emphasis/caution/validator intensity inside the same shell rather than through a layout redesign
+  - Reused shared support-mode labeling instead of duplicating mode formatting logic, and updated stale operator-facing shell copy so the current slice status and mode behavior read coherently
+  - Added focused verification in `src/runtime/presentationPolicy.test.ts` and extended `src/state/sessionStore.test.tsx`, then re-verified the slice with targeted adaptive-UI tests, the full automated test suite, and `npm run build`
+- What remains:
+  - Override logic remains intentionally deferred and is still not implemented because it stayed out of scope for the bounded Phase 4 completion pass
+  - Replay/reporting UI, KPI dashboards, evaluation harness work, and additional scenarios remain intentionally untouched
+- Blockers:
+  - None in the current Phase 4 slice 3 implementation
+- Next recommended step:
+  - Hold Phase 4 scope unless the human explicitly opens either a narrow override-workflow slice or later-phase evaluation/replay work
 
 ---
 

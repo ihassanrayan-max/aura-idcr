@@ -305,6 +305,7 @@ describe("AuraSessionStore", () => {
     render(<App store={store} autoRun={false} />);
 
     expect(screen.getByText("Support State / Combined Risk")).toBeInTheDocument();
+    expect(screen.getByText(/AURA-IDCR Phase 4 Slice 3/i)).toBeInTheDocument();
     expect(screen.getByText("Workload")).toBeInTheDocument();
     expect(screen.getByText("Attention Stability")).toBeInTheDocument();
     expect(screen.getByText("Signal Confidence")).toBeInTheDocument();
@@ -338,7 +339,79 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Soft warning confirmation required/i)).toBeInTheDocument();
     expect(screen.getByText(/Confirm and apply action/i)).toBeInTheDocument();
     expect(screen.getByText(/Validation pending confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText(/asking for explicit confirmation before this action proceeds/i)).toBeInTheDocument();
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
+  });
+
+  it("keeps pass validation quiet while preserving the bounded operator regions", () => {
+    const store = new AuraSessionStore({ session_index: 24, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    act(() => {
+      store.requestAction({
+        action_id: "act_adjust_feedwater",
+        requested_value: 82,
+        ui_region: "plant_mimic",
+        reason_note: "Quiet pass render test",
+      });
+    });
+
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.queryByText(/Last action validation/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Dynamic First-Response Lane/i })).toBeInTheDocument();
+    expect(screen.getByText(/Support State \/ Combined Risk/i)).toBeInTheDocument();
+    expect(screen.getByText(/Alarm Intelligence Area/i)).toBeInTheDocument();
+  });
+
+  it("makes protected-response hard prevents more prominent without hiding core regions", () => {
+    const store = new AuraSessionStore({ session_index: 25, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 8; tick += 1) {
+      store.advanceTick();
+    }
+
+    const protectedSnapshot = {
+      ...store.getSnapshot(),
+      outcome: undefined,
+      last_validation_result: {
+        validation_result_id: "val_9999",
+        action_request_id: "actreq_9999",
+        sim_time_sec: store.getSnapshot().sim_time_sec,
+        outcome: "hard_prevent" as const,
+        requires_confirmation: false,
+        override_allowed: false,
+        reason_code: "test_hard_prevent",
+        explanation: "This deterministic hard prevent remains visible in protected response.",
+        risk_context: "Protected Response is active and the bounded recovery path is being defended.",
+        confidence_note: "Current runtime signals do not indicate degraded confidence limiting this decision.",
+        affected_variable_ids: ["feedwater_flow_pct"],
+        prevented_harm: true,
+        nuisance_flag: false,
+        recommended_safe_alternative: "Stay with the bounded recovery target.",
+      },
+    };
+    const mockStore = {
+      getSnapshot: () => protectedSnapshot,
+      subscribe: () => () => undefined,
+      requestAction: () => false,
+      confirmPendingAction: () => false,
+      dismissPendingActionConfirmation: () => undefined,
+      advanceTick: () => protectedSnapshot,
+      reset: () => undefined,
+    } as unknown as AuraSessionStore;
+
+    render(<App store={mockStore} autoRun={false} />);
+
+    expect(protectedSnapshot.support_mode).toBe("protected_response");
+    expect(screen.getByText(/Protected validation active/i)).toBeInTheDocument();
+    expect(screen.getByText(/Protected Response is elevating this validation result/i)).toBeInTheDocument();
+    expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Dynamic First-Response Lane/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Storyline \/ Root-Cause Area/i })).toBeInTheDocument();
   });
 
   it("keeps critical alarms visibly pinned in the alarm area when they are active", () => {

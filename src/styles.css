@@ -81,6 +81,13 @@ pre {
   color: #9cb3c8;
 }
 
+.mode-summary-note,
+.top-status-note {
+  margin: 0.45rem 0 0;
+  color: #b8cce0;
+  font-size: 0.88rem;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(120px, 1fr));
@@ -373,6 +380,18 @@ pre {
   padding: 0.85rem;
 }
 
+.mode-presentation-banner {
+  border-radius: 12px;
+  padding: 0.85rem;
+  margin: 0.75rem 0;
+  background: rgba(14, 31, 46, 0.94);
+  border-left: 4px solid rgba(91, 166, 220, 0.35);
+}
+
+.mode-presentation-banner p {
+  margin: 0.35rem 0 0;
+}
+
 .evidence-card {
   padding: 0.75rem;
 }
@@ -386,6 +405,18 @@ pre {
   box-shadow:
     0 0 0 1px rgba(91, 166, 220, 0.45) inset,
     0 0 0 1px rgba(44, 92, 132, 0.25);
+}
+
+.support-mode-monitoring_support .procedure-item.emphasized {
+  box-shadow:
+    0 0 0 1px rgba(91, 166, 220, 0.22) inset,
+    0 0 0 1px rgba(44, 92, 132, 0.12);
+}
+
+.support-mode-protected_response .procedure-item.emphasized {
+  box-shadow:
+    0 0 0 1px rgba(201, 96, 96, 0.45) inset,
+    0 0 0 1px rgba(146, 75, 75, 0.28);
 }
 
 .lane-why-now,
@@ -407,10 +438,49 @@ pre {
   border-left: 4px solid rgba(201, 96, 96, 0.65);
 }
 
+.support-caution-banner.caution-standard {
+  border-left-color: rgba(91, 166, 220, 0.35);
+}
+
+.support-caution-banner.caution-priority {
+  border-left-color: rgba(216, 166, 94, 0.58);
+}
+
+.support-caution-banner.caution-critical {
+  border-left-color: rgba(201, 96, 96, 0.72);
+}
+
 .validation-banner {
   display: grid;
   gap: 0.55rem;
   border-left: 4px solid rgba(91, 166, 220, 0.65);
+}
+
+.validation-banner.validator-standard {
+  border-left-color: rgba(91, 166, 220, 0.35);
+}
+
+.validation-banner.validator-priority {
+  border-left-color: rgba(216, 166, 94, 0.62);
+}
+
+.validation-banner.validator-critical {
+  border-left-color: rgba(201, 96, 96, 0.75);
+  box-shadow:
+    0 0 0 1px rgba(201, 96, 96, 0.2) inset,
+    0 0 0 1px rgba(146, 75, 75, 0.22);
+}
+
+.support-panel.support-mode-monitoring_support .mode-presentation-banner {
+  border-left-color: rgba(91, 166, 220, 0.32);
+}
+
+.support-panel.support-mode-guided_support .mode-presentation-banner {
+  border-left-color: rgba(216, 166, 94, 0.55);
+}
+
+.support-panel.support-mode-protected_response .mode-presentation-banner {
+  border-left-color: rgba(201, 96, 96, 0.72);
 }
 
 .support-caution-banner p {

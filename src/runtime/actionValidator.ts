@@ -10,6 +10,7 @@ import type {
   ReasoningSnapshot,
   SupportMode,
 } from "../contracts/aura";
+import { formatSupportModeLabel } from "./supportModePolicy";
 
 type ValidateActionParams = {
   action_request: ActionRequest;
@@ -32,17 +33,6 @@ function clamp(value: number, min: number, max: number): number {
 
 function factorRawIndex(combined_risk: CombinedRiskSnapshot, factor_id: string): number {
   return combined_risk.factor_breakdown.find((factor) => factor.factor_id === factor_id)?.raw_index ?? 0;
-}
-
-function formatSupportMode(mode: SupportMode): string {
-  switch (mode) {
-    case "monitoring_support":
-      return "Monitoring Support";
-    case "guided_support":
-      return "Guided Support";
-    case "protected_response":
-      return "Protected Response";
-  }
 }
 
 function buildValidationId(sequence: number): string {
@@ -78,7 +68,7 @@ function confidenceNote(operator_state: OperatorStateSnapshot): string {
 
 function baseRiskContext(params: ValidateActionParams, bounded_recovery_target: number): string {
   const plant_severity = factorRawIndex(params.combined_risk, "plant_severity");
-  return `${formatSupportMode(params.support_mode)} is active, combined risk is ${params.combined_risk.combined_risk_band} (${params.combined_risk.combined_risk_score.toFixed(
+  return `${formatSupportModeLabel(params.support_mode)} is active, combined risk is ${params.combined_risk.combined_risk_band} (${params.combined_risk.combined_risk_score.toFixed(
     1,
   )}/100), plant severity is ${plant_severity}/100, the dominant hypothesis is ${dominantHypothesisLabel(
     params.reasoning_snapshot,

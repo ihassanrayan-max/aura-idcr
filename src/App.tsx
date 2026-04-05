@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
 import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
+import { formatSupportModeLabel } from "./runtime/supportModePolicy";
+import {
+  buildPresentationPolicy,
+  orderPresentedLaneItems,
+  type SupportSectionId,
+} from "./runtime/presentationPolicy";
 
 type AppProps = {
   store?: AuraSessionStore;
@@ -34,19 +40,6 @@ function formatSignalLabel(signalId: string): string {
   return labels[signalId] ?? signalId.replace(/_/g, " ");
 }
 
-function formatSupportModeLabel(
-  supportMode: "monitoring_support" | "guided_support" | "protected_response",
-): string {
-  switch (supportMode) {
-    case "monitoring_support":
-      return "Monitoring Support";
-    case "guided_support":
-      return "Guided Support";
-    case "protected_response":
-      return "Protected Response";
-  }
-}
-
 function riskBadgeTone(riskBand: "low" | "guarded" | "elevated" | "high"): "ok" | "neutral" | "alert" {
   switch (riskBand) {
     case "low":
@@ -77,6 +70,17 @@ function validationBadgeTone(outcome: "pass" | "soft_warning" | "hard_prevent"):
     case "soft_warning":
       return "neutral";
     case "hard_prevent":
+      return "alert";
+  }
+}
+
+function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "neutral" | "alert" {
+  switch (priority) {
+    case "standard":
+      return "ok";
+    case "priority":
+      return "neutral";
+    case "critical":
       return "alert";
   }
 }
@@ -117,6 +121,72 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   const pendingConfirmation = snapshot.pending_action_confirmation;
   const actionConfirmationPending = Boolean(pendingConfirmation);
   const lastValidation = snapshot.last_validation_result;
+  const presentationPolicy = useMemo(
+    () =>
+      buildPresentationPolicy({
+        support_mode: snapshot.support_mode,
+        support_policy: snapshot.support_policy,
+        support_refinement: snapshot.support_refinement,
+        last_validation_result: snapshot.last_validation_result,
+        pending_action_confirmation: snapshot.pending_action_confirmation,
+      }),
+    [
+      snapshot.last_validation_result,
+      snapshot.pending_action_confirmation,
+      snapshot.support_mode,
+      snapshot.support_policy,
+      snapshot.support_refinement,
+    ],
+  );
+  const presentedLaneItems = useMemo(
+    () => orderPresentedLaneItems(snapshot.first_response_lane.items, presentationPolicy.procedure_item_order),
+    [presentationPolicy.procedure_item_order, snapshot.first_response_lane.items],
+  );
+  const supportCards = useMemo(() => {
+    const cardMap: Record<SupportSectionId, { title: string; body: string }> = {
+      mode: {
+        title: "Current assistance mode",
+        body: snapshot.support_policy.current_mode_reason,
+      },
+      watch: {
+        title: "Watch next",
+        body: snapshot.support_refinement.watch_now_summary,
+      },
+      effect: {
+        title: "Mode effect on presentation",
+        body: snapshot.support_policy.support_behavior_changes.join(" "),
+      },
+      focus: {
+        title: "Current support focus",
+        body: snapshot.support_refinement.current_support_focus,
+      },
+      guardrails: {
+        title: "Critical visibility guardrails",
+        body: snapshot.support_policy.critical_visibility.summary,
+      },
+      confidence: {
+        title: "Degraded-confidence effect",
+        body: snapshot.support_policy.degraded_confidence_effect,
+      },
+      operator: {
+        title: "Operator context",
+        body: snapshot.support_refinement.operator_context_note,
+      },
+      transition: {
+        title: "Mode transition status",
+        body: `${snapshot.support_policy.transition_reason} ${snapshot.support_policy.mode_change_summary}`.trim(),
+      },
+      risk: {
+        title: "Why this is emphasized now",
+        body: snapshot.support_refinement.summary_explanation,
+      },
+    };
+
+    return presentationPolicy.support_section_order.map((id) => ({
+      id,
+      ...cardMap[id],
+    }));
+  }, [presentationPolicy.support_section_order, snapshot.support_policy, snapshot.support_refinement]);
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -140,9 +210,10 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     <div className="app-shell">
       <header className="top-status-bar">
         <div>
-          <p className="eyebrow">AURA-IDCR Phase 4 Slice 1</p>
+          <p className="eyebrow">{presentationPolicy.shell_slice_label}</p>
           <h1>{snapshot.scenario.title}</h1>
           <p className="muted">{snapshot.current_phase.label}</p>
+          <p className="mode-summary-note">{presentationPolicy.shell_mode_summary}</p>
         </div>
         <div className="status-grid">
           <div className="status-cell">
@@ -164,17 +235,14 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         </div>
         <div className="badge-row">
           <span className="badge ok">{snapshot.logging_active ? "Logging active" : "Logging offline"}</span>
-          <span className="badge neutral">
-            {actionConfirmationPending
-              ? "Validation pending confirmation"
-              : snapshot.validation_status_available
-                ? "Validation ready"
-                : "Validation offline"}
+          <span className={`badge ${snapshot.validation_status_available ? presentationPolicy.status_tone : "neutral"}`}>
+            {snapshot.validation_status_available ? presentationPolicy.validation_status_label : "Validation offline"}
           </span>
           <span className={`badge ${snapshot.outcome ? "alert" : "ok"}`}>
             {snapshot.outcome ? `Outcome: ${snapshot.outcome.outcome}` : "Scenario running"}
           </span>
         </div>
+        <p className="top-status-note">{presentationPolicy.validation_status_summary}</p>
       </header>
 
       <main className="layout-grid">
@@ -401,20 +469,21 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             <p className="muted">Prototype guidance only. The lane narrows the bounded first checks and actions for the current storyline.</p>
           </div>
 
-          <div className="procedure-lane">
+          <div className={`procedure-lane ${presentationPolicy.support_panel_mode_class}`}>
             <p className="muted">{snapshot.first_response_lane.prototype_notice}</p>
             <div className="badge-row">
               <span className={`badge ${riskBadgeTone(snapshot.combined_risk.combined_risk_band)}`}>
                 Focus: {snapshot.support_refinement.current_support_focus}
               </span>
               <span className="badge neutral">Emphasized items: {snapshot.support_refinement.emphasized_lane_item_ids.length}</span>
-              <span className="badge ok">Watch next: {snapshot.support_refinement.watch_now_summary}</span>
+              <span className={`badge ${presentationPolicy.watch_badge_tone}`}>Watch next: {snapshot.support_refinement.watch_now_summary}</span>
             </div>
+            <p className="mode-summary-note">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
             <div className="procedure-list">
-              {snapshot.first_response_lane.items.map((item) => (
+              {presentedLaneItems.map((item) => (
                 <article
                   key={item.item_id}
-                  className={`procedure-item ${item.presentation_cue?.emphasized ? "emphasized" : ""}`}
+                  className={`procedure-item ${item.presentation_cue?.emphasized ? "emphasized" : ""} ${presentationPolicy.support_panel_mode_class}`}
                 >
                   <div className="alarm-title-row">
                     <strong>{item.label}</strong>
@@ -525,11 +594,15 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
           </div>
 
           {pendingConfirmation ? (
-            <div className="validation-banner" data-testid="pending-validation-banner">
+            <div
+              className={`validation-banner ${presentationPolicy.validation_mode_class}`}
+              data-testid="pending-validation-banner"
+            >
               <div className="alarm-title-row">
                 <strong>Soft warning confirmation required</strong>
                 <span>{actionLabels[pendingConfirmation.action_request.action_id] ?? pendingConfirmation.action_request.action_id}</span>
               </div>
+              <p className="mode-summary-note">{presentationPolicy.pending_confirmation_intro}</p>
               <p className="muted">{pendingConfirmation.validation_result.explanation}</p>
               <p className="lane-why-now">{pendingConfirmation.validation_result.risk_context}</p>
               <p className="lane-caution">{pendingConfirmation.validation_result.confidence_note}</p>
@@ -548,7 +621,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
           ) : null}
         </section>
 
-        <section className="panel support-panel">
+        <section className={`panel support-panel ${presentationPolicy.support_panel_mode_class}`}>
           <div className="panel-header">
             <h2>Support State / Combined Risk</h2>
             <p className="muted">Compact deterministic assistance-state output, bounded action validation status, and enforced critical visibility.</p>
@@ -595,60 +668,32 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             <span className="badge ok">Rule-based storyline active</span>
             <span className="badge ok">Dynamic first-response lane active</span>
           </div>
+          <div className={`mode-presentation-banner ${presentationPolicy.support_panel_mode_class}`}>
+            <strong>{formatSupportModeLabel(snapshot.support_mode)}</strong>
+            <p className="muted">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
+            <p className="muted">{presentationPolicy.validation_status_summary}</p>
+          </div>
           <div className="support-refinement-grid">
-            <article className="support-explanation-card">
-              <span className="metric-label">Current assistance mode</span>
-              <p className="muted">{snapshot.support_policy.current_mode_reason}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Mode transition status</span>
-              <p className="muted">{snapshot.support_policy.transition_reason}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">What changed</span>
-              <p className="muted">{snapshot.support_policy.mode_change_summary}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Mode effect on support</span>
-              <p className="muted">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Current support focus</span>
-              <p className="muted">{snapshot.support_refinement.current_support_focus}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Why this is emphasized now</span>
-              <p className="muted">{snapshot.support_refinement.summary_explanation}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Operator context</span>
-              <p className="muted">{snapshot.support_refinement.operator_context_note}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Watch next</span>
-              <p className="muted">{snapshot.support_refinement.watch_now_summary}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Degraded-confidence effect</span>
-              <p className="muted">{snapshot.support_policy.degraded_confidence_effect}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Critical visibility guardrails</span>
-              <p className="muted">{snapshot.support_policy.critical_visibility.summary}</p>
-            </article>
+            {supportCards.map((card) => (
+              <article key={card.id} className="support-explanation-card">
+                <span className="metric-label">{card.title}</span>
+                <p className="muted">{card.body}</p>
+              </article>
+            ))}
           </div>
           {snapshot.support_refinement.degraded_confidence_caution ? (
-            <div className="support-caution-banner">
+            <div className={`support-caution-banner caution-${presentationPolicy.caution_priority}`}>
               <strong>Degraded-confidence caveat</strong>
               <p className="muted">{snapshot.support_refinement.degraded_confidence_caution}</p>
             </div>
           ) : null}
-          {lastValidation ? (
-            <div className="validation-banner">
+          {lastValidation && presentationPolicy.validator_should_surface ? (
+            <div className={`validation-banner ${presentationPolicy.validation_mode_class}`}>
               <div className="alarm-title-row">
                 <strong>Last action validation</strong>
                 <span className={`badge ${validationBadgeTone(lastValidation.outcome)}`}>{lastValidation.outcome}</span>
               </div>
+              <p className="mode-summary-note">{presentationPolicy.validator_mode_summary}</p>
               <p className="muted">{lastValidation.explanation}</p>
               <p className="alarm-meta">Reason code: {lastValidation.reason_code}</p>
               <p className="lane-why-now">{lastValidation.risk_context}</p>
