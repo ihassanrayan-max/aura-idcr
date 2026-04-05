@@ -81,6 +81,7 @@ Required contents:
 - current assistance mode label
 - short non-stigmatizing operator-support summary
 - space for later human-state confidence or degraded-sensing status
+- compact combined-risk score / band with a short explanation and confidence caveat
 
 Layout rule:
 
@@ -121,6 +122,7 @@ Layout rule:
 - Adaptive behavior may reprioritize, highlight, or narrow content, but it may not remove access to critical plant state or `P1` / `P2` alarm visibility.
 - The transparency and procedure regions must exist in the baseline shell even if they begin as static placeholders in Phase 1.
 - The support-state area must stay compact and descriptive, never punitive or medicalized.
+- Human-state confidence or degraded-sensing cues should be visible there when the bounded proxy pipeline is active.
 - Optional supervisor content should be easy to hide during operator-focused demos.
 
 ## Critical Visibility Baseline

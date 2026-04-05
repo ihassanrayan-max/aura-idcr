@@ -231,6 +231,10 @@ Required notes:
 - `trace_refs` must point back to the tick, phase, action, and alarm objects that justify the event.
 - `diagnosis_committed` is the event that later KPI calculation uses for first confirmed diagnosis timing.
 - Minimum KPI-facing payload fields for these event types are defined in [aura_kpi_definitions.md](./aura_kpi_definitions.md) and are part of the expected contract surface.
+- Phase 3 may extend `operator_state_snapshot_recorded` with additive fields such as `degraded_mode_active`, `degraded_mode_reason`, and `observation_window_ticks`.
+- Phase 3 may extend `reasoning_snapshot_published` with additive combined-risk fields such as `combined_risk_score`, `combined_risk_band`, `top_contributing_factors`, and `confidence_caveat`.
+- Phase 3 support refinement may add shallow fields such as `current_support_focus`, `emphasized_lane_item_ids`, `summary_explanation`, `watch_now_summary`, `degraded_confidence_caution`, and `wording_style` without replacing the base reasoning payload.
+- Phase 4 assistance policy may add shallow fields such as `support_mode`, `current_mode_reason`, `transition_reason`, `mode_change_summary`, `support_behavior_changes`, `degraded_confidence_effect`, and compact critical-visibility summaries without replacing the base reasoning payload.
 
 ## `KpiSummary`
 
@@ -257,16 +261,154 @@ type KpiMetric = {
 }
 ```
 
+## `OperatorStateSnapshot`
+
+`OperatorStateSnapshot` is the compact deterministic operator-state proxy published from existing runtime/session signals only.
+
+```ts
+type OperatorStateSnapshot = {
+  workload_index: number
+  attention_stability_index: number
+  signal_confidence: number
+  degraded_mode_active: boolean
+  degraded_mode_reason: string
+  observation_window_ticks: number
+}
+```
+
+Required notes:
+
+- These are bounded proxy outputs for a student-feasible prototype, not biometric or medical measurements.
+- Inputs must come only from existing runtime/session signals already available in the deterministic loop.
+- `signal_confidence` must fail gracefully and make degraded mode explicit rather than silent.
+
+## `CombinedRiskSnapshot`
+
+`CombinedRiskSnapshot` is the additive transparent risk layer published alongside the existing Phase 2 reasoning outputs.
+
+```ts
+type CombinedRiskBand = "low" | "guarded" | "elevated" | "high"
+
+type CombinedRiskFactor = {
+  factor_id:
+    | "plant_severity"
+    | "alarm_burden"
+    | "diagnosis_uncertainty"
+    | "operator_workload"
+    | "attention_instability"
+    | "signal_confidence_penalty"
+  label: string
+  raw_index: number
+  contribution: number
+  detail: string
+}
+
+type CombinedRiskSnapshot = {
+  combined_risk_score: number
+  combined_risk_band: CombinedRiskBand
+  factor_breakdown: CombinedRiskFactor[]
+  top_contributing_factors: string[]
+  confidence_caveat: string
+  why_risk_is_current: string
+  what_changed: string
+}
+```
+
+Required notes:
+
+- This layer is additive and must not replace the Phase 2 ranked root-cause / storyline outputs.
+- `factor_breakdown` must stay inspectable enough for replay, regression tests, and judge-facing explanation.
+- The confidence caveat must reflect operator-state signal confidence or degraded-mode penalties when active.
+
+## `SupportRefinementSnapshot`
+
+`SupportRefinementSnapshot` is the additive deterministic support-refinement layer that republishes Phase 2 support content with bounded emphasis cues.
+
+```ts
+type SupportUrgencyLevel = "standard" | "priority" | "urgent"
+type SupportWordingStyle = "concise" | "explicit"
+
+type FirstResponsePresentationCue = {
+  emphasized: boolean
+  urgency_level: SupportUrgencyLevel
+  why_this_matters_now: string
+  attention_sensitive_caution?: string
+  degraded_confidence_caveat?: string
+  wording_style: SupportWordingStyle
+}
+
+type SupportRefinementSnapshot = {
+  current_support_focus: string
+  emphasized_lane_item_ids: string[]
+  summary_explanation: string
+  operator_context_note: string
+  degraded_confidence_caution: string
+  watch_now_summary: string
+  wording_style: SupportWordingStyle
+}
+```
+
+Required notes:
+
+- This layer is additive and must not replace the Phase 2 storyline, ranked root-cause output, or first-response lane base logic.
+- `current_support_focus`, `summary_explanation`, and `watch_now_summary` must stay short, deterministic, and replay-inspectable.
+- `FirstResponsePresentationCue` is presentation metadata only; it may reprioritize emphasis, but it must not hide or remove existing first-response items.
+
+## `CriticalVisibilityGuardrailState`
+
+`CriticalVisibilityGuardrailState` is the compact published state that proves critical plant cues and critical alarms remain pinned across assistance modes.
+
+```ts
+type CriticalVisibilityGuardrailState = {
+  critical_variable_ids: string[]
+  always_visible_alarm_ids: string[]
+  pinned_alarm_ids: string[]
+  summary: string
+}
+```
+
+Required notes:
+
+- `critical_variable_ids` must align with the continuously visible plant-state baseline defined in [aura_hmi_wireframe.md](./aura_hmi_wireframe.md).
+- `pinned_alarm_ids` must keep all active `always_visible` alarms and the active `P1` / `P2` picture continuously surfaced somewhere in the operator shell.
+
+## `SupportPolicySnapshot`
+
+`SupportPolicySnapshot` is the additive deterministic assistance-policy layer published alongside support refinement.
+
+```ts
+type SupportPolicySnapshot = {
+  current_mode_reason: string
+  transition_reason: string
+  mode_change_summary: string
+  support_behavior_changes: string[]
+  degraded_confidence_effect: string
+  critical_visibility: CriticalVisibilityGuardrailState
+}
+```
+
+Required notes:
+
+- This layer must stay deterministic, compact, and replay-inspectable.
+- It may explain how `SupportMode` is affecting emphasis strength, wording, watch-now prioritization, first-response focus intensity, and caution prominence, but it must not redesign the shell or hide major regions.
+- Degraded confidence must reduce certainty/aggressiveness explicitly rather than silently.
+
 ## Closed-Loop Contract Map
 
 ```mermaid
 flowchart LR
   ScenarioDefinition --> PlantTick
   PlantTick --> AlarmSet
+  PlantTick --> OperatorStateSnapshot["Operator state snapshot"]
+  AlarmSet --> OperatorStateSnapshot
   AlarmSet --> SessionLogEvent
   PlantTick --> SessionLogEvent
   AlarmSet --> ReasoningSnapshot["Reasoning snapshot event payload"]
-  ReasoningSnapshot --> SupportState["Support mode event payload"]
+  ReasoningSnapshot --> CombinedRiskSnapshot["Combined risk snapshot"]
+  OperatorStateSnapshot --> CombinedRiskSnapshot
+  CombinedRiskSnapshot --> SupportRefinementSnapshot["Support refinement snapshot"]
+  SupportRefinementSnapshot --> SupportPolicySnapshot["Support policy snapshot"]
+  SupportPolicySnapshot --> SupportState["Support mode event payload"]
   SupportState --> ActionRequest
   ActionRequest --> ActionValidationResult
   ActionValidationResult --> SessionLogEvent

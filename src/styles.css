@@ -238,6 +238,34 @@ pre {
   margin-bottom: 0.75rem;
 }
 
+.support-summary-grid,
+.support-refinement-grid,
+.support-explanation-grid,
+.support-factor-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.support-summary-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 0.75rem;
+}
+
+.support-explanation-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0.75rem 0;
+}
+
+.support-refinement-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0.75rem 0;
+}
+
+.support-factor-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.75rem;
+}
+
 .alarm-card.active {
   border-left: 4px solid #c96060;
 }
@@ -285,6 +313,14 @@ pre {
   border-left-width: 3px;
 }
 
+.critical-alarm-strip {
+  border-radius: 12px;
+  background: rgba(17, 37, 55, 0.94);
+  padding: 0.85rem;
+  margin-bottom: 0.75rem;
+  border-left: 4px solid rgba(201, 96, 96, 0.65);
+}
+
 .ghost-button {
   background: transparent;
   border-color: rgba(122, 167, 205, 0.35);
@@ -316,9 +352,24 @@ pre {
 
 .storyline-card,
 .storyline-item,
-.procedure-item {
+.procedure-item,
+.support-explanation-card,
+.support-factor-card {
   display: grid;
   gap: 0.55rem;
+}
+
+.storyline-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.storyline-context-card,
+.support-caution-banner {
+  border-radius: 12px;
+  background: rgba(17, 37, 55, 0.94);
+  padding: 0.85rem;
 }
 
 .evidence-card {
@@ -328,6 +379,35 @@ pre {
 .procedure-lane {
   display: grid;
   gap: 0.75rem;
+}
+
+.procedure-item.emphasized {
+  box-shadow:
+    0 0 0 1px rgba(91, 166, 220, 0.45) inset,
+    0 0 0 1px rgba(44, 92, 132, 0.25);
+}
+
+.lane-why-now,
+.lane-caution {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.lane-why-now {
+  color: #cfe4f5;
+}
+
+.lane-caution {
+  color: #f2cfbf;
+}
+
+.support-caution-banner {
+  margin: 0.75rem 0;
+  border-left: 4px solid rgba(201, 96, 96, 0.65);
+}
+
+.support-caution-banner p {
+  margin: 0.4rem 0 0;
 }
 
 .lane-action-button {
@@ -355,7 +435,12 @@ pre {
 
   .metric-grid,
   .mimic-flow,
-  .alarm-summary-grid {
+  .alarm-summary-grid,
+  .support-summary-grid,
+  .support-refinement-grid,
+  .support-explanation-grid,
+  .support-factor-list,
+  .storyline-context {
     grid-template-columns: 1fr;
   }
 }

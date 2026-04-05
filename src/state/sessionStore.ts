@@ -2,14 +2,19 @@ import { useSyncExternalStore } from "react";
 import type {
   ActionRequest,
   AlarmIntelligenceSnapshot,
+  CombinedRiskSnapshot,
   ExecutedAction,
   FirstResponseLane,
   LoggedAlarmState,
+  OperatorStateSnapshot,
   PlantTick,
   ReasoningSnapshot,
   ScenarioDefinition,
   ScenarioOutcome,
   SessionSnapshot,
+  SupportMode,
+  SupportPolicySnapshot,
+  SupportRefinementSnapshot,
 } from "../contracts/aura";
 import { scnAlarmCascadeRootCause } from "../scenarios/scn_alarm_cascade_root_cause";
 import { alarmDictionaryById } from "../data/alarmDictionary";
@@ -31,9 +36,13 @@ import {
   stepPlantTwin,
   type PlantTwinInternalState,
 } from "../runtime/plantTwin";
+import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
+import { buildOperatorStateSnapshot } from "../runtime/operatorState";
 import { buildFirstResponseLane } from "../runtime/procedureLane";
 import { buildReasoningSnapshot, createReasoningRuntimeState, type ReasoningRuntimeState } from "../runtime/reasoningEngine";
 import { SessionLogger } from "../runtime/sessionLogger";
+import { buildSupportRefinement } from "../runtime/supportRefinement";
+import { createSupportModeRuntimeState, resolveSupportModePolicy } from "../runtime/supportModePolicy";
 
 type SessionStoreOptions = {
   scenario?: ScenarioDefinition;
@@ -70,6 +79,41 @@ function laneSummaryKey(first_response_lane: FirstResponseLane): string {
   return JSON.stringify(summarizeLaneItems(first_response_lane));
 }
 
+function summarizeRiskFactors(combined_risk: CombinedRiskSnapshot) {
+  return combined_risk.factor_breakdown.map((factor) => ({
+    factor_id: factor.factor_id,
+    label: factor.label,
+    raw_index: factor.raw_index,
+    contribution: factor.contribution,
+  }));
+}
+
+function summarizeSupportRefinement(support_refinement: SupportRefinementSnapshot) {
+  return {
+    current_support_focus: support_refinement.current_support_focus,
+    emphasized_lane_item_ids: support_refinement.emphasized_lane_item_ids,
+    summary_explanation: support_refinement.summary_explanation,
+    operator_context_note: support_refinement.operator_context_note,
+    degraded_confidence_caution: support_refinement.degraded_confidence_caution,
+    watch_now_summary: support_refinement.watch_now_summary,
+    wording_style: support_refinement.wording_style,
+  };
+}
+
+function summarizeSupportPolicy(support_policy: SupportPolicySnapshot) {
+  return {
+    current_mode_reason: support_policy.current_mode_reason,
+    transition_reason: support_policy.transition_reason,
+    mode_change_summary: support_policy.mode_change_summary,
+    support_behavior_changes: support_policy.support_behavior_changes,
+    degraded_confidence_effect: support_policy.degraded_confidence_effect,
+    critical_visibility_summary: support_policy.critical_visibility.summary,
+    pinned_alarm_ids: support_policy.critical_visibility.pinned_alarm_ids,
+    always_visible_alarm_ids: support_policy.critical_visibility.always_visible_alarm_ids,
+    critical_variable_ids: support_policy.critical_visibility.critical_variable_ids,
+  };
+}
+
 function criticalEscalationActive(active_alarm_ids: string[]): boolean {
   return ["ALM_RPV_LEVEL_LOW_LOW", "ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].some((alarm_id) =>
     active_alarm_ids.includes(alarm_id),
@@ -89,6 +133,7 @@ export class AuraSessionStore {
   private alarm_runtime_state: AlarmRuntimeState;
   private reasoning_runtime_state: ReasoningRuntimeState;
   private plant_internal_state: PlantTwinInternalState;
+  private support_mode_runtime_state = createSupportModeRuntimeState();
   private snapshot: SessionSnapshot;
 
   constructor(options: SessionStoreOptions = {}) {
@@ -135,6 +180,89 @@ export class AuraSessionStore {
       alarm_intelligence,
       reasoning_snapshot: reasoning_result.reasoning_snapshot,
       first_response_lane,
+    };
+  }
+
+  private buildPhase3State(params: {
+    sim_time_sec: number;
+    tick_index: number;
+    plant_state: PlantTick["plant_state"];
+    alarm_set: SessionSnapshot["alarm_set"];
+    allowed_action_ids: string[];
+    executed_actions: ExecutedAction[];
+    previous_snapshot?: SessionSnapshot;
+  }): {
+    alarm_intelligence: AlarmIntelligenceSnapshot;
+    reasoning_snapshot: ReasoningSnapshot;
+    first_response_lane: FirstResponseLane;
+    operator_state: OperatorStateSnapshot;
+    combined_risk: CombinedRiskSnapshot;
+    support_mode: SupportMode;
+    support_policy: SupportPolicySnapshot;
+    support_refinement: SupportRefinementSnapshot;
+    support_mode_runtime_state: ReturnType<typeof createSupportModeRuntimeState>;
+    lane_changed: boolean;
+  } {
+    const phase2_state = this.buildPhase2State({
+      sim_time_sec: params.sim_time_sec,
+      plant_state: params.plant_state,
+      alarm_set: params.alarm_set,
+      allowed_action_ids: params.allowed_action_ids,
+    });
+
+    const lane_changed = params.previous_snapshot
+      ? laneSummaryKey(params.previous_snapshot.first_response_lane) !== laneSummaryKey(phase2_state.first_response_lane) ||
+        params.previous_snapshot.reasoning_snapshot.dominant_hypothesis_id !==
+          phase2_state.reasoning_snapshot.dominant_hypothesis_id
+      : false;
+
+    const operator_state = buildOperatorStateSnapshot({
+      sim_time_sec: params.sim_time_sec,
+      tick_index: params.tick_index,
+      plant_state: params.plant_state,
+      alarm_set: params.alarm_set,
+      alarm_intelligence: phase2_state.alarm_intelligence,
+      reasoning_snapshot: phase2_state.reasoning_snapshot,
+      executed_actions: params.executed_actions,
+      lane_changed,
+    });
+
+    const combined_risk = buildCombinedRiskSnapshot({
+      plant_state: params.plant_state,
+      alarm_set: params.alarm_set,
+      alarm_intelligence: phase2_state.alarm_intelligence,
+      reasoning_snapshot: phase2_state.reasoning_snapshot,
+      operator_state,
+      previous_combined_risk: params.previous_snapshot?.combined_risk,
+    });
+    const support_mode_result = resolveSupportModePolicy({
+      plant_state: params.plant_state,
+      alarm_set: params.alarm_set,
+      alarm_intelligence: phase2_state.alarm_intelligence,
+      reasoning_snapshot: phase2_state.reasoning_snapshot,
+      operator_state,
+      combined_risk,
+      previous_mode: params.previous_snapshot?.support_mode ?? this.support_mode_runtime_state.current_mode,
+      runtime_state: this.support_mode_runtime_state,
+    });
+    const support_refinement_result = buildSupportRefinement({
+      first_response_lane: phase2_state.first_response_lane,
+      reasoning_snapshot: phase2_state.reasoning_snapshot,
+      operator_state,
+      combined_risk,
+      support_mode: support_mode_result.support_mode,
+    });
+
+    return {
+      ...phase2_state,
+      first_response_lane: support_refinement_result.first_response_lane,
+      operator_state,
+      combined_risk,
+      support_mode: support_mode_result.support_mode,
+      support_policy: support_mode_result.support_policy,
+      support_refinement: support_refinement_result.support_refinement,
+      support_mode_runtime_state: support_mode_result.runtime_state,
+      lane_changed,
     };
   }
 
@@ -239,11 +367,29 @@ export class AuraSessionStore {
       trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
     });
 
-    const phase2_state = this.buildPhase2State({
+    const phase3_state = this.buildPhase3State({
       sim_time_sec: 0,
+      tick_index: 0,
       plant_state: tick_with_alarm_counts.plant_state,
       alarm_set: initial_alarm_eval.alarm_set,
       allowed_action_ids: initial_phase.allowed_action_ids ?? [],
+      executed_actions: [],
+    });
+    this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
+    const operator_state_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "operator_state_snapshot_recorded",
+      source_module: "reasoning_layer",
+      phase_id: initial_phase.phase_id,
+      payload: {
+        workload_index: phase3_state.operator_state.workload_index,
+        attention_stability_index: phase3_state.operator_state.attention_stability_index,
+        signal_confidence: phase3_state.operator_state.signal_confidence,
+        degraded_mode_active: phase3_state.operator_state.degraded_mode_active,
+        degraded_mode_reason: phase3_state.operator_state.degraded_mode_reason,
+        observation_window_ticks: phase3_state.operator_state.observation_window_ticks,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
     });
     const reasoning_event = this.logger.append({
       sim_time_sec: 0,
@@ -251,15 +397,23 @@ export class AuraSessionStore {
       source_module: "reasoning_layer",
       phase_id: initial_phase.phase_id,
       payload: {
-        top_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
-        ranked_hypothesis_ids: phase2_state.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => hypothesis.hypothesis_id),
-        confidence_band: phase2_state.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low",
-        stable_for_ticks: phase2_state.reasoning_snapshot.stable_for_ticks,
-        changed_since_last_tick: phase2_state.reasoning_snapshot.changed_since_last_tick,
-        dominant_summary: phase2_state.reasoning_snapshot.dominant_summary,
-        expected_root_cause_aligned: phase2_state.reasoning_snapshot.expected_root_cause_aligned,
-        lane_item_ids: phase2_state.first_response_lane.items.map((item) => item.item_id),
-        lane_items: summarizeLaneItems(phase2_state.first_response_lane),
+        top_hypothesis_id: phase3_state.reasoning_snapshot.dominant_hypothesis_id,
+        ranked_hypothesis_ids: phase3_state.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => hypothesis.hypothesis_id),
+        confidence_band: phase3_state.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low",
+        stable_for_ticks: phase3_state.reasoning_snapshot.stable_for_ticks,
+        changed_since_last_tick: phase3_state.reasoning_snapshot.changed_since_last_tick,
+        dominant_summary: phase3_state.reasoning_snapshot.dominant_summary,
+        expected_root_cause_aligned: phase3_state.reasoning_snapshot.expected_root_cause_aligned,
+        lane_item_ids: phase3_state.first_response_lane.items.map((item) => item.item_id),
+        lane_items: summarizeLaneItems(phase3_state.first_response_lane),
+        combined_risk_score: phase3_state.combined_risk.combined_risk_score,
+        combined_risk_band: phase3_state.combined_risk.combined_risk_band,
+        top_contributing_factors: phase3_state.combined_risk.top_contributing_factors,
+        confidence_caveat: phase3_state.combined_risk.confidence_caveat,
+        factor_breakdown: summarizeRiskFactors(phase3_state.combined_risk),
+        support_mode: phase3_state.support_mode,
+        ...summarizeSupportRefinement(phase3_state.support_refinement),
+        ...summarizeSupportPolicy(phase3_state.support_policy),
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
     });
@@ -269,7 +423,7 @@ export class AuraSessionStore {
     return {
       session_id: this.session_id,
       session_mode: "baseline",
-      support_mode: "monitoring_support",
+      support_mode: phase3_state.support_mode,
       scenario: this.scenario,
       current_phase: initial_phase,
       sim_time_sec: 0,
@@ -281,13 +435,18 @@ export class AuraSessionStore {
           phase_changed_event.event_id,
           plant_tick_event.event_id,
           alarm_event.event_id,
+          operator_state_event.event_id,
           reasoning_event.event_id,
         ],
       },
       alarm_set: initial_alarm_eval.alarm_set,
-      alarm_intelligence: phase2_state.alarm_intelligence,
-      reasoning_snapshot: phase2_state.reasoning_snapshot,
-      first_response_lane: phase2_state.first_response_lane,
+      alarm_intelligence: phase3_state.alarm_intelligence,
+      reasoning_snapshot: phase3_state.reasoning_snapshot,
+      operator_state: phase3_state.operator_state,
+      combined_risk: phase3_state.combined_risk,
+      first_response_lane: phase3_state.first_response_lane,
+      support_refinement: phase3_state.support_refinement,
+      support_policy: phase3_state.support_policy,
       alarm_history,
       events: this.logger.list(),
       executed_actions: [],
@@ -361,6 +520,7 @@ export class AuraSessionStore {
     this.alarm_runtime_state = createAlarmRuntimeState();
     this.reasoning_runtime_state = createReasoningRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
+    this.support_mode_runtime_state = createSupportModeRuntimeState();
     this.snapshot = this.createInitialSnapshot();
     this.emit();
   }
@@ -509,8 +669,9 @@ export class AuraSessionStore {
       previous_alarm_runtime_state: this.alarm_runtime_state,
     });
     this.alarm_runtime_state = alarm_evaluation.alarm_runtime_state;
-    const phase2_state = this.buildPhase2State({
+    const phase3_state = this.buildPhase3State({
       sim_time_sec,
+      tick_index: this.snapshot.tick_index + 1,
       plant_state: {
         ...stepped.plant_state,
         alarm_load_count: alarm_evaluation.alarm_set.active_alarm_count,
@@ -518,7 +679,10 @@ export class AuraSessionStore {
       },
       alarm_set: alarm_evaluation.alarm_set,
       allowed_action_ids: current_phase.allowed_action_ids ?? [],
+      executed_actions: this.snapshot.executed_actions,
+      previous_snapshot: this.snapshot,
     });
+    this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
 
     const plant_tick: PlantTick = {
       tick_id: next_tick_id,
@@ -567,39 +731,79 @@ export class AuraSessionStore {
         active_alarm_cluster_count: alarm_evaluation.alarm_set.active_alarm_cluster_count,
         highest_priority_active: alarm_evaluation.alarm_set.highest_priority_active,
         active_alarm_ids: alarm_evaluation.alarm_set.active_alarm_ids,
-        visible_alarm_card_count: phase2_state.alarm_intelligence.visible_alarm_card_count,
-        compression_ratio: phase2_state.alarm_intelligence.compression_ratio,
-        cluster_summaries: summarizeAlarmClusters(phase2_state.alarm_intelligence),
+        visible_alarm_card_count: phase3_state.alarm_intelligence.visible_alarm_card_count,
+        compression_ratio: phase3_state.alarm_intelligence.compression_ratio,
+        cluster_summaries: summarizeAlarmClusters(phase3_state.alarm_intelligence),
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
     });
-    const lane_changed =
-      laneSummaryKey(this.snapshot.first_response_lane) !== laneSummaryKey(phase2_state.first_response_lane) ||
-      this.snapshot.reasoning_snapshot.dominant_hypothesis_id !== phase2_state.reasoning_snapshot.dominant_hypothesis_id;
+    const operator_state_event = this.logger.append({
+      sim_time_sec,
+      event_type: "operator_state_snapshot_recorded",
+      source_module: "reasoning_layer",
+      phase_id: current_phase.phase_id,
+      payload: {
+        workload_index: phase3_state.operator_state.workload_index,
+        attention_stability_index: phase3_state.operator_state.attention_stability_index,
+        signal_confidence: phase3_state.operator_state.signal_confidence,
+        degraded_mode_active: phase3_state.operator_state.degraded_mode_active,
+        degraded_mode_reason: phase3_state.operator_state.degraded_mode_reason,
+        observation_window_ticks: phase3_state.operator_state.observation_window_ticks,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+    });
     const reasoning_event = this.logger.append({
       sim_time_sec,
       event_type: "reasoning_snapshot_published",
       source_module: "reasoning_layer",
       phase_id: current_phase.phase_id,
       payload: {
-        top_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
-        ranked_hypothesis_ids: phase2_state.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => hypothesis.hypothesis_id),
-        confidence_band: phase2_state.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low",
-        stable_for_ticks: phase2_state.reasoning_snapshot.stable_for_ticks,
-        changed_since_last_tick: phase2_state.reasoning_snapshot.changed_since_last_tick,
-        dominant_summary: phase2_state.reasoning_snapshot.dominant_summary,
-        expected_root_cause_aligned: phase2_state.reasoning_snapshot.expected_root_cause_aligned,
-        lane_changed,
-        lane_item_ids: phase2_state.first_response_lane.items.map((item) => item.item_id),
-        lane_items: summarizeLaneItems(phase2_state.first_response_lane),
+        top_hypothesis_id: phase3_state.reasoning_snapshot.dominant_hypothesis_id,
+        ranked_hypothesis_ids: phase3_state.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => hypothesis.hypothesis_id),
+        confidence_band: phase3_state.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low",
+        stable_for_ticks: phase3_state.reasoning_snapshot.stable_for_ticks,
+        changed_since_last_tick: phase3_state.reasoning_snapshot.changed_since_last_tick,
+        dominant_summary: phase3_state.reasoning_snapshot.dominant_summary,
+        expected_root_cause_aligned: phase3_state.reasoning_snapshot.expected_root_cause_aligned,
+        lane_changed: phase3_state.lane_changed,
+        lane_item_ids: phase3_state.first_response_lane.items.map((item) => item.item_id),
+        lane_items: summarizeLaneItems(phase3_state.first_response_lane),
+        combined_risk_score: phase3_state.combined_risk.combined_risk_score,
+        combined_risk_band: phase3_state.combined_risk.combined_risk_band,
+        top_contributing_factors: phase3_state.combined_risk.top_contributing_factors,
+        confidence_caveat: phase3_state.combined_risk.confidence_caveat,
+        factor_breakdown: summarizeRiskFactors(phase3_state.combined_risk),
+        support_mode: phase3_state.support_mode,
+        ...summarizeSupportRefinement(phase3_state.support_refinement),
+        ...summarizeSupportPolicy(phase3_state.support_policy),
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
     });
+    let support_mode_event_id: string | undefined;
+    if (phase3_state.support_mode !== this.snapshot.support_mode) {
+      const support_mode_event = this.logger.append({
+        sim_time_sec,
+        event_type: "support_mode_changed",
+        source_module: "adaptive_orchestrator",
+        phase_id: current_phase.phase_id,
+        payload: {
+          from_mode: this.snapshot.support_mode,
+          to_mode: phase3_state.support_mode,
+          trigger_reason: phase3_state.support_policy.transition_reason,
+          current_mode_reason: phase3_state.support_policy.current_mode_reason,
+          support_behavior_changes: phase3_state.support_policy.support_behavior_changes,
+          degraded_confidence_effect: phase3_state.support_policy.degraded_confidence_effect,
+          critical_visibility_summary: phase3_state.support_policy.critical_visibility.summary,
+        },
+        trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+      });
+      support_mode_event_id = support_mode_event.event_id;
+    }
     let diagnosis_event_id: string | undefined;
     if (
-      phase2_state.reasoning_snapshot.dominant_hypothesis_id &&
-      phase2_state.reasoning_snapshot.stable_for_ticks >= 2 &&
-      this.reasoning_runtime_state.last_committed_hypothesis_id !== phase2_state.reasoning_snapshot.dominant_hypothesis_id
+      phase3_state.reasoning_snapshot.dominant_hypothesis_id &&
+      phase3_state.reasoning_snapshot.stable_for_ticks >= 2 &&
+      this.reasoning_runtime_state.last_committed_hypothesis_id !== phase3_state.reasoning_snapshot.dominant_hypothesis_id
     ) {
       const diagnosis_event = this.logger.append({
         sim_time_sec,
@@ -607,8 +811,8 @@ export class AuraSessionStore {
         source_module: "reasoning_layer",
         phase_id: current_phase.phase_id,
         payload: {
-          diagnosis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
-          matches_expected_root_cause: phase2_state.reasoning_snapshot.expected_root_cause_aligned,
+          diagnosis_id: phase3_state.reasoning_snapshot.dominant_hypothesis_id,
+          matches_expected_root_cause: phase3_state.reasoning_snapshot.expected_root_cause_aligned,
         },
         trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
       });
@@ -616,7 +820,7 @@ export class AuraSessionStore {
       this.reasoning_runtime_state = {
         ...this.reasoning_runtime_state,
         diagnosis_committed: true,
-        last_committed_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+        last_committed_hypothesis_id: phase3_state.reasoning_snapshot.dominant_hypothesis_id,
       };
     }
 
@@ -627,7 +831,7 @@ export class AuraSessionStore {
       elapsed_time_sec: sim_time_sec,
     };
     const diagnosis_ready =
-      phase2_state.reasoning_snapshot.expected_root_cause_aligned && phase2_state.reasoning_snapshot.stable_for_ticks >= 2;
+      phase3_state.reasoning_snapshot.expected_root_cause_aligned && phase3_state.reasoning_snapshot.stable_for_ticks >= 2;
     const stabilized_alarm_picture =
       !criticalEscalationActive(alarm_evaluation.alarm_set.active_alarm_ids) && alarm_evaluation.alarm_set.active_alarm_count <= 2;
 
@@ -667,7 +871,7 @@ export class AuraSessionStore {
           success: outcome.outcome === "success",
           failure_reason: outcome.message,
           stabilized: outcome.stabilized,
-          dominant_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+          dominant_hypothesis_id: phase3_state.reasoning_snapshot.dominant_hypothesis_id,
           diagnosis_ready,
           remaining_alarm_count: alarm_evaluation.alarm_set.active_alarm_count,
         },
@@ -699,14 +903,19 @@ export class AuraSessionStore {
       tick_index: this.snapshot.tick_index + 1,
       plant_tick: {
         ...plant_tick,
-        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id, reasoning_event.event_id].concat(
-          diagnosis_event_id ? [diagnosis_event_id] : [],
-        ),
+        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id, operator_state_event.event_id, reasoning_event.event_id]
+          .concat(support_mode_event_id ? [support_mode_event_id] : [])
+          .concat(diagnosis_event_id ? [diagnosis_event_id] : []),
       },
       alarm_set: alarm_evaluation.alarm_set,
-      alarm_intelligence: phase2_state.alarm_intelligence,
-      reasoning_snapshot: phase2_state.reasoning_snapshot,
-      first_response_lane: phase2_state.first_response_lane,
+      alarm_intelligence: phase3_state.alarm_intelligence,
+      reasoning_snapshot: phase3_state.reasoning_snapshot,
+      operator_state: phase3_state.operator_state,
+      combined_risk: phase3_state.combined_risk,
+      support_mode: phase3_state.support_mode,
+      first_response_lane: phase3_state.first_response_lane,
+      support_refinement: phase3_state.support_refinement,
+      support_policy: phase3_state.support_policy,
       alarm_history,
       events: this.logger.list(),
       outcome,

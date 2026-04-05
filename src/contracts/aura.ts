@@ -216,6 +216,79 @@ export type ReasoningSnapshot = {
   expected_root_cause_aligned: boolean;
 };
 
+export type OperatorStateSnapshot = {
+  workload_index: number;
+  attention_stability_index: number;
+  signal_confidence: number;
+  degraded_mode_active: boolean;
+  degraded_mode_reason: string;
+  observation_window_ticks: number;
+};
+
+export type CombinedRiskBand = "low" | "guarded" | "elevated" | "high";
+
+export type CombinedRiskFactor = {
+  factor_id:
+    | "plant_severity"
+    | "alarm_burden"
+    | "diagnosis_uncertainty"
+    | "operator_workload"
+    | "attention_instability"
+    | "signal_confidence_penalty";
+  label: string;
+  raw_index: number;
+  contribution: number;
+  detail: string;
+};
+
+export type CombinedRiskSnapshot = {
+  combined_risk_score: number;
+  combined_risk_band: CombinedRiskBand;
+  factor_breakdown: CombinedRiskFactor[];
+  top_contributing_factors: string[];
+  confidence_caveat: string;
+  why_risk_is_current: string;
+  what_changed: string;
+};
+
+export type SupportUrgencyLevel = "standard" | "priority" | "urgent";
+export type SupportWordingStyle = "concise" | "explicit";
+
+export type FirstResponsePresentationCue = {
+  emphasized: boolean;
+  urgency_level: SupportUrgencyLevel;
+  why_this_matters_now: string;
+  attention_sensitive_caution?: string;
+  degraded_confidence_caveat?: string;
+  wording_style: SupportWordingStyle;
+};
+
+export type SupportRefinementSnapshot = {
+  current_support_focus: string;
+  emphasized_lane_item_ids: string[];
+  summary_explanation: string;
+  operator_context_note: string;
+  degraded_confidence_caution: string;
+  watch_now_summary: string;
+  wording_style: SupportWordingStyle;
+};
+
+export type CriticalVisibilityGuardrailState = {
+  critical_variable_ids: string[];
+  always_visible_alarm_ids: string[];
+  pinned_alarm_ids: string[];
+  summary: string;
+};
+
+export type SupportPolicySnapshot = {
+  current_mode_reason: string;
+  transition_reason: string;
+  mode_change_summary: string;
+  support_behavior_changes: string[];
+  degraded_confidence_effect: string;
+  critical_visibility: CriticalVisibilityGuardrailState;
+};
+
 export type FirstResponseItem = {
   item_id: string;
   label: string;
@@ -226,6 +299,7 @@ export type FirstResponseItem = {
   completion_hint: string;
   source_alarm_ids: string[];
   source_variable_ids: string[];
+  presentation_cue?: FirstResponsePresentationCue;
 };
 
 export type FirstResponseLane = {
@@ -295,7 +369,11 @@ export type SessionSnapshot = {
   alarm_set: AlarmSet;
   alarm_intelligence: AlarmIntelligenceSnapshot;
   reasoning_snapshot: ReasoningSnapshot;
+  operator_state: OperatorStateSnapshot;
+  combined_risk: CombinedRiskSnapshot;
   first_response_lane: FirstResponseLane;
+  support_refinement: SupportRefinementSnapshot;
+  support_policy: SupportPolicySnapshot;
   alarm_history: LoggedAlarmState[];
   events: SessionLogEvent[];
   executed_actions: ExecutedAction[];

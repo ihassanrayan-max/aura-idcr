@@ -34,6 +34,42 @@ function formatSignalLabel(signalId: string): string {
   return labels[signalId] ?? signalId.replace(/_/g, " ");
 }
 
+function formatSupportModeLabel(
+  supportMode: "monitoring_support" | "guided_support" | "protected_response",
+): string {
+  switch (supportMode) {
+    case "monitoring_support":
+      return "Monitoring Support";
+    case "guided_support":
+      return "Guided Support";
+    case "protected_response":
+      return "Protected Response";
+  }
+}
+
+function riskBadgeTone(riskBand: "low" | "guarded" | "elevated" | "high"): "ok" | "neutral" | "alert" {
+  switch (riskBand) {
+    case "low":
+      return "ok";
+    case "guarded":
+      return "neutral";
+    case "elevated":
+    case "high":
+      return "alert";
+  }
+}
+
+function urgencyBadgeTone(urgencyLevel: "standard" | "priority" | "urgent"): "ok" | "neutral" | "alert" {
+  switch (urgencyLevel) {
+    case "standard":
+      return "ok";
+    case "priority":
+      return "neutral";
+    case "urgent":
+      return "alert";
+  }
+}
+
 export default function App({ store = defaultStore, autoRun = true }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
   const [isRunning, setIsRunning] = useState(true);
@@ -65,6 +101,8 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     [snapshot.scenario.allowed_operator_actions],
   );
   const recentEvents = snapshot.events.slice(-8).reverse();
+  const pinnedCriticalAlarmIds = new Set(snapshot.support_policy.critical_visibility.pinned_alarm_ids);
+  const pinnedCriticalAlarms = snapshot.alarm_set.active_alarms.filter((alarm) => pinnedCriticalAlarmIds.has(alarm.alarm_id));
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -88,7 +126,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     <div className="app-shell">
       <header className="top-status-bar">
         <div>
-          <p className="eyebrow">AURA-IDCR Phase 2</p>
+          <p className="eyebrow">AURA-IDCR Phase 4 Slice 1</p>
           <h1>{snapshot.scenario.title}</h1>
           <p className="muted">{snapshot.current_phase.label}</p>
         </div>
@@ -99,7 +137,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
           </div>
           <div className="status-cell">
             <span className="status-label">Support Mode</span>
-            <strong>{snapshot.support_mode}</strong>
+            <strong>{formatSupportModeLabel(snapshot.support_mode)}</strong>
           </div>
           <div className="status-cell">
             <span className="status-label">Simulation Clock</span>
@@ -204,6 +242,28 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               <strong>{snapshot.alarm_set.active_alarm_cluster_count}</strong>
             </article>
           </div>
+          <div className="critical-alarm-strip">
+            <div className="alarm-title-row">
+              <strong>Critical alarms pinned in view</strong>
+              <span>{pinnedCriticalAlarms.length}</span>
+            </div>
+            <p className="muted">{snapshot.support_policy.critical_visibility.summary}</p>
+            <div className="badge-row cluster-badges">
+              {pinnedCriticalAlarms.length > 0 ? (
+                pinnedCriticalAlarms.map((alarm) => (
+                  <span
+                    key={alarm.alarm_id}
+                    className={`badge priority-chip priority-${alarm.priority}`}
+                    data-testid="critical-alarm-chip"
+                  >
+                    {alarm.title}
+                  </span>
+                ))
+              ) : (
+                <span className="badge ok">No active P1/P2 or always-visible alarms</span>
+              )}
+            </div>
+          </div>
           <div className="alarm-list">
             {snapshot.alarm_intelligence.clusters.length === 0 ? (
               <p className="muted">No active alarm clusters yet.</p>
@@ -274,6 +334,23 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
                 {snapshot.reasoning_snapshot.expected_root_cause_aligned ? "Aligned with scenario driver" : "Alternative storyline active"}
               </span>
               <span className="badge neutral">Stable for {snapshot.reasoning_snapshot.stable_for_ticks} ticks</span>
+              <span className={`badge ${snapshot.support_refinement.wording_style === "concise" ? "neutral" : "ok"}`}>
+                Wording: {snapshot.support_refinement.wording_style}
+              </span>
+            </div>
+            <div className="storyline-context">
+              <article className="storyline-context-card">
+                <span className="metric-label">Support focus now</span>
+                <p className="muted">{snapshot.support_refinement.current_support_focus}</p>
+              </article>
+              <article className="storyline-context-card">
+                <span className="metric-label">Why emphasis changed</span>
+                <p className="muted">{snapshot.support_refinement.summary_explanation}</p>
+              </article>
+              <article className="storyline-context-card">
+                <span className="metric-label">Operator context</span>
+                <p className="muted">{snapshot.support_refinement.operator_context_note}</p>
+              </article>
             </div>
           </div>
           <div className="storyline-list">
@@ -308,14 +385,42 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
 
           <div className="procedure-lane">
             <p className="muted">{snapshot.first_response_lane.prototype_notice}</p>
+            <div className="badge-row">
+              <span className={`badge ${riskBadgeTone(snapshot.combined_risk.combined_risk_band)}`}>
+                Focus: {snapshot.support_refinement.current_support_focus}
+              </span>
+              <span className="badge neutral">Emphasized items: {snapshot.support_refinement.emphasized_lane_item_ids.length}</span>
+              <span className="badge ok">Watch next: {snapshot.support_refinement.watch_now_summary}</span>
+            </div>
             <div className="procedure-list">
               {snapshot.first_response_lane.items.map((item) => (
-                <article key={item.item_id} className="procedure-item">
+                <article
+                  key={item.item_id}
+                  className={`procedure-item ${item.presentation_cue?.emphasized ? "emphasized" : ""}`}
+                >
                   <div className="alarm-title-row">
                     <strong>{item.label}</strong>
                     <span>{item.item_kind}</span>
                   </div>
+                  {item.presentation_cue ? (
+                    <div className="badge-row">
+                      <span className={`badge ${urgencyBadgeTone(item.presentation_cue.urgency_level)}`}>
+                        {item.presentation_cue.urgency_level}
+                      </span>
+                      {item.presentation_cue.emphasized ? <span className="badge ok">Emphasized now</span> : null}
+                      <span className={`badge ${item.presentation_cue.wording_style === "concise" ? "neutral" : "ok"}`}>
+                        {item.presentation_cue.wording_style}
+                      </span>
+                    </div>
+                  ) : null}
                   <p className="muted">{item.why}</p>
+                  {item.presentation_cue ? <p className="lane-why-now">{item.presentation_cue.why_this_matters_now}</p> : null}
+                  {item.presentation_cue?.attention_sensitive_caution ? (
+                    <p className="lane-caution">{item.presentation_cue.attention_sensitive_caution}</p>
+                  ) : null}
+                  {item.presentation_cue?.degraded_confidence_caveat ? (
+                    <p className="lane-caution">{item.presentation_cue.degraded_confidence_caveat}</p>
+                  ) : null}
                   <p className="alarm-meta">{item.completion_hint}</p>
                   {item.source_variable_ids.length > 0 ? (
                     <p className="alarm-meta">Signals: {item.source_variable_ids.map(formatSignalLabel).join(", ")}</p>
@@ -401,13 +506,124 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
 
         <section className="panel support-panel">
           <div className="panel-header">
-            <h2>Phase 2 Scope Guardrail</h2>
+            <h2>Support State / Combined Risk</h2>
+            <p className="muted">Compact deterministic assistance-state output, additive support refinement, and enforced critical visibility. No action interception yet.</p>
+          </div>
+          <div className="support-summary-grid">
+            <article className="metric-card compact">
+              <span className="metric-label">Workload</span>
+              <strong>{snapshot.operator_state.workload_index}/100</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Attention Stability</span>
+              <strong>{snapshot.operator_state.attention_stability_index}/100</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Signal Confidence</span>
+              <strong>{snapshot.operator_state.signal_confidence}/100</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Degraded Mode</span>
+              <strong>{snapshot.operator_state.degraded_mode_active ? "Active" : "Clear"}</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Assistance Mode</span>
+              <strong>{formatSupportModeLabel(snapshot.support_mode)}</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Combined Risk</span>
+              <strong>
+                {snapshot.combined_risk.combined_risk_score.toFixed(1)}/100 {snapshot.combined_risk.combined_risk_band}
+              </strong>
+            </article>
           </div>
           <div className="badge-row">
-            <span className="badge ok">Alarm grouping active</span>
+            <span className={`badge ${snapshot.operator_state.degraded_mode_active ? "alert" : "ok"}`}>
+              Degraded mode: {snapshot.operator_state.degraded_mode_active ? "active" : "clear"}
+            </span>
+            <span className={`badge ${snapshot.support_mode === "protected_response" ? "alert" : snapshot.support_mode === "guided_support" ? "neutral" : "ok"}`}>
+              Assistance: {formatSupportModeLabel(snapshot.support_mode)}
+            </span>
+            <span className={`badge ${riskBadgeTone(snapshot.combined_risk.combined_risk_band)}`}>
+              Combined risk: {snapshot.combined_risk.combined_risk_band}
+            </span>
+            <span className="badge ok">Critical visibility guardrails active</span>
             <span className="badge ok">Rule-based storyline active</span>
             <span className="badge ok">Dynamic first-response lane active</span>
-            <span className="badge neutral">No human monitoring or adaptive mode shifts in this slice</span>
+          </div>
+          <div className="support-refinement-grid">
+            <article className="support-explanation-card">
+              <span className="metric-label">Current assistance mode</span>
+              <p className="muted">{snapshot.support_policy.current_mode_reason}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Mode transition status</span>
+              <p className="muted">{snapshot.support_policy.transition_reason}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">What changed</span>
+              <p className="muted">{snapshot.support_policy.mode_change_summary}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Mode effect on support</span>
+              <p className="muted">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Current support focus</span>
+              <p className="muted">{snapshot.support_refinement.current_support_focus}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Why this is emphasized now</span>
+              <p className="muted">{snapshot.support_refinement.summary_explanation}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Operator context</span>
+              <p className="muted">{snapshot.support_refinement.operator_context_note}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Watch next</span>
+              <p className="muted">{snapshot.support_refinement.watch_now_summary}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Degraded-confidence effect</span>
+              <p className="muted">{snapshot.support_policy.degraded_confidence_effect}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Critical visibility guardrails</span>
+              <p className="muted">{snapshot.support_policy.critical_visibility.summary}</p>
+            </article>
+          </div>
+          {snapshot.support_refinement.degraded_confidence_caution ? (
+            <div className="support-caution-banner">
+              <strong>Degraded-confidence caveat</strong>
+              <p className="muted">{snapshot.support_refinement.degraded_confidence_caution}</p>
+            </div>
+          ) : null}
+          <div className="support-explanation-grid">
+            <article className="support-explanation-card">
+              <span className="metric-label">Why risk is here now</span>
+              <p className="muted">{snapshot.combined_risk.why_risk_is_current}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">Confidence caveat</span>
+              <p className="muted">{snapshot.combined_risk.confidence_caveat}</p>
+            </article>
+            <article className="support-explanation-card">
+              <span className="metric-label">What changed</span>
+              <p className="muted">{snapshot.combined_risk.what_changed}</p>
+            </article>
+          </div>
+          <div className="support-factor-list">
+            {snapshot.combined_risk.factor_breakdown.slice(0, 3).map((factor) => (
+              <article key={factor.factor_id} className="support-factor-card">
+                <div className="alarm-title-row">
+                  <strong>{factor.label}</strong>
+                  <span>+{factor.contribution.toFixed(1)}</span>
+                </div>
+                <p className="alarm-meta">Raw index: {factor.raw_index}/100</p>
+                <p className="muted">{factor.detail}</p>
+              </article>
+            ))}
           </div>
         </section>
 

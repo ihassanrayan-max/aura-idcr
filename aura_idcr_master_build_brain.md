@@ -754,17 +754,17 @@ Use these statuses exactly:
 - [x] Scenario success/failure logic — **Done**
 
 ### Phase 3 — Human Monitoring + Reasoning
-- [ ] Operator-state feature extraction — **Not Started**
-- [ ] Workload/attention proxy outputs — **Not Started**
-- [ ] Sensor confidence / degraded mode — **Not Started**
-- [ ] Combined risk reasoning — **Not Started**
-- [ ] Explanation outputs — **Not Started**
+- [x] Operator-state feature extraction — **Done**
+- [x] Workload/attention proxy outputs — **Done**
+- [x] Sensor confidence / degraded mode — **Done**
+- [x] Combined risk reasoning — **Done**
+- [x] Explanation outputs — **Done**
 
 ### Phase 4 — Adaptive Assistance + Interceptor
-- [ ] Assistance mode logic — **Not Started**
-- [ ] Adaptive UI behavior — **Not Started**
+- [x] Assistance mode logic — **Done**
+- [ ] Adaptive UI behavior — **Partial**
 - [ ] Action validator / interceptor — **Not Started**
-- [ ] Critical-visibility guarantees — **Not Started**
+- [x] Critical-visibility guarantees — **Done**
 - [ ] Override logic — **Not Started**
 
 ### Phase 5 — Evaluation Harness
@@ -785,16 +785,15 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Phase 2 is now implemented for the first deterministic feedwater-side slice.
+Phase 4 slice 1 is now implemented for the deterministic feedwater-side / Loss of Feedwater scenario family.
 
-The immediate next deliverables should remain out of scope for this repo session unless the human explicitly requests them:
-1. Phase 3 operator-state feature extraction,
-2. workload/attention proxy outputs,
-3. sensor confidence / degraded mode,
-4. combined risk reasoning,
-5. explanation outputs.
+The immediate next recommended step is the next narrow Phase 4 slice:
+1. deterministic pass / soft warning / hard prevent action-validation behavior using the now-live assistance-mode and critical-visibility state,
+2. explanation text for validator outcomes only,
+3. no override workflows, replay/reporting expansion, or evaluation harness work unless the human explicitly opens that scope,
+4. no broad UI redesign beyond compact validator messaging inside the existing shell regions.
 
-Do not skip or replace the current Phase 2 structures, and do not jump into later adaptive or evaluation features unless the human explicitly opens that phase.
+Do not replace the current Phase 2 storyline/procedure structures, and do not jump into broad evaluation or stretch features unless the human explicitly opens that phase.
 
 ---
 
@@ -899,6 +898,59 @@ Use this section to track meaningful progress across sessions.
   - None in the current Phase 2 slice
 - Next recommended step:
   - Hold scope and begin Phase 3 only when the human explicitly requests human-state and combined-reasoning work
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 3 slice 1 session
+- Task worked on: Phase 3 deterministic operator-state proxies, degraded confidence handling, additive combined-risk reasoning, and compact support-state outputs for the deterministic feedwater slice
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` and the checked-in `docs/` authority files with additive Phase 3 types and notes for operator-state snapshots, degraded confidence handling, and transparent combined-risk outputs
+  - Added `src/runtime/operatorState.ts` and `src/runtime/combinedRisk.ts` to compute deterministic workload, attention stability, signal confidence, degraded mode, combined-risk score/band, factor breakdown, and compact explanation text from existing runtime/session signals only
+  - Updated `src/state/sessionStore.ts` so each tick now publishes operator-state snapshots, additive combined-risk fields inside reasoning events, and visible replay-inspectable payloads without changing plant progression, alarm logic, or Phase 2 diagnosis/procedure behavior
+  - Replaced the support-state placeholder in `src/App.tsx` and `src/styles.css` with a bounded compact panel showing workload, attention stability, signal confidence, degraded mode, combined risk, top factors, and short explanation text
+  - Added focused runtime and store/UI verification coverage in `src/runtime/operatorState.test.ts`, `src/runtime/combinedRisk.test.ts`, and `src/state/sessionStore.test.tsx`, then verified the slice with `npm test` and `npm run build`
+- What remains:
+  - Phase 4 assistance mode logic, adaptive UI behavior, action validator / interceptor work, replay/reporting UI, evaluation harness work, and additional scenarios remain intentionally untouched
+- Blockers:
+  - None in the current Phase 3 slice
+- Next recommended step:
+  - Begin a narrow Phase 4 slice that turns the combined-risk outputs into deterministic support-mode transitions and explanation messages while continuing to defer broad UI changes and action interception until explicitly requested
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 3 slice 2 session
+- Task worked on: Phase 3 deterministic operator-state-informed support refinement for the bounded feedwater-side scenario family
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` and `docs/aura_module_contracts.md` with additive support-refinement snapshot and first-response presentation-cue contract shapes
+  - Added `src/runtime/supportRefinement.ts` to deterministically refine support emphasis from combined risk, workload, attention stability, reasoning ambiguity/stability, and degraded confidence without changing Phase 2 base lane/storyline logic
+  - Updated `src/state/sessionStore.ts` so each tick now publishes replay-inspectable support-refinement state and shallow additive support-refinement fields inside `reasoning_snapshot_published`
+  - Updated `src/App.tsx` and `src/styles.css` so the existing storyline area, first-response lane, and support-state panel now show bounded urgency/emphasis cues, short why-now text, watch-next guidance, and degraded-confidence cautions without any layout rewrite or assistance-mode switching
+  - Added focused verification in `src/runtime/supportRefinement.test.ts` and extended `src/state/sessionStore.test.tsx`, then verified the slice with `npm test` and `npm run build`
+- What remains:
+  - Phase 4 assistance mode logic, adaptive UI behavior, action validator / interceptor work, replay/reporting UI, evaluation harness work, and additional scenarios remain intentionally untouched
+- Blockers:
+  - None in the current Phase 3 slice
+- Next recommended step:
+  - Begin a narrow Phase 4 slice that turns the published combined-risk and support-refinement outputs into deterministic support-mode transitions and explanation messages while continuing to defer adaptive UI changes and action interception until explicitly requested
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 4 slice 1 session
+- Task worked on: Phase 4 slice 1 deterministic assistance-mode state, bounded support-policy transitions, and critical-visibility guardrails for the bounded feedwater-side scenario family
+- Status: Done
+- What changed:
+  - Added additive Phase 4 assistance-policy contract surfaces in `src/contracts/aura.ts` and the checked-in contract/KPI docs so support mode, transition explanations, and compact critical-visibility guardrail state are replay-inspectable
+  - Added `src/runtime/supportModePolicy.ts` to deterministically resolve `monitoring_support`, `guided_support`, and `protected_response` from existing combined-risk, operator-state, reasoning-stability, and escalation signals using bounded anti-chatter downshift dwell logic
+  - Updated `src/runtime/supportRefinement.ts` so the live support mode now changes emphasis strength, wording strength, urgency, watch-now focus, and degraded-confidence caution strength without hiding any Phase 2 lane items or changing the base lane generator
+  - Updated `src/state/sessionStore.ts` so the runtime now publishes live support mode and support-policy state, emits replay-friendly `support_mode_changed` events with KPI-safe payloads, and keeps the deterministic corrected run behavior intact
+  - Updated `src/App.tsx` and `src/styles.css` so the existing shell now shows the current assistance mode, why it is active, what changed, what the mode is changing in support behavior, degraded-confidence limits, and a real pinned critical-alarm strip inside the existing alarm region
+  - Added focused tests in `src/runtime/supportModePolicy.test.ts`, updated `src/runtime/supportRefinement.test.ts` and `src/state/sessionStore.test.tsx`, and re-verified the slice with `npm test`, `npm run build`, and a direct runtime self-check of escalated and corrected scenario paths
+- What remains:
+  - Broader adaptive UI behavior is still only partial because this slice intentionally stayed inside existing shell regions and bounded messaging / emphasis changes
+  - Action validator / interceptor behavior, override workflows, replay/reporting UI, KPI dashboards, and additional scenarios remain intentionally untouched
+- Blockers:
+  - None in the current Phase 4 slice 1 implementation
+- Next recommended step:
+  - Begin the next narrow Phase 4 slice that adds deterministic action-validation outcomes and explanation messages while continuing to defer override workflows, replay/reporting, and broader UI changes until explicitly requested
 
 ---
 

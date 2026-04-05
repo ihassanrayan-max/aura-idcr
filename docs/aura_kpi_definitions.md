@@ -27,6 +27,12 @@ Later phases must emit the following event types with stable payload fields if t
 | `diagnosis_committed` | `diagnosis_id`, `matches_expected_root_cause` |
 | `scenario_outcome_recorded` | `outcome`, `success`, `failure_reason`, `stabilized` |
 
+Phase 3 additive note:
+
+- `operator_state_snapshot_recorded` may add `degraded_mode_active`, `degraded_mode_reason`, and `observation_window_ticks` without changing the KPI minimums above.
+- `reasoning_snapshot_published` may add `combined_risk_score`, `combined_risk_band`, `top_contributing_factors`, and `confidence_caveat` so the additive risk layer remains replay-inspectable.
+- `support_mode_changed` may add `current_mode_reason`, `support_behavior_changes`, `degraded_confidence_effect`, and compact critical-visibility summaries without changing the KPI minimums above.
+
 ## KPI Sheet
 
 | KPI Name | Description | Why It Matters | Exact Log / Event Dependency | Audience |
