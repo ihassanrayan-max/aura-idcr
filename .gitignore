@@ -1,0 +1,38 @@
+# Local environment and secrets
+.env
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Node / common JS build output
+node_modules/
+.next/
+out/
+
+# Logs and temp
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
