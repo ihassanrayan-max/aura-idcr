@@ -70,6 +70,17 @@ function urgencyBadgeTone(urgencyLevel: "standard" | "priority" | "urgent"): "ok
   }
 }
 
+function validationBadgeTone(outcome: "pass" | "soft_warning" | "hard_prevent"): "ok" | "neutral" | "alert" {
+  switch (outcome) {
+    case "pass":
+      return "ok";
+    case "soft_warning":
+      return "neutral";
+    case "hard_prevent":
+      return "alert";
+  }
+}
+
 export default function App({ store = defaultStore, autoRun = true }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
   const [isRunning, setIsRunning] = useState(true);
@@ -103,6 +114,9 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   const recentEvents = snapshot.events.slice(-8).reverse();
   const pinnedCriticalAlarmIds = new Set(snapshot.support_policy.critical_visibility.pinned_alarm_ids);
   const pinnedCriticalAlarms = snapshot.alarm_set.active_alarms.filter((alarm) => pinnedCriticalAlarmIds.has(alarm.alarm_id));
+  const pendingConfirmation = snapshot.pending_action_confirmation;
+  const actionConfirmationPending = Boolean(pendingConfirmation);
+  const lastValidation = snapshot.last_validation_result;
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -151,7 +165,11 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         <div className="badge-row">
           <span className="badge ok">{snapshot.logging_active ? "Logging active" : "Logging offline"}</span>
           <span className="badge neutral">
-            {snapshot.validation_status_available ? "Validation ready" : "Validation placeholder only"}
+            {actionConfirmationPending
+              ? "Validation pending confirmation"
+              : snapshot.validation_status_available
+                ? "Validation ready"
+                : "Validation offline"}
           </span>
           <span className={`badge ${snapshot.outcome ? "alert" : "ok"}`}>
             {snapshot.outcome ? `Outcome: ${snapshot.outcome.outcome}` : "Scenario running"}
@@ -429,6 +447,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
                     <button
                       type="button"
                       className="lane-action-button"
+                      disabled={actionConfirmationPending}
                       onClick={() => requestLaneAction(item.recommended_action_id!, item.recommended_value)}
                     >
                       {actionLabels[item.recommended_action_id] ?? item.recommended_action_id}
@@ -458,6 +477,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               <strong>{feedwaterDemand}% rated</strong>
               <button
                 type="button"
+                disabled={actionConfirmationPending}
                 onClick={() =>
                   store.requestAction({
                     action_id: "act_adjust_feedwater",
@@ -475,6 +495,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
           <div className="control-row">
             <button
               type="button"
+                disabled={actionConfirmationPending}
               onClick={() =>
                 store.requestAction({
                   action_id: "act_ack_alarm",
@@ -502,12 +523,35 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               Reset session
             </button>
           </div>
+
+          {pendingConfirmation ? (
+            <div className="validation-banner" data-testid="pending-validation-banner">
+              <div className="alarm-title-row">
+                <strong>Soft warning confirmation required</strong>
+                <span>{actionLabels[pendingConfirmation.action_request.action_id] ?? pendingConfirmation.action_request.action_id}</span>
+              </div>
+              <p className="muted">{pendingConfirmation.validation_result.explanation}</p>
+              <p className="lane-why-now">{pendingConfirmation.validation_result.risk_context}</p>
+              <p className="lane-caution">{pendingConfirmation.validation_result.confidence_note}</p>
+              {pendingConfirmation.validation_result.recommended_safe_alternative ? (
+                <p className="alarm-meta">Safer direction: {pendingConfirmation.validation_result.recommended_safe_alternative}</p>
+              ) : null}
+              <div className="control-row">
+                <button type="button" onClick={() => store.confirmPendingAction()}>
+                  Confirm and apply action
+                </button>
+                <button type="button" className="ghost-button" onClick={() => store.dismissPendingActionConfirmation()}>
+                  Cancel warning
+                </button>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="panel support-panel">
           <div className="panel-header">
             <h2>Support State / Combined Risk</h2>
-            <p className="muted">Compact deterministic assistance-state output, additive support refinement, and enforced critical visibility. No action interception yet.</p>
+            <p className="muted">Compact deterministic assistance-state output, bounded action validation status, and enforced critical visibility.</p>
           </div>
           <div className="support-summary-grid">
             <article className="metric-card compact">
@@ -597,6 +641,29 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             <div className="support-caution-banner">
               <strong>Degraded-confidence caveat</strong>
               <p className="muted">{snapshot.support_refinement.degraded_confidence_caution}</p>
+            </div>
+          ) : null}
+          {lastValidation ? (
+            <div className="validation-banner">
+              <div className="alarm-title-row">
+                <strong>Last action validation</strong>
+                <span className={`badge ${validationBadgeTone(lastValidation.outcome)}`}>{lastValidation.outcome}</span>
+              </div>
+              <p className="muted">{lastValidation.explanation}</p>
+              <p className="alarm-meta">Reason code: {lastValidation.reason_code}</p>
+              <p className="lane-why-now">{lastValidation.risk_context}</p>
+              {lastValidation.recommended_safe_alternative ? (
+                <p className="alarm-meta">Safer direction: {lastValidation.recommended_safe_alternative}</p>
+              ) : null}
+              <p className="lane-caution">{lastValidation.confidence_note}</p>
+              <div className="badge-row">
+                <span className={`badge ${lastValidation.requires_confirmation ? "neutral" : "ok"}`}>
+                  {lastValidation.requires_confirmation ? "Confirmation required" : "No confirmation required"}
+                </span>
+                <span className={`badge ${lastValidation.prevented_harm ? "alert" : "neutral"}`}>
+                  {lastValidation.prevented_harm ? "Prevented-harm signal: yes" : "Prevented-harm signal: no"}
+                </span>
+              </div>
             </div>
           ) : null}
           <div className="support-explanation-grid">

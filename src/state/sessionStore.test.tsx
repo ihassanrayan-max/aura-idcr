@@ -121,6 +121,7 @@ describe("AuraSessionStore", () => {
     expect(eventTypes).toContain("plant_tick_recorded");
     expect(eventTypes).toContain("alarm_set_updated");
     expect(eventTypes).toContain("action_requested");
+    expect(eventTypes).toContain("action_validated");
     expect(eventTypes).toContain("operator_action_applied");
     expect(eventTypes).toContain("operator_state_snapshot_recorded");
     expect(eventTypes).toContain("reasoning_snapshot_published");
@@ -163,6 +164,75 @@ describe("AuraSessionStore", () => {
     expect(onsetLaneItems).toContain("fw_action_ack");
     expect(recoveryLaneItems).not.toContain("fw_action_ack");
     expect(recoveryLaneItems).toContain("fw_watch_recovery");
+  });
+
+  it("holds a soft warning action until the operator explicitly confirms it", () => {
+    const store = new AuraSessionStore({ session_index: 20, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    const firstAttemptApplied = store.requestAction({
+      action_id: "act_adjust_feedwater",
+      requested_value: 70,
+      ui_region: "plant_mimic",
+      reason_note: "Soft warning confirmation test",
+    });
+    const warningSnapshot = store.getSnapshot();
+
+    expect(firstAttemptApplied).toBe(false);
+    expect(warningSnapshot.pending_action_confirmation).toBeDefined();
+    expect(warningSnapshot.last_validation_result?.outcome).toBe("soft_warning");
+    expect(warningSnapshot.events.filter((event) => event.event_type === "operator_action_applied")).toHaveLength(0);
+
+    const confirmed = store.confirmPendingAction();
+    const confirmedSnapshot = store.getSnapshot();
+
+    expect(confirmed).toBe(true);
+    expect(confirmedSnapshot.pending_action_confirmation).toBeUndefined();
+    expect(confirmedSnapshot.executed_actions).toHaveLength(1);
+    expect(confirmedSnapshot.events.some((event) => event.event_type === "action_confirmation_recorded")).toBe(true);
+    expect(confirmedSnapshot.events.some((event) => event.event_type === "operator_action_applied")).toBe(true);
+  });
+
+  it("blocks a hard prevent request and logs a prevented-harm signal", () => {
+    const store = new AuraSessionStore({ session_index: 21, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    const applied = store.requestAction({
+      action_id: "act_adjust_feedwater",
+      requested_value: 55,
+      ui_region: "plant_mimic",
+      reason_note: "Hard prevent test",
+    });
+    const snapshot = store.getSnapshot();
+    const validationEvents = snapshot.events.filter((event) => event.event_type === "action_validated");
+    const lastValidationPayload = validationEvents[validationEvents.length - 1]?.payload as Record<string, unknown>;
+
+    expect(applied).toBe(false);
+    expect(snapshot.executed_actions).toHaveLength(0);
+    expect(snapshot.pending_action_confirmation).toBeUndefined();
+    expect(snapshot.last_validation_result?.outcome).toBe("hard_prevent");
+    expect(lastValidationPayload.outcome).toBe("hard_prevent");
+    expect(lastValidationPayload.prevented_harm).toBe(true);
+    expect(snapshot.events.some((event) => event.event_type === "operator_action_applied")).toBe(false);
+  });
+
+  it("keeps low-concern acknowledgement actions quiet and pass-through", () => {
+    const store = new AuraSessionStore({ session_index: 22, tick_duration_sec: 5 });
+    const applied = store.requestAction({
+      action_id: "act_ack_alarm",
+      ui_region: "alarm_area",
+      reason_note: "Validation quiet-pass acknowledgement test",
+    });
+
+    expect(applied).toBe(true);
+    expect(store.getSnapshot().last_validation_result?.outcome).toBe("pass");
+    expect(store.getSnapshot().pending_action_confirmation).toBeUndefined();
   });
 
   it("records deterministic degraded mode early and recovers confidence after a successful correction", () => {
@@ -245,6 +315,30 @@ describe("AuraSessionStore", () => {
     expect(screen.getAllByText(/Why this is emphasized now/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Current assistance mode/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Critical visibility guardrails/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders the bounded soft-warning confirmation flow inside the existing shell", () => {
+    const store = new AuraSessionStore({ session_index: 23, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    act(() => {
+      store.requestAction({
+        action_id: "act_adjust_feedwater",
+        requested_value: 70,
+        ui_region: "plant_mimic",
+        reason_note: "HMI soft warning render test",
+      });
+    });
+
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByText(/Soft warning confirmation required/i)).toBeInTheDocument();
+    expect(screen.getByText(/Confirm and apply action/i)).toBeInTheDocument();
+    expect(screen.getByText(/Validation pending confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
   });
 
   it("keeps critical alarms visibly pinned in the alarm area when they are active", () => {

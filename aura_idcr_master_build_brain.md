@@ -763,7 +763,7 @@ Use these statuses exactly:
 ### Phase 4 — Adaptive Assistance + Interceptor
 - [x] Assistance mode logic — **Done**
 - [ ] Adaptive UI behavior — **Partial**
-- [ ] Action validator / interceptor — **Not Started**
+- [x] Action validator / interceptor — **Done**
 - [x] Critical-visibility guarantees — **Done**
 - [ ] Override logic — **Not Started**
 
@@ -785,13 +785,13 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Phase 4 slice 1 is now implemented for the deterministic feedwater-side / Loss of Feedwater scenario family.
+Phase 4 slice 2 is now implemented for the deterministic feedwater-side / Loss of Feedwater scenario family.
 
-The immediate next recommended step is the next narrow Phase 4 slice:
-1. deterministic pass / soft warning / hard prevent action-validation behavior using the now-live assistance-mode and critical-visibility state,
-2. explanation text for validator outcomes only,
-3. no override workflows, replay/reporting expansion, or evaluation harness work unless the human explicitly opens that scope,
-4. no broad UI redesign beyond compact validator messaging inside the existing shell regions.
+The immediate next recommended step should stay narrow and inside remaining Phase 4 scope:
+1. finish the still-partial bounded adaptive UI behavior around validator/support cues inside the existing shell,
+2. add only compact supervisor-facing intervention markers if the human explicitly wants that slice,
+3. continue to defer override workflows, replay/reporting expansion, KPI dashboards, and evaluation harness work unless the human explicitly opens that scope,
+4. keep the validator deterministic, quiet by default, and bounded to the current feedwater-side scenario family.
 
 Do not replace the current Phase 2 storyline/procedure structures, and do not jump into broad evaluation or stretch features unless the human explicitly opens that phase.
 
@@ -951,6 +951,24 @@ Use this section to track meaningful progress across sessions.
   - None in the current Phase 4 slice 1 implementation
 - Next recommended step:
   - Begin the next narrow Phase 4 slice that adds deterministic action-validation outcomes and explanation messages while continuing to defer override workflows, replay/reporting, and broader UI changes until explicitly requested
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 4 slice 2 session
+- Task worked on: Phase 4 slice 2 bounded deterministic action validator / interceptor with pass-soft warning-hard prevent behavior for the bounded feedwater-side scenario family
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` and the checked-in contract/KPI docs with additive validator types, latest validation session state, pending soft-warning confirmation state, and an explicit `action_confirmation_recorded` event while preserving the existing event taxonomy and KPI minimum payloads
+  - Added `src/runtime/actionValidator.ts` to deterministically classify the bounded existing operator action set into `pass`, `soft_warning`, and `hard_prevent` using current support mode, combined risk, plant severity, escalation markers, reasoning state, first-response lane relevance, degraded confidence, and requested feedwater value against the bounded recovery path
+  - Updated `src/state/sessionStore.ts` so operator actions now flow through `action_requested` -> `action_validated` -> applied / held-for-confirmation / blocked, with explicit soft-warning confirmation handling, replay-inspectable validation payloads, and no hidden autonomous plant action behavior
+  - Updated `src/App.tsx` and `src/styles.css` so the existing shell now shows live validation-ready state, inline soft-warning confirmation, hard-prevent / warning explanation text, and compact last-validation status inside the existing procedure/support regions without a broad layout redesign
+  - Added focused tests in `src/runtime/actionValidator.test.ts` and extended `src/state/sessionStore.test.tsx`, then verified the slice with focused validator/store tests, the full test suite, and `npm run build`
+- What remains:
+  - Adaptive UI behavior is still only partial because this slice intentionally stayed inside compact existing-shell messaging rather than broader interface adaptation
+  - Override workflows, replay/reporting UI, KPI dashboards, evaluation harness work, and additional scenarios remain intentionally untouched
+- Blockers:
+  - None in the current Phase 4 slice 2 implementation
+- Next recommended step:
+  - If the human wants to stay in Phase 4, take the next narrow slice on remaining bounded adaptive UI behavior and compact supervisor-facing intervention markers while continuing to defer override workflows and later-phase evaluation work
 
 ---
 

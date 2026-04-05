@@ -185,7 +185,7 @@ export const scnAlarmCascadeRootCause: ScenarioDefinition = {
       allowed_phase_ids: ["phase_onset", "phase_stabilization"],
       can_change_progression: true,
       unsafe_if_misused: true,
-      requires_validation: false,
+      requires_validation: true,
       effect_note:
         "A proper setpoint correction restores vessel inventory; a poor correction worsens the event deterministically.",
     },

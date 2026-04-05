@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from "react";
 import type {
   ActionRequest,
+  ActionValidationResult,
   AlarmIntelligenceSnapshot,
   CombinedRiskSnapshot,
+  PendingActionConfirmation,
   ExecutedAction,
   FirstResponseLane,
   LoggedAlarmState,
@@ -43,6 +45,7 @@ import { buildReasoningSnapshot, createReasoningRuntimeState, type ReasoningRunt
 import { SessionLogger } from "../runtime/sessionLogger";
 import { buildSupportRefinement } from "../runtime/supportRefinement";
 import { createSupportModeRuntimeState, resolveSupportModePolicy } from "../runtime/supportModePolicy";
+import { validateAction } from "../runtime/actionValidator";
 
 type SessionStoreOptions = {
   scenario?: ScenarioDefinition;
@@ -114,6 +117,23 @@ function summarizeSupportPolicy(support_policy: SupportPolicySnapshot) {
   };
 }
 
+function summarizeValidationResult(validation_result: ActionValidationResult) {
+  return {
+    action_request_id: validation_result.action_request_id,
+    outcome: validation_result.outcome,
+    reason_code: validation_result.reason_code,
+    prevented_harm: validation_result.prevented_harm ?? false,
+    nuisance_flag: validation_result.nuisance_flag ?? false,
+    requires_confirmation: validation_result.requires_confirmation,
+    override_allowed: validation_result.override_allowed,
+    explanation: validation_result.explanation,
+    risk_context: validation_result.risk_context,
+    confidence_note: validation_result.confidence_note,
+    recommended_safe_alternative: validation_result.recommended_safe_alternative,
+    affected_variable_ids: validation_result.affected_variable_ids,
+  };
+}
+
 function criticalEscalationActive(active_alarm_ids: string[]): boolean {
   return ["ALM_RPV_LEVEL_LOW_LOW", "ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].some((alarm_id) =>
     active_alarm_ids.includes(alarm_id),
@@ -128,6 +148,7 @@ export class AuraSessionStore {
   private readonly logger: SessionLogger;
 
   private action_sequence = 0;
+  private validation_sequence = 0;
   private activation_sequence = 0;
   private scenario_runtime_state: ScenarioRuntimeState;
   private alarm_runtime_state: AlarmRuntimeState;
@@ -450,8 +471,10 @@ export class AuraSessionStore {
       alarm_history,
       events: this.logger.list(),
       executed_actions: [],
+      last_validation_result: undefined,
+      pending_action_confirmation: undefined,
       logging_active: true,
-      validation_status_available: false,
+      validation_status_available: true,
     };
   }
 
@@ -515,6 +538,7 @@ export class AuraSessionStore {
 
   reset(): void {
     this.action_sequence = 0;
+    this.validation_sequence = 0;
     this.activation_sequence = 0;
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
@@ -525,8 +549,103 @@ export class AuraSessionStore {
     this.emit();
   }
 
+  private applyAcceptedAction(
+    action_request: ActionRequest,
+    validation_result: ActionValidationResult,
+    pending_action_confirmation?: PendingActionConfirmation,
+  ): boolean {
+    const action_result = applyOperatorAction(this.snapshot.plant_tick.plant_state, this.plant_internal_state, action_request);
+    this.plant_internal_state = action_result.internal_state;
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "operator_action_applied",
+      source_module: "plant_twin",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_id: action_request.action_id,
+        action_class: action_result.action_class,
+        correctness_label: action_result.correctness_label,
+        resulting_state_change: action_result.resulting_state_change,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: action_request.action_request_id }],
+    });
+
+    const executed_action: ExecutedAction = {
+      ...action_request,
+      applied: true,
+    };
+
+    this.snapshot = {
+      ...this.snapshot,
+      executed_actions: [...this.snapshot.executed_actions, executed_action],
+      last_validation_result: validation_result,
+      pending_action_confirmation,
+      events: this.logger.list(),
+    };
+    this.emit();
+    return true;
+  }
+
+  private publishValidationResult(action_request: ActionRequest, validation_result: ActionValidationResult): void {
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "action_validated",
+      source_module: "action_validator",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_id: action_request.action_id,
+        ...summarizeValidationResult(validation_result),
+      },
+      trace_refs: [
+        { ref_type: "action_id", ref_value: action_request.action_request_id },
+        { ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id },
+      ],
+    });
+  }
+
+  confirmPendingAction(): boolean {
+    if (this.snapshot.outcome || !this.snapshot.pending_action_confirmation) {
+      return false;
+    }
+
+    const pending_confirmation = this.snapshot.pending_action_confirmation;
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "action_confirmation_recorded",
+      source_module: "action_validator",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_request_id: pending_confirmation.action_request.action_request_id,
+        action_id: pending_confirmation.action_request.action_id,
+        original_outcome: pending_confirmation.validation_result.outcome,
+        confirmation_status: "confirmed",
+        reason_code: pending_confirmation.validation_result.reason_code,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: pending_confirmation.action_request.action_request_id }],
+    });
+
+    return this.applyAcceptedAction(
+      pending_confirmation.action_request,
+      pending_confirmation.validation_result,
+      undefined,
+    );
+  }
+
+  dismissPendingActionConfirmation(): void {
+    if (!this.snapshot.pending_action_confirmation) {
+      return;
+    }
+
+    this.snapshot = {
+      ...this.snapshot,
+      pending_action_confirmation: undefined,
+    };
+    this.emit();
+  }
+
   requestAction(params: ActionRequestParams): boolean {
-    if (this.snapshot.outcome) {
+    if (this.snapshot.outcome || this.snapshot.pending_action_confirmation) {
       return false;
     }
 
@@ -563,39 +682,47 @@ export class AuraSessionStore {
       trace_refs: [{ ref_type: "action_id", ref_value: action_request.action_request_id }],
     });
 
-    const action_result = applyOperatorAction(
-      this.snapshot.plant_tick.plant_state,
-      this.plant_internal_state,
+    this.validation_sequence += 1;
+    const validation_result = validateAction({
       action_request,
-    );
-    this.plant_internal_state = action_result.internal_state;
-
-    this.logger.append({
-      sim_time_sec: this.snapshot.sim_time_sec,
-      event_type: "operator_action_applied",
-      source_module: "plant_twin",
-      phase_id: this.snapshot.current_phase.phase_id,
-      payload: {
-        action_id: action_request.action_id,
-        action_class: action_result.action_class,
-        correctness_label: action_result.correctness_label,
-        resulting_state_change: action_result.resulting_state_change,
-      },
-      trace_refs: [{ ref_type: "action_id", ref_value: action_request.action_request_id }],
+      allowed_action,
+      plant_state: this.snapshot.plant_tick.plant_state,
+      alarm_set: this.snapshot.alarm_set,
+      reasoning_snapshot: this.snapshot.reasoning_snapshot,
+      combined_risk: this.snapshot.combined_risk,
+      operator_state: this.snapshot.operator_state,
+      support_mode: this.snapshot.support_mode,
+      first_response_lane: this.snapshot.first_response_lane,
+      validation_sequence: this.validation_sequence,
     });
+    this.publishValidationResult(action_request, validation_result);
 
-    const executed_action: ExecutedAction = {
-      ...action_request,
-      applied: true,
-    };
+    if (validation_result.outcome === "hard_prevent") {
+      this.snapshot = {
+        ...this.snapshot,
+        last_validation_result: validation_result,
+        pending_action_confirmation: undefined,
+        events: this.logger.list(),
+      };
+      this.emit();
+      return false;
+    }
 
-    this.snapshot = {
-      ...this.snapshot,
-      executed_actions: [...this.snapshot.executed_actions, executed_action],
-      events: this.logger.list(),
-    };
-    this.emit();
-    return true;
+    if (validation_result.outcome === "soft_warning") {
+      this.snapshot = {
+        ...this.snapshot,
+        last_validation_result: validation_result,
+        pending_action_confirmation: {
+          action_request,
+          validation_result,
+        },
+        events: this.logger.list(),
+      };
+      this.emit();
+      return false;
+    }
+
+    return this.applyAcceptedAction(action_request, validation_result, undefined);
   }
 
   advanceTick(): SessionSnapshot {

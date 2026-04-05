@@ -366,7 +366,8 @@ pre {
 }
 
 .storyline-context-card,
-.support-caution-banner {
+.support-caution-banner,
+.validation-banner {
   border-radius: 12px;
   background: rgba(17, 37, 55, 0.94);
   padding: 0.85rem;
@@ -404,6 +405,12 @@ pre {
 .support-caution-banner {
   margin: 0.75rem 0;
   border-left: 4px solid rgba(201, 96, 96, 0.65);
+}
+
+.validation-banner {
+  display: grid;
+  gap: 0.55rem;
+  border-left: 4px solid rgba(91, 166, 220, 0.65);
 }
 
 .support-caution-banner p {

@@ -1,6 +1,7 @@
 export type SessionMode = "baseline" | "adaptive";
 export type AlarmPriority = "P1" | "P2" | "P3";
 export type ActorRole = "operator" | "shift_supervisor" | "trainer_evaluator" | "system";
+export type ValidationOutcome = "pass" | "soft_warning" | "hard_prevent";
 export type SourceModule =
   | "scenario_engine"
   | "plant_twin"
@@ -187,6 +188,28 @@ export type ActionRequest = {
   reason_note?: string;
 };
 
+export type ActionValidationResult = {
+  validation_result_id: string;
+  action_request_id: string;
+  sim_time_sec: number;
+  outcome: ValidationOutcome;
+  requires_confirmation: boolean;
+  override_allowed: boolean;
+  reason_code: string;
+  explanation: string;
+  risk_context: string;
+  confidence_note: string;
+  affected_variable_ids: string[];
+  prevented_harm?: boolean;
+  nuisance_flag?: boolean;
+  recommended_safe_alternative?: string;
+};
+
+export type PendingActionConfirmation = {
+  action_request: ActionRequest;
+  validation_result: ActionValidationResult;
+};
+
 export type HypothesisEvidence = {
   evidence_id: string;
   label: string;
@@ -320,6 +343,7 @@ export type SessionLogEventType =
   | "operator_state_snapshot_recorded"
   | "action_requested"
   | "action_validated"
+  | "action_confirmation_recorded"
   | "operator_action_applied"
   | "diagnosis_committed"
   | "scenario_outcome_recorded"
@@ -377,6 +401,8 @@ export type SessionSnapshot = {
   alarm_history: LoggedAlarmState[];
   events: SessionLogEvent[];
   executed_actions: ExecutedAction[];
+  last_validation_result?: ActionValidationResult;
+  pending_action_confirmation?: PendingActionConfirmation;
   outcome?: ScenarioOutcome;
   logging_active: boolean;
   validation_status_available: boolean;

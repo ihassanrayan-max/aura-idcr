@@ -219,6 +219,7 @@ type SessionLogEventType =
   | "operator_state_snapshot_recorded"
   | "action_requested"
   | "action_validated"
+  | "action_confirmation_recorded"
   | "operator_action_applied"
   | "diagnosis_committed"
   | "scenario_outcome_recorded"
@@ -235,6 +236,23 @@ Required notes:
 - Phase 3 may extend `reasoning_snapshot_published` with additive combined-risk fields such as `combined_risk_score`, `combined_risk_band`, `top_contributing_factors`, and `confidence_caveat`.
 - Phase 3 support refinement may add shallow fields such as `current_support_focus`, `emphasized_lane_item_ids`, `summary_explanation`, `watch_now_summary`, `degraded_confidence_caution`, and `wording_style` without replacing the base reasoning payload.
 - Phase 4 assistance policy may add shallow fields such as `support_mode`, `current_mode_reason`, `transition_reason`, `mode_change_summary`, `support_behavior_changes`, `degraded_confidence_effect`, and compact critical-visibility summaries without replacing the base reasoning payload.
+- Phase 4 action validation may add shallow `action_validated` fields such as `explanation`, `risk_context`, `confidence_note`, and `recommended_safe_alternative`, plus the additive `action_confirmation_recorded` event for explicit soft-warning confirmation logging.
+
+## `PendingActionConfirmation`
+
+`PendingActionConfirmation` is the compact session-facing state published when a soft warning is waiting for explicit operator confirmation.
+
+```ts
+type PendingActionConfirmation = {
+  action_request: ActionRequest
+  validation_result: ActionValidationResult
+}
+```
+
+Required notes:
+
+- This state exists only while a `soft_warning` is awaiting confirmation.
+- It is additive session state for HMI flow control and replay inspection, not a replacement for canonical log events.
 
 ## `KpiSummary`
 

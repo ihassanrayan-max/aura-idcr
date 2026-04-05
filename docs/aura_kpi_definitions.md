@@ -32,6 +32,8 @@ Phase 3 additive note:
 - `operator_state_snapshot_recorded` may add `degraded_mode_active`, `degraded_mode_reason`, and `observation_window_ticks` without changing the KPI minimums above.
 - `reasoning_snapshot_published` may add `combined_risk_score`, `combined_risk_band`, `top_contributing_factors`, and `confidence_caveat` so the additive risk layer remains replay-inspectable.
 - `support_mode_changed` may add `current_mode_reason`, `support_behavior_changes`, `degraded_confidence_effect`, and compact critical-visibility summaries without changing the KPI minimums above.
+- `action_validated` may add shallow explanation fields such as `explanation`, `risk_context`, `confidence_note`, and `recommended_safe_alternative`, while keeping the minimum KPI payload unchanged.
+- `action_confirmation_recorded` may be emitted for explicit soft-warning confirmation logging, but KPI calculations should continue to treat `action_validated` as the authoritative intervention event.
 
 ## KPI Sheet
 
