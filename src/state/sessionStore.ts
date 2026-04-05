@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from "react";
 import type {
   ActionRequest,
+  AlarmIntelligenceSnapshot,
   ExecutedAction,
+  FirstResponseLane,
   LoggedAlarmState,
   PlantTick,
+  ReasoningSnapshot,
   ScenarioDefinition,
   ScenarioOutcome,
   SessionSnapshot,
@@ -11,6 +14,7 @@ import type {
 import { scnAlarmCascadeRootCause } from "../scenarios/scn_alarm_cascade_root_cause";
 import { alarmDictionaryById } from "../data/alarmDictionary";
 import { evaluateAlarmSet, createAlarmRuntimeState, type AlarmRuntimeState } from "../runtime/alarmEngine";
+import { buildAlarmIntelligence } from "../runtime/alarmIntelligence";
 import {
   advancePhaseIfNeeded,
   consumeTriggeredInjections,
@@ -27,6 +31,8 @@ import {
   stepPlantTwin,
   type PlantTwinInternalState,
 } from "../runtime/plantTwin";
+import { buildFirstResponseLane } from "../runtime/procedureLane";
+import { buildReasoningSnapshot, createReasoningRuntimeState, type ReasoningRuntimeState } from "../runtime/reasoningEngine";
 import { SessionLogger } from "../runtime/sessionLogger";
 
 type SessionStoreOptions = {
@@ -42,6 +48,34 @@ type ActionRequestParams = {
   reason_note?: string;
 };
 
+function summarizeAlarmClusters(alarm_intelligence: AlarmIntelligenceSnapshot) {
+  return alarm_intelligence.clusters.map((cluster) => ({
+    cluster_id: cluster.cluster_id,
+    title: cluster.title,
+    priority: cluster.priority,
+    alarm_ids: cluster.alarm_ids,
+    critical_alarm_ids: cluster.critical_alarm_ids,
+  }));
+}
+
+function summarizeLaneItems(first_response_lane: FirstResponseLane) {
+  return first_response_lane.items.map((item) => ({
+    item_id: item.item_id,
+    item_kind: item.item_kind,
+    recommended_action_id: item.recommended_action_id,
+  }));
+}
+
+function laneSummaryKey(first_response_lane: FirstResponseLane): string {
+  return JSON.stringify(summarizeLaneItems(first_response_lane));
+}
+
+function criticalEscalationActive(active_alarm_ids: string[]): boolean {
+  return ["ALM_RPV_LEVEL_LOW_LOW", "ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].some((alarm_id) =>
+    active_alarm_ids.includes(alarm_id),
+  );
+}
+
 export class AuraSessionStore {
   private readonly scenario: ScenarioDefinition;
   private readonly session_id: string;
@@ -53,6 +87,7 @@ export class AuraSessionStore {
   private activation_sequence = 0;
   private scenario_runtime_state: ScenarioRuntimeState;
   private alarm_runtime_state: AlarmRuntimeState;
+  private reasoning_runtime_state: ReasoningRuntimeState;
   private plant_internal_state: PlantTwinInternalState;
   private snapshot: SessionSnapshot;
 
@@ -63,8 +98,44 @@ export class AuraSessionStore {
     this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
+    this.reasoning_runtime_state = createReasoningRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
     this.snapshot = this.createInitialSnapshot();
+  }
+
+  private buildPhase2State(params: {
+    sim_time_sec: number;
+    plant_state: PlantTick["plant_state"];
+    alarm_set: SessionSnapshot["alarm_set"];
+    allowed_action_ids: string[];
+  }): {
+    alarm_intelligence: AlarmIntelligenceSnapshot;
+    reasoning_snapshot: ReasoningSnapshot;
+    first_response_lane: FirstResponseLane;
+  } {
+    const alarm_intelligence = buildAlarmIntelligence(params.alarm_set);
+    const reasoning_result = buildReasoningSnapshot({
+      plant_state: params.plant_state,
+      alarm_set: params.alarm_set,
+      alarm_intelligence,
+      previous_state: this.reasoning_runtime_state,
+      expected_root_cause_hypothesis_id: this.scenario.expected_root_cause_hypothesis_id,
+    });
+    this.reasoning_runtime_state = reasoning_result.runtime_state;
+
+    const first_response_lane = buildFirstResponseLane({
+      sim_time_sec: params.sim_time_sec,
+      plant_state: params.plant_state,
+      alarm_set: params.alarm_set,
+      reasoning_snapshot: reasoning_result.reasoning_snapshot,
+      allowed_action_ids: params.allowed_action_ids,
+    });
+
+    return {
+      alarm_intelligence,
+      reasoning_snapshot: reasoning_result.reasoning_snapshot,
+      first_response_lane,
+    };
   }
 
   private createInitialSnapshot(): SessionSnapshot {
@@ -109,6 +180,7 @@ export class AuraSessionStore {
         active_alarm_cluster_count: initial_alarm_eval.alarm_set.active_alarm_cluster_count,
       },
     };
+    const initial_alarm_intelligence = buildAlarmIntelligence(initial_alarm_eval.alarm_set);
 
     const session_started_event = this.logger.append({
       sim_time_sec: 0,
@@ -160,6 +232,34 @@ export class AuraSessionStore {
         active_alarm_cluster_count: initial_alarm_eval.alarm_set.active_alarm_cluster_count,
         highest_priority_active: initial_alarm_eval.alarm_set.highest_priority_active,
         active_alarm_ids: initial_alarm_eval.alarm_set.active_alarm_ids,
+        visible_alarm_card_count: initial_alarm_intelligence.visible_alarm_card_count,
+        compression_ratio: initial_alarm_intelligence.compression_ratio,
+        cluster_summaries: summarizeAlarmClusters(initial_alarm_intelligence),
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
+    });
+
+    const phase2_state = this.buildPhase2State({
+      sim_time_sec: 0,
+      plant_state: tick_with_alarm_counts.plant_state,
+      alarm_set: initial_alarm_eval.alarm_set,
+      allowed_action_ids: initial_phase.allowed_action_ids ?? [],
+    });
+    const reasoning_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "reasoning_snapshot_published",
+      source_module: "reasoning_layer",
+      phase_id: initial_phase.phase_id,
+      payload: {
+        top_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+        ranked_hypothesis_ids: phase2_state.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => hypothesis.hypothesis_id),
+        confidence_band: phase2_state.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low",
+        stable_for_ticks: phase2_state.reasoning_snapshot.stable_for_ticks,
+        changed_since_last_tick: phase2_state.reasoning_snapshot.changed_since_last_tick,
+        dominant_summary: phase2_state.reasoning_snapshot.dominant_summary,
+        expected_root_cause_aligned: phase2_state.reasoning_snapshot.expected_root_cause_aligned,
+        lane_item_ids: phase2_state.first_response_lane.items.map((item) => item.item_id),
+        lane_items: summarizeLaneItems(phase2_state.first_response_lane),
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
     });
@@ -176,9 +276,18 @@ export class AuraSessionStore {
       tick_index: 0,
       plant_tick: {
         ...tick_with_alarm_counts,
-        source_event_ids: [session_started_event.event_id, phase_changed_event.event_id, plant_tick_event.event_id, alarm_event.event_id],
+        source_event_ids: [
+          session_started_event.event_id,
+          phase_changed_event.event_id,
+          plant_tick_event.event_id,
+          alarm_event.event_id,
+          reasoning_event.event_id,
+        ],
       },
       alarm_set: initial_alarm_eval.alarm_set,
+      alarm_intelligence: phase2_state.alarm_intelligence,
+      reasoning_snapshot: phase2_state.reasoning_snapshot,
+      first_response_lane: phase2_state.first_response_lane,
       alarm_history,
       events: this.logger.list(),
       executed_actions: [],
@@ -250,6 +359,7 @@ export class AuraSessionStore {
     this.activation_sequence = 0;
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
+    this.reasoning_runtime_state = createReasoningRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
     this.snapshot = this.createInitialSnapshot();
     this.emit();
@@ -399,6 +509,16 @@ export class AuraSessionStore {
       previous_alarm_runtime_state: this.alarm_runtime_state,
     });
     this.alarm_runtime_state = alarm_evaluation.alarm_runtime_state;
+    const phase2_state = this.buildPhase2State({
+      sim_time_sec,
+      plant_state: {
+        ...stepped.plant_state,
+        alarm_load_count: alarm_evaluation.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: alarm_evaluation.alarm_set.active_alarm_cluster_count,
+      },
+      alarm_set: alarm_evaluation.alarm_set,
+      allowed_action_ids: current_phase.allowed_action_ids ?? [],
+    });
 
     const plant_tick: PlantTick = {
       tick_id: next_tick_id,
@@ -447,9 +567,58 @@ export class AuraSessionStore {
         active_alarm_cluster_count: alarm_evaluation.alarm_set.active_alarm_cluster_count,
         highest_priority_active: alarm_evaluation.alarm_set.highest_priority_active,
         active_alarm_ids: alarm_evaluation.alarm_set.active_alarm_ids,
+        visible_alarm_card_count: phase2_state.alarm_intelligence.visible_alarm_card_count,
+        compression_ratio: phase2_state.alarm_intelligence.compression_ratio,
+        cluster_summaries: summarizeAlarmClusters(phase2_state.alarm_intelligence),
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
     });
+    const lane_changed =
+      laneSummaryKey(this.snapshot.first_response_lane) !== laneSummaryKey(phase2_state.first_response_lane) ||
+      this.snapshot.reasoning_snapshot.dominant_hypothesis_id !== phase2_state.reasoning_snapshot.dominant_hypothesis_id;
+    const reasoning_event = this.logger.append({
+      sim_time_sec,
+      event_type: "reasoning_snapshot_published",
+      source_module: "reasoning_layer",
+      phase_id: current_phase.phase_id,
+      payload: {
+        top_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+        ranked_hypothesis_ids: phase2_state.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => hypothesis.hypothesis_id),
+        confidence_band: phase2_state.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low",
+        stable_for_ticks: phase2_state.reasoning_snapshot.stable_for_ticks,
+        changed_since_last_tick: phase2_state.reasoning_snapshot.changed_since_last_tick,
+        dominant_summary: phase2_state.reasoning_snapshot.dominant_summary,
+        expected_root_cause_aligned: phase2_state.reasoning_snapshot.expected_root_cause_aligned,
+        lane_changed,
+        lane_item_ids: phase2_state.first_response_lane.items.map((item) => item.item_id),
+        lane_items: summarizeLaneItems(phase2_state.first_response_lane),
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+    });
+    let diagnosis_event_id: string | undefined;
+    if (
+      phase2_state.reasoning_snapshot.dominant_hypothesis_id &&
+      phase2_state.reasoning_snapshot.stable_for_ticks >= 2 &&
+      this.reasoning_runtime_state.last_committed_hypothesis_id !== phase2_state.reasoning_snapshot.dominant_hypothesis_id
+    ) {
+      const diagnosis_event = this.logger.append({
+        sim_time_sec,
+        event_type: "diagnosis_committed",
+        source_module: "reasoning_layer",
+        phase_id: current_phase.phase_id,
+        payload: {
+          diagnosis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+          matches_expected_root_cause: phase2_state.reasoning_snapshot.expected_root_cause_aligned,
+        },
+        trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+      });
+      diagnosis_event_id = diagnosis_event.event_id;
+      this.reasoning_runtime_state = {
+        ...this.reasoning_runtime_state,
+        diagnosis_committed: true,
+        last_committed_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+      };
+    }
 
     let outcome: ScenarioOutcome | undefined;
     const outcome_context = {
@@ -457,26 +626,32 @@ export class AuraSessionStore {
       executed_actions: this.snapshot.executed_actions,
       elapsed_time_sec: sim_time_sec,
     };
+    const diagnosis_ready =
+      phase2_state.reasoning_snapshot.expected_root_cause_aligned && phase2_state.reasoning_snapshot.stable_for_ticks >= 2;
+    const stabilized_alarm_picture =
+      !criticalEscalationActive(alarm_evaluation.alarm_set.active_alarm_ids) && alarm_evaluation.alarm_set.active_alarm_count <= 2;
 
     if (evaluateCondition(this.scenario.failure_condition, outcome_context)) {
       outcome = {
         outcome: "failure",
         stabilized: false,
-        message: "The plant reached an unsafe failure marker before stabilization.",
+        message: "The plant crossed a hard escalation marker before the Phase 2 response path could stabilize it.",
         sim_time_sec,
       };
-    } else if (evaluateCondition(this.scenario.success_condition, outcome_context)) {
+    } else if (evaluateCondition(this.scenario.success_condition, outcome_context) && diagnosis_ready && stabilized_alarm_picture) {
       outcome = {
         outcome: "success",
         stabilized: true,
-        message: "The operator corrected feedwater and the plant stabilized within the bounded window.",
+        message: "The feedwater-side diagnosis converged, the bounded first-response path was relevant, and the plant stabilized.",
         sim_time_sec,
       };
     } else if (evaluateCondition(this.scenario.timeout_condition, outcome_context)) {
       outcome = {
         outcome: "timeout",
         stabilized: false,
-        message: "The response window expired before the plant reached a stable recovery state.",
+        message: diagnosis_ready
+          ? "The response window expired before alarms and plant state fully stabilized."
+          : "The response window expired before the dominant hypothesis stabilized into a successful recovery path.",
         sim_time_sec,
       };
     }
@@ -492,6 +667,9 @@ export class AuraSessionStore {
           success: outcome.outcome === "success",
           failure_reason: outcome.message,
           stabilized: outcome.stabilized,
+          dominant_hypothesis_id: phase2_state.reasoning_snapshot.dominant_hypothesis_id,
+          diagnosis_ready,
+          remaining_alarm_count: alarm_evaluation.alarm_set.active_alarm_count,
         },
         trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
       });
@@ -521,9 +699,14 @@ export class AuraSessionStore {
       tick_index: this.snapshot.tick_index + 1,
       plant_tick: {
         ...plant_tick,
-        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id],
+        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id, reasoning_event.event_id].concat(
+          diagnosis_event_id ? [diagnosis_event_id] : [],
+        ),
       },
       alarm_set: alarm_evaluation.alarm_set,
+      alarm_intelligence: phase2_state.alarm_intelligence,
+      reasoning_snapshot: phase2_state.reasoning_snapshot,
+      first_response_lane: phase2_state.first_response_lane,
       alarm_history,
       events: this.logger.list(),
       outcome,

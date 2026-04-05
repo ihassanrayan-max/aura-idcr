@@ -190,6 +190,7 @@ export const scnAlarmCascadeRootCause: ScenarioDefinition = {
         "A proper setpoint correction restores vessel inventory; a poor correction worsens the event deterministically.",
     },
   ],
+  expected_root_cause_hypothesis_id: "hyp_feedwater_degradation",
   success_condition: {
     all: [
       { action: { action_id: "act_adjust_feedwater", performed: true } },
@@ -205,6 +206,20 @@ export const scnAlarmCascadeRootCause: ScenarioDefinition = {
           variable_id: "vessel_pressure_mpa",
           operator: "lte",
           value: 7.35,
+        },
+      },
+      {
+        variable: {
+          variable_id: "feedwater_flow_pct",
+          operator: "gte",
+          value: 76,
+        },
+      },
+      {
+        variable: {
+          variable_id: "active_alarm_cluster_count",
+          operator: "lte",
+          value: 2,
         },
       },
       { elapsed_time_sec_gte: 120 },

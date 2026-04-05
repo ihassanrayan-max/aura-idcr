@@ -747,11 +747,11 @@ Use these statuses exactly:
 - [x] One deterministic scenario end to end — **Done**
 
 ### Phase 2 — Alarm Intelligence + Procedure Support
-- [ ] Alarm clustering — **Not Started**
-- [ ] Event storyline engine — **Not Started**
-- [ ] Ranked root-cause support — **Not Started**
-- [ ] Dynamic first-response lane — **Not Started**
-- [ ] Scenario success/failure logic — **Not Started**
+- [x] Alarm clustering — **Done**
+- [x] Event storyline engine — **Done**
+- [x] Ranked root-cause support — **Done**
+- [x] Dynamic first-response lane — **Done**
+- [x] Scenario success/failure logic — **Done**
 
 ### Phase 3 — Human Monitoring + Reasoning
 - [ ] Operator-state feature extraction — **Not Started**
@@ -785,17 +785,16 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Phase 0 is now frozen through the contract package in `docs/`.
+Phase 2 is now implemented for the first deterministic feedwater-side slice.
 
-The immediate next deliverables should move to **Phase 1 — First End-to-End Slice**:
-1. build the plant twin skeleton against the canonical variable schema,
-2. build the baseline HMI shell against the HMI layout agreement,
-3. build the basic alarm list from the alarm dictionary,
-4. build the control input path against the scenario action contract,
-5. build the session logging backbone against the shared event taxonomy,
-6. run one deterministic scenario end to end using the shared scenario schema.
+The immediate next deliverables should remain out of scope for this repo session unless the human explicitly requests them:
+1. Phase 3 operator-state feature extraction,
+2. workload/attention proxy outputs,
+3. sensor confidence / degraded mode,
+4. combined risk reasoning,
+5. explanation outputs.
 
-Do not skip these interfaces or invent alternate schemas during Phase 1.
+Do not skip or replace the current Phase 2 structures, and do not jump into later adaptive or evaluation features unless the human explicitly opens that phase.
 
 ---
 
@@ -882,6 +881,24 @@ Use this section to track meaningful progress across sessions.
   - None for the Phase 1 slice currently implemented
 - Next recommended step:
   - Hold scope and begin Phase 2 only when the human explicitly requests alarm intelligence and procedure-support work
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 2 alarm intelligence session
+- Task worked on: Phase 2 alarm intelligence, storyline, first-response, and outcome refinement for the deterministic feedwater slice
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` with additive Phase 2 snapshot types for grouped alarm intelligence, ranked hypotheses, and the dynamic first-response lane
+  - Added rule-based runtime modules for alarm clustering, transparent hypothesis ranking, and bounded first-response mapping on top of the existing deterministic plant and alarm loop
+  - Updated `src/state/sessionStore.ts` so each tick now publishes grouped alarm state, reasoning snapshots, diagnosis commits, first-response lane updates, and assistance-aware deterministic outcome logic
+  - Updated `src/App.tsx` and `src/styles.css` so the alarm area, storyline area, and first-response lane are now real Phase 2 operator-facing panels while the rest of the shell remains stable
+  - Refined `src/scenarios/scn_alarm_cascade_root_cause.ts` with the expected root-cause marker and stronger deterministic stabilization criteria
+  - Extended `src/state/sessionStore.test.tsx` to verify alarm overload reduction, dominant-hypothesis stability, lane updates, deterministic replay, and required Phase 2 log events
+- What remains:
+  - Phase 3 human monitoring, workload proxies, combined risk reasoning, adaptive assistance, validation/interception, replay/reporting UI, and all stretch items remain intentionally untouched
+- Blockers:
+  - None in the current Phase 2 slice
+- Next recommended step:
+  - Hold scope and begin Phase 3 only when the human explicitly requests human-state and combined-reasoning work
 
 ---
 

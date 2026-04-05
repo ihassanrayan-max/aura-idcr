@@ -73,7 +73,7 @@ pre {
 
 .top-status-bar h1,
 .panel-header h2,
-.procedure-placeholder h3 {
+.control-block h3 {
   margin: 0;
 }
 
@@ -200,11 +200,18 @@ pre {
 .metric-card,
 .alarm-card,
 .log-card,
-.procedure-placeholder,
+.storyline-card,
+.storyline-item,
+.evidence-card,
+.procedure-item,
 .control-block {
   border-radius: 12px;
   background: rgba(14, 31, 46, 0.94);
   padding: 0.9rem;
+}
+
+.metric-card.compact {
+  padding: 0.75rem;
 }
 
 .metric-label {
@@ -215,9 +222,20 @@ pre {
 }
 
 .alarm-list,
-.log-list {
+.log-list,
+.storyline-list,
+.procedure-list,
+.cluster-detail-list,
+.evidence-list {
   display: grid;
   gap: 0.75rem;
+}
+
+.alarm-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .alarm-card.active {
@@ -253,6 +271,25 @@ pre {
   font-size: 0.83rem;
 }
 
+.cluster-badges {
+  margin: 0.6rem 0;
+}
+
+.priority-chip {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.alarm-card.nested {
+  margin-top: 0;
+  padding: 0.75rem;
+  border-left-width: 3px;
+}
+
+.ghost-button {
+  background: transparent;
+  border-color: rgba(122, 167, 205, 0.35);
+}
+
 .placeholder-list {
   margin: 0;
   padding-left: 1rem;
@@ -269,8 +306,32 @@ pre {
   gap: 0.75rem;
 }
 
+.compact-header {
+  margin-bottom: 0;
+}
+
 .control-block input {
   width: 100%;
+}
+
+.storyline-card,
+.storyline-item,
+.procedure-item {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.evidence-card {
+  padding: 0.75rem;
+}
+
+.procedure-lane {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.lane-action-button {
+  justify-self: start;
 }
 
 @media (max-width: 1200px) {
@@ -293,7 +354,8 @@ pre {
   }
 
   .metric-grid,
-  .mimic-flow {
+  .mimic-flow,
+  .alarm-summary-grid {
     grid-template-columns: 1fr;
   }
 }

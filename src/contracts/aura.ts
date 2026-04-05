@@ -62,6 +62,27 @@ export type AlarmSet = {
   newly_cleared_alarm_ids: string[];
 };
 
+export type AlarmCluster = {
+  cluster_id: string;
+  title: string;
+  summary: string;
+  priority: AlarmPriority;
+  visibility_rule: "always_visible" | "standard_visible";
+  alarm_ids: string[];
+  alarms: AlarmRecord[];
+  critical_alarm_ids: string[];
+  primary_alarm_ids: string[];
+  grouped_alarm_count: number;
+};
+
+export type AlarmIntelligenceSnapshot = {
+  visible_alarm_card_count: number;
+  grouped_alarm_count: number;
+  compression_ratio: number;
+  dominant_cluster_id?: string;
+  clusters: AlarmCluster[];
+};
+
 export type ScenarioDefinition = {
   scenario_id: string;
   version: string;
@@ -78,6 +99,7 @@ export type ScenarioDefinition = {
   event_injections: ScenarioEventInjection[];
   alarm_hooks: AlarmTriggerHook[];
   allowed_operator_actions: AllowedOperatorAction[];
+  expected_root_cause_hypothesis_id?: string;
   success_condition: ScenarioCondition;
   failure_condition: ScenarioCondition;
   timeout_condition: ScenarioCondition;
@@ -165,6 +187,55 @@ export type ActionRequest = {
   reason_note?: string;
 };
 
+export type HypothesisEvidence = {
+  evidence_id: string;
+  label: string;
+  detail: string;
+  strength: "strong" | "moderate" | "watch";
+  source_alarm_ids: string[];
+  source_variable_ids: string[];
+};
+
+export type EventHypothesis = {
+  hypothesis_id: string;
+  label: string;
+  summary: string;
+  score: number;
+  confidence_band: "low" | "medium" | "high";
+  rank: number;
+  evidence: HypothesisEvidence[];
+  watch_items: string[];
+};
+
+export type ReasoningSnapshot = {
+  dominant_hypothesis_id?: string;
+  dominant_summary: string;
+  ranked_hypotheses: EventHypothesis[];
+  changed_since_last_tick: boolean;
+  stable_for_ticks: number;
+  expected_root_cause_aligned: boolean;
+};
+
+export type FirstResponseItem = {
+  item_id: string;
+  label: string;
+  item_kind: "check" | "action" | "watch";
+  why: string;
+  recommended_action_id?: string;
+  recommended_value?: ScalarValue;
+  completion_hint: string;
+  source_alarm_ids: string[];
+  source_variable_ids: string[];
+};
+
+export type FirstResponseLane = {
+  lane_id: string;
+  dominant_hypothesis_id?: string;
+  updated_at_sec: number;
+  prototype_notice: string;
+  items: FirstResponseItem[];
+};
+
 export type SessionLogEventType =
   | "session_started"
   | "phase_changed"
@@ -222,6 +293,9 @@ export type SessionSnapshot = {
   tick_index: number;
   plant_tick: PlantTick;
   alarm_set: AlarmSet;
+  alarm_intelligence: AlarmIntelligenceSnapshot;
+  reasoning_snapshot: ReasoningSnapshot;
+  first_response_lane: FirstResponseLane;
   alarm_history: LoggedAlarmState[];
   events: SessionLogEvent[];
   executed_actions: ExecutedAction[];

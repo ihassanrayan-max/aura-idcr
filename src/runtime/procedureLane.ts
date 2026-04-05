@@ -1,0 +1,237 @@
+import type {
+  AlarmSet,
+  FirstResponseItem,
+  FirstResponseLane,
+  PlantStateSnapshot,
+  ReasoningSnapshot,
+  ScalarValue,
+} from "../contracts/aura";
+
+function makeItem(params: {
+  item_id: string;
+  label: string;
+  item_kind: FirstResponseItem["item_kind"];
+  why: string;
+  completion_hint: string;
+  source_alarm_ids?: string[];
+  source_variable_ids?: string[];
+  recommended_action_id?: string;
+  recommended_value?: ScalarValue;
+}): FirstResponseItem {
+  return {
+    item_id: params.item_id,
+    label: params.label,
+    item_kind: params.item_kind,
+    why: params.why,
+    completion_hint: params.completion_hint,
+    source_alarm_ids: params.source_alarm_ids ?? [],
+    source_variable_ids: params.source_variable_ids ?? [],
+    recommended_action_id: params.recommended_action_id,
+    recommended_value: params.recommended_value,
+  };
+}
+
+function topAlarmId(alarm_set: AlarmSet): string | undefined {
+  return alarm_set.active_alarm_ids[0];
+}
+
+function buildFeedwaterLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet, allowed_action_ids: Set<string>): FirstResponseItem[] {
+  const items: FirstResponseItem[] = [];
+  const feedwater_gap = Number(plant_state.main_steam_flow_pct) - Number(plant_state.feedwater_flow_pct);
+  const top_alarm_id = topAlarmId(alarm_set);
+
+  items.push(
+    makeItem({
+      item_id: "fw_check_mismatch",
+      label: "Confirm feedwater is lagging steam demand",
+      item_kind: "check",
+      why: `Steam flow exceeds feedwater by ${feedwater_gap.toFixed(1)}%, which fits the feedwater-loss storyline.`,
+      completion_hint: "Use feedwater flow, steam flow, and vessel level together before acting.",
+      source_alarm_ids: ["ALM_FEEDWATER_FLOW_LOW", "ALM_RPV_LEVEL_LOW", "ALM_RPV_LEVEL_LOW_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["feedwater_flow_pct", "main_steam_flow_pct", "vessel_water_level_m"],
+    }),
+  );
+
+  if (allowed_action_ids.has("act_adjust_feedwater")) {
+    items.push(
+      makeItem({
+        item_id: "fw_action_recover",
+        label: "Recover feedwater demand toward 82% rated",
+        item_kind: "action",
+        why: "The dominant hypothesis points to inadequate feedwater as the primary recoverable driver.",
+        completion_hint: "Use the bounded correction first, then watch whether level stabilizes without pressure worsening.",
+        source_alarm_ids: ["ALM_FEEDWATER_FLOW_LOW", "ALM_RPV_LEVEL_LOW", "ALM_RPV_LEVEL_LOW_LOW"].filter((alarm_id) =>
+          alarm_set.active_alarm_ids.includes(alarm_id),
+        ),
+        source_variable_ids: ["feedwater_flow_pct", "vessel_water_level_m"],
+        recommended_action_id: "act_adjust_feedwater",
+        recommended_value: 82,
+      }),
+    );
+  }
+
+  if (allowed_action_ids.has("act_ack_alarm") && top_alarm_id) {
+    items.push(
+      makeItem({
+        item_id: "fw_action_ack",
+        label: "Acknowledge the top alarm once the diagnosis is clear",
+        item_kind: "action",
+        why: "Alarm clutter is increasing, but acknowledgement should follow the bounded first-response picture rather than replace it.",
+        completion_hint: "Keep the critical alarm visible while reducing nuisance scanning.",
+        source_alarm_ids: [top_alarm_id],
+        source_variable_ids: [],
+        recommended_action_id: "act_ack_alarm",
+      }),
+    );
+  }
+
+  items.push(
+    makeItem({
+      item_id: "fw_watch_recovery",
+      label: "Watch vessel level and pressure after correction",
+      item_kind: "watch",
+      why: "A successful recovery should raise level back toward band without allowing a pressure spike.",
+      completion_hint: "Look for level recovery first, then confirm pressure is staying bounded.",
+      source_alarm_ids: ["ALM_RPV_LEVEL_LOW", "ALM_RPV_PRESSURE_HIGH"].filter((alarm_id) => alarm_set.active_alarm_ids.includes(alarm_id)),
+      source_variable_ids: ["vessel_water_level_m", "vessel_pressure_mpa"],
+    }),
+  );
+
+  return items;
+}
+
+function buildHeatSinkLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet, allowed_action_ids: Set<string>): FirstResponseItem[] {
+  const items: FirstResponseItem[] = [
+    makeItem({
+      item_id: "hs_check_backpressure",
+      label: "Check condenser backpressure against steam-path drift",
+      item_kind: "check",
+      why: `Condenser backpressure is ${Number(plant_state.condenser_backpressure_kpa).toFixed(1)} kPa and is contributing to steam-path stress.`,
+      completion_hint: "Confirm whether condenser stress is a driver or a consequence of the feedwater upset.",
+      source_alarm_ids: ["ALM_CONDENSER_BACKPRESSURE_HIGH", "ALM_MAIN_STEAM_FLOW_MISMATCH"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["condenser_backpressure_kpa", "main_steam_flow_pct"],
+    }),
+    makeItem({
+      item_id: "hs_watch_pressure",
+      label: "Watch vessel pressure and SRV behavior",
+      item_kind: "watch",
+      why: "Heat-sink stress matters mainly because it can escalate into pressure control consequences.",
+      completion_hint: "Escalate concern if pressure keeps rising or SRV relief becomes sustained.",
+      source_alarm_ids: ["ALM_RPV_PRESSURE_HIGH", "ALM_SRV_STUCK_OPEN"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["vessel_pressure_mpa", "safety_relief_valve_open"],
+    }),
+  ];
+
+  if (allowed_action_ids.has("act_adjust_feedwater")) {
+    items.push(
+      makeItem({
+        item_id: "hs_compare_feedwater",
+        label: "Compare feedwater recovery before chasing secondary symptoms",
+        item_kind: "action",
+        why: "In this bounded scenario, heat-sink stress often follows the feedwater upset rather than replacing it.",
+        completion_hint: "Use the feedwater correction path if the mismatch remains present.",
+        source_alarm_ids: ["ALM_FEEDWATER_FLOW_LOW"].filter((alarm_id) => alarm_set.active_alarm_ids.includes(alarm_id)),
+        source_variable_ids: ["feedwater_flow_pct"],
+        recommended_action_id: "act_adjust_feedwater",
+        recommended_value: 82,
+      }),
+    );
+  }
+
+  return items;
+}
+
+function buildPressureLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet): FirstResponseItem[] {
+  return [
+    makeItem({
+      item_id: "pc_check_pressure",
+      label: "Check pressure, SRV state, and containment together",
+      item_kind: "check",
+      why: `Pressure is ${Number(plant_state.vessel_pressure_mpa).toFixed(2)} MPa and the event is approaching consequence territory.`,
+      completion_hint: "Do not treat pressure in isolation; confirm whether containment or SRV indicators are worsening too.",
+      source_alarm_ids: ["ALM_RPV_PRESSURE_HIGH", "ALM_SRV_STUCK_OPEN", "ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["vessel_pressure_mpa", "safety_relief_valve_open", "containment_pressure_kpa"],
+    }),
+    makeItem({
+      item_id: "pc_watch_consequence",
+      label: "Watch for containment or low-low level escalation",
+      item_kind: "watch",
+      why: "This hypothesis indicates the upset is no longer just a diagnosis problem; it is becoming a consequence-control problem.",
+      completion_hint: "If containment pressure or low-low level appear, the response is unsuccessful.",
+      source_alarm_ids: ["ALM_CONTAINMENT_PRESSURE_HIGH", "ALM_RPV_LEVEL_LOW_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["containment_pressure_kpa", "vessel_water_level_m"],
+    }),
+  ];
+}
+
+function buildPostTripLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet): FirstResponseItem[] {
+  return [
+    makeItem({
+      item_id: "pt_check_trip",
+      label: "Confirm post-trip stabilization cues",
+      item_kind: "check",
+      why: "Protection has already actuated, so the first-response priority is stabilization rather than diagnosis refinement.",
+      completion_hint: "Track level, containment, and pressure together to determine whether the response stayed bounded.",
+      source_alarm_ids: ["ALM_REACTOR_TRIP_ACTIVE", "ALM_RPV_LEVEL_LOW_LOW", "ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["reactor_trip_active", "vessel_water_level_m", "containment_pressure_kpa"],
+    }),
+    makeItem({
+      item_id: "pt_watch_recovery",
+      label: "Watch for unsuccessful stabilization markers",
+      item_kind: "watch",
+      why: `Containment pressure is ${Number(plant_state.containment_pressure_kpa).toFixed(1)} kPa and vessel level is ${Number(plant_state.vessel_water_level_m).toFixed(2)} m.`,
+      completion_hint: "If containment pressure keeps rising or level stays below recovery band, the scenario has not stabilized.",
+      source_alarm_ids: ["ALM_CONTAINMENT_PRESSURE_HIGH", "ALM_RPV_LEVEL_LOW_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["containment_pressure_kpa", "vessel_water_level_m"],
+    }),
+  ];
+}
+
+export function buildFirstResponseLane(params: {
+  sim_time_sec: number;
+  plant_state: PlantStateSnapshot;
+  alarm_set: AlarmSet;
+  reasoning_snapshot: ReasoningSnapshot;
+  allowed_action_ids: string[];
+}): FirstResponseLane {
+  const allowed_action_ids = new Set(params.allowed_action_ids);
+  let items: FirstResponseItem[];
+
+  switch (params.reasoning_snapshot.dominant_hypothesis_id) {
+    case "hyp_heat_sink_stress":
+      items = buildHeatSinkLane(params.plant_state, params.alarm_set, allowed_action_ids);
+      break;
+    case "hyp_pressure_control_transient":
+      items = buildPressureLane(params.plant_state, params.alarm_set);
+      break;
+    case "hyp_post_trip_stabilization":
+      items = buildPostTripLane(params.plant_state, params.alarm_set);
+      break;
+    case "hyp_feedwater_degradation":
+    default:
+      items = buildFeedwaterLane(params.plant_state, params.alarm_set, allowed_action_ids);
+      break;
+  }
+
+  return {
+    lane_id: `lane_${params.reasoning_snapshot.dominant_hypothesis_id ?? "monitor"}_${params.sim_time_sec}`,
+    dominant_hypothesis_id: params.reasoning_snapshot.dominant_hypothesis_id,
+    updated_at_sec: params.sim_time_sec,
+    prototype_notice: "Prototype guidance only. This lane narrows likely first checks and actions for the current bounded scenario; it is not an official procedure.",
+    items,
+  };
+}

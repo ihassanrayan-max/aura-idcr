@@ -29,10 +29,16 @@ function formatClock(simTimeSec: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatSignalLabel(signalId: string): string {
+  const labels = variableLabels as Record<string, string>;
+  return labels[signalId] ?? signalId.replace(/_/g, " ");
+}
+
 export default function App({ store = defaultStore, autoRun = true }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
   const [isRunning, setIsRunning] = useState(true);
   const [feedwaterDemand, setFeedwaterDemand] = useState(82);
+  const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!autoRun || !isRunning || snapshot.outcome) {
@@ -50,13 +56,39 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     () => new Set(snapshot.alarm_set.active_alarm_ids),
     [snapshot.alarm_set.active_alarm_ids],
   );
+  const actionLabels = useMemo(
+    () =>
+      Object.fromEntries(snapshot.scenario.allowed_operator_actions.map((action) => [action.action_id, action.label])) as Record<
+        string,
+        string
+      >,
+    [snapshot.scenario.allowed_operator_actions],
+  );
   const recentEvents = snapshot.events.slice(-8).reverse();
+
+  function toggleCluster(clusterId: string): void {
+    setExpandedClusterIds((current) =>
+      current.includes(clusterId) ? current.filter((entry) => entry !== clusterId) : [...current, clusterId],
+    );
+  }
+
+  function requestLaneAction(actionId: string, recommendedValue?: number | boolean | string): void {
+    store.requestAction({
+      action_id: actionId,
+      requested_value: typeof recommendedValue === "number" ? recommendedValue : undefined,
+      ui_region: "procedure_lane",
+      reason_note:
+        actionId === "act_ack_alarm"
+          ? snapshot.alarm_set.active_alarm_ids[0] ?? "no_active_alarm"
+          : `Phase 2 first-response guidance for ${snapshot.reasoning_snapshot.dominant_hypothesis_id ?? "monitoring"}`,
+    });
+  }
 
   return (
     <div className="app-shell">
       <header className="top-status-bar">
         <div>
-          <p className="eyebrow">AURA-IDCR Phase 1</p>
+          <p className="eyebrow">AURA-IDCR Phase 2</p>
           <h1>{snapshot.scenario.title}</h1>
           <p className="muted">{snapshot.current_phase.label}</p>
         </div>
@@ -74,8 +106,8 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             <strong>{formatClock(snapshot.sim_time_sec)}</strong>
           </div>
           <div className="status-cell">
-            <span className="status-label">Outcome Window</span>
-            <strong>{snapshot.scenario.expected_duration_sec}s</strong>
+            <span className="status-label">Alarm Compression</span>
+            <strong>{snapshot.alarm_intelligence.compression_ratio.toFixed(2)}x</strong>
           </div>
         </div>
         <div className="badge-row">
@@ -155,28 +187,70 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
 
         <aside className="panel alarm-panel">
           <div className="panel-header">
-            <h2>Raw Alarm Area</h2>
-            <p className="muted">
-              {snapshot.alarm_set.active_alarm_count} active alarms, {snapshot.alarm_set.active_alarm_cluster_count} active groups
-            </p>
+            <h2>Alarm Intelligence Area</h2>
+            <p className="muted">Grouped, inspectable alarm clusters with critical signals still surfaced.</p>
+          </div>
+          <div className="alarm-summary-grid">
+            <article className="metric-card compact">
+              <span className="metric-label">Raw active alarms</span>
+              <strong>{snapshot.alarm_set.active_alarm_count}</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Visible grouped cards</span>
+              <strong>{snapshot.alarm_intelligence.visible_alarm_card_count}</strong>
+            </article>
+            <article className="metric-card compact">
+              <span className="metric-label">Active clusters</span>
+              <strong>{snapshot.alarm_set.active_alarm_cluster_count}</strong>
+            </article>
           </div>
           <div className="alarm-list">
-            {snapshot.alarm_history.length === 0 ? (
-              <p className="muted">No alarms have activated in this session.</p>
+            {snapshot.alarm_intelligence.clusters.length === 0 ? (
+              <p className="muted">No active alarm clusters yet.</p>
             ) : (
-              snapshot.alarm_history.map((alarm) => (
+              snapshot.alarm_intelligence.clusters.map((cluster) => (
                 <article
-                  key={alarm.alarm_id}
-                  className={`alarm-card ${activeAlarmIds.has(alarm.alarm_id) ? "active" : "inactive"} priority-${alarm.priority}`}
+                  key={cluster.cluster_id}
+                  className={`alarm-card active priority-${cluster.priority}`}
                 >
                   <div className="alarm-title-row">
-                    <strong>{alarm.title}</strong>
-                    <span>{alarm.priority}</span>
+                    <strong>{cluster.title}</strong>
+                    <span>{cluster.priority}</span>
                   </div>
                   <p className="alarm-meta">
-                    #{alarm.activation_order} | t+{alarm.activated_at_sec}s | {activeAlarmIds.has(alarm.alarm_id) ? "Active" : "Inactive"}
+                    {cluster.grouped_alarm_count} related alarms | critical visible: {cluster.critical_alarm_ids.length}
                   </p>
-                  <p className="muted">{alarm.subsystem_tag}</p>
+                  <p className="muted">{cluster.summary}</p>
+                  <div className="badge-row cluster-badges">
+                    {cluster.alarms
+                      .filter((alarm) => cluster.primary_alarm_ids.includes(alarm.alarm_id))
+                      .map((alarm) => (
+                        <span key={alarm.alarm_id} className={`badge priority-chip priority-${alarm.priority}`}>
+                          {alarm.title}
+                        </span>
+                      ))}
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => toggleCluster(cluster.cluster_id)}>
+                    {expandedClusterIds.includes(cluster.cluster_id) ? "Hide raw alarms" : "Inspect raw alarms"}
+                  </button>
+                  {expandedClusterIds.includes(cluster.cluster_id) ? (
+                    <div className="cluster-detail-list">
+                      {cluster.alarms.map((alarm) => (
+                        <article
+                          key={alarm.alarm_id}
+                          className={`alarm-card nested ${activeAlarmIds.has(alarm.alarm_id) ? "active" : "inactive"} priority-${alarm.priority}`}
+                        >
+                          <div className="alarm-title-row">
+                            <strong>{alarm.title}</strong>
+                            <span>{alarm.priority}</span>
+                          </div>
+                          <p className="alarm-meta">
+                            {alarm.subsystem_tag} | {alarm.visibility_rule === "always_visible" ? "Always visible" : "Grouped"}
+                          </p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
                 </article>
               ))
             )}
@@ -185,26 +259,87 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
 
         <section className="panel placeholder-panel">
           <div className="panel-header">
-            <h2>Transparency / Root-Cause Area</h2>
+            <h2>Storyline / Root-Cause Area</h2>
           </div>
-          <p className="muted">
-            Phase 1 placeholder only. Later phases may rank hypotheses and evidence here, but this slice keeps the operator-facing
-            shell stable without adding root-cause logic yet.
-          </p>
-          <ul className="placeholder-list">
-            <li>Initiating event: {snapshot.scenario.initiating_event}</li>
-            <li>Training goal: {snapshot.scenario.training_goal}</li>
-            <li>Current dominant visible stressor: feedwater-side inventory loss</li>
-          </ul>
+          <div className="storyline-card">
+            <div className="alarm-title-row">
+              <strong>
+                {snapshot.reasoning_snapshot.ranked_hypotheses[0]?.label ?? "Monitoring only"}
+              </strong>
+              <span>{snapshot.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low"} confidence</span>
+            </div>
+            <p className="muted">{snapshot.reasoning_snapshot.dominant_summary}</p>
+            <div className="badge-row">
+              <span className={`badge ${snapshot.reasoning_snapshot.expected_root_cause_aligned ? "ok" : "neutral"}`}>
+                {snapshot.reasoning_snapshot.expected_root_cause_aligned ? "Aligned with scenario driver" : "Alternative storyline active"}
+              </span>
+              <span className="badge neutral">Stable for {snapshot.reasoning_snapshot.stable_for_ticks} ticks</span>
+            </div>
+          </div>
+          <div className="storyline-list">
+            {snapshot.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => (
+              <article key={hypothesis.hypothesis_id} className="storyline-item">
+                <div className="alarm-title-row">
+                  <strong>
+                    #{hypothesis.rank} {hypothesis.label}
+                  </strong>
+                  <span>{hypothesis.score.toFixed(2)}</span>
+                </div>
+                <p className="muted">{hypothesis.summary}</p>
+                <div className="evidence-list">
+                  {hypothesis.evidence.map((evidence) => (
+                    <article key={evidence.evidence_id} className="evidence-card">
+                      <strong>{evidence.label}</strong>
+                      <p className="muted">{evidence.detail}</p>
+                    </article>
+                  ))}
+                </div>
+                <p className="alarm-meta">Watch: {hypothesis.watch_items.map(formatSignalLabel).join(", ")}</p>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className="panel controls-panel">
           <div className="panel-header">
-            <h2>Basic Control Input Area</h2>
-            <p className="muted">Bounded operator actions only; no later-phase guidance or interception logic is active here.</p>
+            <h2>Dynamic First-Response Lane</h2>
+            <p className="muted">Prototype guidance only. The lane narrows the bounded first checks and actions for the current storyline.</p>
+          </div>
+
+          <div className="procedure-lane">
+            <p className="muted">{snapshot.first_response_lane.prototype_notice}</p>
+            <div className="procedure-list">
+              {snapshot.first_response_lane.items.map((item) => (
+                <article key={item.item_id} className="procedure-item">
+                  <div className="alarm-title-row">
+                    <strong>{item.label}</strong>
+                    <span>{item.item_kind}</span>
+                  </div>
+                  <p className="muted">{item.why}</p>
+                  <p className="alarm-meta">{item.completion_hint}</p>
+                  {item.source_variable_ids.length > 0 ? (
+                    <p className="alarm-meta">Signals: {item.source_variable_ids.map(formatSignalLabel).join(", ")}</p>
+                  ) : null}
+                  {item.recommended_action_id ? (
+                    <button
+                      type="button"
+                      className="lane-action-button"
+                      onClick={() => requestLaneAction(item.recommended_action_id!, item.recommended_value)}
+                    >
+                      {actionLabels[item.recommended_action_id] ?? item.recommended_action_id}
+                      {typeof item.recommended_value === "number" ? ` (${item.recommended_value}% rated)` : ""}
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </div>
 
           <div className="control-block">
+            <div className="panel-header compact-header">
+              <h3>Manual Control Input</h3>
+              <p className="muted">The baseline bounded controls remain available for deterministic replay.</p>
+            </div>
             <label htmlFor="feedwater-demand">Feedwater Demand Target</label>
             <input
               id="feedwater-demand"
@@ -262,23 +397,18 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               Reset session
             </button>
           </div>
-
-          <div className="procedure-placeholder">
-            <h3>Procedure / First-Response Placeholder</h3>
-            <p className="muted">
-              Future procedure guidance will live here. Phase 1 keeps this region visible but intentionally static.
-            </p>
-          </div>
         </section>
 
         <section className="panel support-panel">
           <div className="panel-header">
-            <h2>Support-State Placeholder</h2>
+            <h2>Phase 2 Scope Guardrail</h2>
           </div>
-          <p className="muted">
-            Baseline mode only. Support state remains visible for later adaptive behavior, but no human monitoring or assistance shifts
-            are implemented in this slice.
-          </p>
+          <div className="badge-row">
+            <span className="badge ok">Alarm grouping active</span>
+            <span className="badge ok">Rule-based storyline active</span>
+            <span className="badge ok">Dynamic first-response lane active</span>
+            <span className="badge neutral">No human monitoring or adaptive mode shifts in this slice</span>
+          </div>
         </section>
 
         <aside className="panel log-panel">
