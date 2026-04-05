@@ -739,12 +739,12 @@ Use these statuses exactly:
 - [x] KPI definitions — **Done**
 
 ### Phase 1 — First End-to-End Slice
-- [ ] Plant twin skeleton — **Not Started**
-- [ ] Baseline HMI shell — **Not Started**
-- [ ] Basic alarm list — **Not Started**
-- [ ] Control input path — **Not Started**
-- [ ] Session logging backbone — **Not Started**
-- [ ] One deterministic scenario end to end — **Not Started**
+- [x] Plant twin skeleton — **Done**
+- [x] Baseline HMI shell — **Done**
+- [x] Basic alarm list — **Done**
+- [x] Control input path — **Done**
+- [x] Session logging backbone — **Done**
+- [x] One deterministic scenario end to end — **Done**
 
 ### Phase 2 — Alarm Intelligence + Procedure Support
 - [ ] Alarm clustering — **Not Started**
@@ -864,6 +864,24 @@ Use this section to track meaningful progress across sessions.
   - None in repo; future sessions should keep the docs authoritative unless the human explicitly changes scope
 - Next recommended step:
   - Begin Phase 1 with one deterministic end-to-end slice built directly from the Phase 0 contracts
+
+- Date: 2026-04-05
+- Agent/session: GPT-5.4 Phase 1 first slice session
+- Task worked on: Phase 1 deterministic first end-to-end slice
+- Status: Done
+- What changed:
+  - Bootstrapped a runnable TypeScript + Vite + React runtime for the repo
+  - Added contract-aligned runtime modules for plant progression, scenario progression, alarm evaluation, and structured session logging
+  - Implemented one deterministic feedwater-degradation scenario directly from the Phase 0 scenario contract
+  - Built the baseline operator HMI shell with top status, plant mimic, raw alarm area, bounded control inputs, placeholder future-phase regions, and structured log preview
+  - Added focused verification tests for deterministic scenario progression, terminal outcomes, UI/store synchronization, and required baseline log events
+  - Marked all Phase 1 first-slice task-board items done
+- What remains:
+  - Phase 2 alarm intelligence, storyline, procedure support, and later adaptive features remain intentionally untouched
+- Blockers:
+  - None for the Phase 1 slice currently implemented
+- Next recommended step:
+  - Hold scope and begin Phase 2 only when the human explicitly requests alarm intelligence and procedure-support work
 
 ---
 

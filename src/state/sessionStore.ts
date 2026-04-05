@@ -1,0 +1,558 @@
+import { useSyncExternalStore } from "react";
+import type {
+  ActionRequest,
+  ExecutedAction,
+  LoggedAlarmState,
+  PlantTick,
+  ScenarioDefinition,
+  ScenarioOutcome,
+  SessionSnapshot,
+} from "../contracts/aura";
+import { scnAlarmCascadeRootCause } from "../scenarios/scn_alarm_cascade_root_cause";
+import { alarmDictionaryById } from "../data/alarmDictionary";
+import { evaluateAlarmSet, createAlarmRuntimeState, type AlarmRuntimeState } from "../runtime/alarmEngine";
+import {
+  advancePhaseIfNeeded,
+  consumeTriggeredInjections,
+  createScenarioRuntimeState,
+  evaluateCondition,
+  getActivePhase,
+  getPhaseElapsedTimeSec,
+  type ScenarioRuntimeState,
+} from "../runtime/scenarioEngine";
+import {
+  applyOperatorAction,
+  applyScenarioEffects,
+  createPlantTwinInternalState,
+  stepPlantTwin,
+  type PlantTwinInternalState,
+} from "../runtime/plantTwin";
+import { SessionLogger } from "../runtime/sessionLogger";
+
+type SessionStoreOptions = {
+  scenario?: ScenarioDefinition;
+  session_index?: number;
+  tick_duration_sec?: number;
+};
+
+type ActionRequestParams = {
+  action_id: string;
+  requested_value?: number;
+  ui_region: ActionRequest["ui_region"];
+  reason_note?: string;
+};
+
+export class AuraSessionStore {
+  private readonly scenario: ScenarioDefinition;
+  private readonly session_id: string;
+  private readonly tick_duration_sec: number;
+  private readonly listeners = new Set<() => void>();
+  private readonly logger: SessionLogger;
+
+  private action_sequence = 0;
+  private activation_sequence = 0;
+  private scenario_runtime_state: ScenarioRuntimeState;
+  private alarm_runtime_state: AlarmRuntimeState;
+  private plant_internal_state: PlantTwinInternalState;
+  private snapshot: SessionSnapshot;
+
+  constructor(options: SessionStoreOptions = {}) {
+    this.scenario = options.scenario ?? scnAlarmCascadeRootCause;
+    this.session_id = `session_${String(options.session_index ?? 1).padStart(3, "0")}`;
+    this.tick_duration_sec = options.tick_duration_sec ?? 5;
+    this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
+    this.scenario_runtime_state = createScenarioRuntimeState();
+    this.alarm_runtime_state = createAlarmRuntimeState();
+    this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
+    this.snapshot = this.createInitialSnapshot();
+  }
+
+  private createInitialSnapshot(): SessionSnapshot {
+    const initial_phase = getActivePhase(this.scenario, this.scenario_runtime_state);
+    const initial_tick: PlantTick = {
+      tick_id: "tick_0000",
+      session_id: this.session_id,
+      scenario_id: this.scenario.scenario_id,
+      session_mode: "baseline",
+      sim_time_sec: 0,
+      phase_id: initial_phase.phase_id,
+      plant_state: { ...this.scenario.initial_plant_state },
+      derived_state: {
+        alarm_load_count: Number(this.scenario.initial_plant_state.alarm_load_count),
+        active_alarm_cluster_count: Number(this.scenario.initial_plant_state.active_alarm_cluster_count),
+      },
+      source_event_ids: [],
+    };
+
+    const initial_alarm_eval = evaluateAlarmSet({
+      scenario: this.scenario,
+      session_id: this.session_id,
+      tick_id: initial_tick.tick_id,
+      scenario_id: this.scenario.scenario_id,
+      plant_state: initial_tick.plant_state,
+      executed_actions: [],
+      current_phase_id: initial_phase.phase_id,
+      phase_elapsed_time_sec: 0,
+      previous_alarm_runtime_state: this.alarm_runtime_state,
+    });
+    this.alarm_runtime_state = initial_alarm_eval.alarm_runtime_state;
+
+    const tick_with_alarm_counts: PlantTick = {
+      ...initial_tick,
+      plant_state: {
+        ...initial_tick.plant_state,
+        alarm_load_count: initial_alarm_eval.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: initial_alarm_eval.alarm_set.active_alarm_cluster_count,
+      },
+      derived_state: {
+        alarm_load_count: initial_alarm_eval.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: initial_alarm_eval.alarm_set.active_alarm_cluster_count,
+      },
+    };
+
+    const session_started_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "session_started",
+      source_module: "scenario_engine",
+      phase_id: initial_phase.phase_id,
+      payload: {
+        session_mode: "baseline",
+        scenario_id: this.scenario.scenario_id,
+        expected_outcome_window_sec: this.scenario.expected_duration_sec,
+      },
+      trace_refs: [{ ref_type: "phase_id", ref_value: initial_phase.phase_id }],
+    });
+
+    const phase_changed_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "phase_changed",
+      source_module: "scenario_engine",
+      phase_id: initial_phase.phase_id,
+      payload: {
+        phase_id: initial_phase.phase_id,
+        from_phase_id: "session_bootstrap",
+        to_phase_id: initial_phase.phase_id,
+      },
+      trace_refs: [{ ref_type: "phase_id", ref_value: initial_phase.phase_id }],
+    });
+
+    const plant_tick_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "plant_tick_recorded",
+      source_module: "plant_twin",
+      phase_id: initial_phase.phase_id,
+      payload: {
+        tick_id: tick_with_alarm_counts.tick_id,
+        phase_id: initial_phase.phase_id,
+        plant_state: tick_with_alarm_counts.plant_state,
+        derived_state: tick_with_alarm_counts.derived_state,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
+    });
+
+    const alarm_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "alarm_set_updated",
+      source_module: "alarm_intelligence",
+      phase_id: initial_phase.phase_id,
+      payload: {
+        active_alarm_count: initial_alarm_eval.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: initial_alarm_eval.alarm_set.active_alarm_cluster_count,
+        highest_priority_active: initial_alarm_eval.alarm_set.highest_priority_active,
+        active_alarm_ids: initial_alarm_eval.alarm_set.active_alarm_ids,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
+    });
+
+    const alarm_history = this.mergeAlarmHistory([], initial_alarm_eval.alarm_set.active_alarm_ids, [], 0);
+
+    return {
+      session_id: this.session_id,
+      session_mode: "baseline",
+      support_mode: "monitoring_support",
+      scenario: this.scenario,
+      current_phase: initial_phase,
+      sim_time_sec: 0,
+      tick_index: 0,
+      plant_tick: {
+        ...tick_with_alarm_counts,
+        source_event_ids: [session_started_event.event_id, phase_changed_event.event_id, plant_tick_event.event_id, alarm_event.event_id],
+      },
+      alarm_set: initial_alarm_eval.alarm_set,
+      alarm_history,
+      events: this.logger.list(),
+      executed_actions: [],
+      logging_active: true,
+      validation_status_available: false,
+    };
+  }
+
+  private mergeAlarmHistory(
+    previous_history: LoggedAlarmState[],
+    newly_raised_alarm_ids: string[],
+    newly_cleared_alarm_ids: string[],
+    sim_time_sec: number,
+  ): LoggedAlarmState[] {
+    const next_history = previous_history.map((entry) =>
+      newly_cleared_alarm_ids.includes(entry.alarm_id) && entry.cleared_at_sec === undefined
+        ? { ...entry, active: false, cleared_at_sec: sim_time_sec }
+        : entry,
+    );
+
+    for (const alarm_id of newly_raised_alarm_ids) {
+      const existing_entry = next_history.find((entry) => entry.alarm_id === alarm_id);
+      if (existing_entry) {
+        existing_entry.active = true;
+        existing_entry.cleared_at_sec = undefined;
+        continue;
+      }
+
+      const alarm = this.snapshot?.alarm_set.active_alarms.find((entry) => entry.alarm_id === alarm_id);
+      const dictionary_entry = alarmDictionaryById[alarm_id];
+      const template = alarm ?? {
+        alarm_id,
+        title: dictionary_entry?.title ?? alarm_id,
+        priority: dictionary_entry?.priority ?? ("P3" as const),
+        subsystem_tag: dictionary_entry?.subsystem_tag ?? "alarm_system",
+        active: true,
+        visibility_rule: dictionary_entry?.visibility_rule ?? ("standard_visible" as const),
+        group_hint: dictionary_entry?.group_hint ?? "runtime",
+      };
+      this.activation_sequence += 1;
+      next_history.push({
+        ...template,
+        active: true,
+        activated_at_sec: sim_time_sec,
+        activation_order: this.activation_sequence,
+      });
+    }
+
+    return [...next_history].sort((left, right) => left.activation_order - right.activation_order);
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  getSnapshot(): SessionSnapshot {
+    return this.snapshot;
+  }
+
+  reset(): void {
+    this.action_sequence = 0;
+    this.activation_sequence = 0;
+    this.scenario_runtime_state = createScenarioRuntimeState();
+    this.alarm_runtime_state = createAlarmRuntimeState();
+    this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
+    this.snapshot = this.createInitialSnapshot();
+    this.emit();
+  }
+
+  requestAction(params: ActionRequestParams): boolean {
+    if (this.snapshot.outcome) {
+      return false;
+    }
+
+    const allowed_action = this.scenario.allowed_operator_actions.find((action) => action.action_id === params.action_id);
+    if (!allowed_action || !allowed_action.allowed_phase_ids.includes(this.snapshot.current_phase.phase_id)) {
+      return false;
+    }
+
+    this.action_sequence += 1;
+    const action_request: ActionRequest = {
+      action_request_id: `actreq_${String(this.action_sequence).padStart(4, "0")}`,
+      session_id: this.session_id,
+      scenario_id: this.scenario.scenario_id,
+      sim_time_sec: this.snapshot.sim_time_sec,
+      actor_role: "operator",
+      action_id: params.action_id,
+      target_subsystem: allowed_action.target_variable_ids[0] ?? "alarm_system",
+      requested_value: params.requested_value,
+      ui_region: params.ui_region,
+      reason_note: params.reason_note,
+    };
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "action_requested",
+      source_module: "hmi",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_id: action_request.action_id,
+        actor_role: action_request.actor_role,
+        ui_region: action_request.ui_region,
+        requested_value: action_request.requested_value,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: action_request.action_request_id }],
+    });
+
+    const action_result = applyOperatorAction(
+      this.snapshot.plant_tick.plant_state,
+      this.plant_internal_state,
+      action_request,
+    );
+    this.plant_internal_state = action_result.internal_state;
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "operator_action_applied",
+      source_module: "plant_twin",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_id: action_request.action_id,
+        action_class: action_result.action_class,
+        correctness_label: action_result.correctness_label,
+        resulting_state_change: action_result.resulting_state_change,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: action_request.action_request_id }],
+    });
+
+    const executed_action: ExecutedAction = {
+      ...action_request,
+      applied: true,
+    };
+
+    this.snapshot = {
+      ...this.snapshot,
+      executed_actions: [...this.snapshot.executed_actions, executed_action],
+      events: this.logger.list(),
+    };
+    this.emit();
+    return true;
+  }
+
+  advanceTick(): SessionSnapshot {
+    if (this.snapshot.outcome) {
+      return this.snapshot;
+    }
+
+    const sim_time_sec = this.snapshot.sim_time_sec + this.tick_duration_sec;
+    const base_context = {
+      plant_state: this.snapshot.plant_tick.plant_state,
+      executed_actions: this.snapshot.executed_actions,
+      elapsed_time_sec: sim_time_sec,
+    };
+
+    const phase_transition = advancePhaseIfNeeded(
+      this.scenario,
+      this.scenario_runtime_state,
+      base_context,
+      sim_time_sec,
+    );
+    this.scenario_runtime_state = phase_transition.runtime_state;
+    let current_phase = getActivePhase(this.scenario, this.scenario_runtime_state);
+
+    if (phase_transition.from_phase && phase_transition.to_phase) {
+      this.logger.append({
+        sim_time_sec,
+        event_type: "phase_changed",
+        source_module: "scenario_engine",
+        phase_id: phase_transition.to_phase.phase_id,
+        payload: {
+          phase_id: phase_transition.to_phase.phase_id,
+          from_phase_id: phase_transition.from_phase.phase_id,
+          to_phase_id: phase_transition.to_phase.phase_id,
+        },
+        trace_refs: [{ ref_type: "phase_id", ref_value: phase_transition.to_phase.phase_id }],
+      });
+      current_phase = phase_transition.to_phase;
+    }
+
+    const injection_result = consumeTriggeredInjections(
+      this.scenario,
+      this.scenario_runtime_state,
+      {
+        ...base_context,
+        elapsed_time_sec: getPhaseElapsedTimeSec(sim_time_sec, this.scenario_runtime_state),
+      },
+      sim_time_sec,
+    );
+    this.scenario_runtime_state = injection_result.runtime_state;
+
+    const with_injections = applyScenarioEffects(
+      this.snapshot.plant_tick.plant_state,
+      this.plant_internal_state,
+      injection_result.effects,
+    );
+    this.plant_internal_state = with_injections.internal_state;
+
+    const stepped = stepPlantTwin(with_injections.plant_state, this.plant_internal_state, this.tick_duration_sec);
+    this.plant_internal_state = stepped.internal_state;
+
+    const next_tick_id = `tick_${String(this.snapshot.tick_index + 1).padStart(4, "0")}`;
+    const alarm_evaluation = evaluateAlarmSet({
+      scenario: this.scenario,
+      session_id: this.session_id,
+      tick_id: next_tick_id,
+      scenario_id: this.scenario.scenario_id,
+      plant_state: stepped.plant_state,
+      executed_actions: this.snapshot.executed_actions,
+      current_phase_id: current_phase.phase_id,
+      phase_elapsed_time_sec: getPhaseElapsedTimeSec(sim_time_sec, this.scenario_runtime_state),
+      previous_alarm_runtime_state: this.alarm_runtime_state,
+    });
+    this.alarm_runtime_state = alarm_evaluation.alarm_runtime_state;
+
+    const plant_tick: PlantTick = {
+      tick_id: next_tick_id,
+      session_id: this.session_id,
+      scenario_id: this.scenario.scenario_id,
+      session_mode: "baseline",
+      sim_time_sec,
+      phase_id: current_phase.phase_id,
+      plant_state: {
+        ...stepped.plant_state,
+        alarm_load_count: alarm_evaluation.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: alarm_evaluation.alarm_set.active_alarm_cluster_count,
+      },
+      derived_state: {
+        alarm_load_count: alarm_evaluation.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: alarm_evaluation.alarm_set.active_alarm_cluster_count,
+      },
+      last_action_request_id:
+        this.snapshot.executed_actions.length > 0
+          ? this.snapshot.executed_actions[this.snapshot.executed_actions.length - 1].action_request_id
+          : undefined,
+      source_event_ids: [],
+    };
+
+    const plant_tick_event = this.logger.append({
+      sim_time_sec,
+      event_type: "plant_tick_recorded",
+      source_module: "plant_twin",
+      phase_id: current_phase.phase_id,
+      payload: {
+        tick_id: plant_tick.tick_id,
+        phase_id: current_phase.phase_id,
+        plant_state: plant_tick.plant_state,
+        derived_state: plant_tick.derived_state,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+    });
+
+    const alarm_event = this.logger.append({
+      sim_time_sec,
+      event_type: "alarm_set_updated",
+      source_module: "alarm_intelligence",
+      phase_id: current_phase.phase_id,
+      payload: {
+        active_alarm_count: alarm_evaluation.alarm_set.active_alarm_count,
+        active_alarm_cluster_count: alarm_evaluation.alarm_set.active_alarm_cluster_count,
+        highest_priority_active: alarm_evaluation.alarm_set.highest_priority_active,
+        active_alarm_ids: alarm_evaluation.alarm_set.active_alarm_ids,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+    });
+
+    let outcome: ScenarioOutcome | undefined;
+    const outcome_context = {
+      plant_state: plant_tick.plant_state,
+      executed_actions: this.snapshot.executed_actions,
+      elapsed_time_sec: sim_time_sec,
+    };
+
+    if (evaluateCondition(this.scenario.failure_condition, outcome_context)) {
+      outcome = {
+        outcome: "failure",
+        stabilized: false,
+        message: "The plant reached an unsafe failure marker before stabilization.",
+        sim_time_sec,
+      };
+    } else if (evaluateCondition(this.scenario.success_condition, outcome_context)) {
+      outcome = {
+        outcome: "success",
+        stabilized: true,
+        message: "The operator corrected feedwater and the plant stabilized within the bounded window.",
+        sim_time_sec,
+      };
+    } else if (evaluateCondition(this.scenario.timeout_condition, outcome_context)) {
+      outcome = {
+        outcome: "timeout",
+        stabilized: false,
+        message: "The response window expired before the plant reached a stable recovery state.",
+        sim_time_sec,
+      };
+    }
+
+    if (outcome) {
+      this.logger.append({
+        sim_time_sec,
+        event_type: "scenario_outcome_recorded",
+        source_module: "evaluation",
+        phase_id: current_phase.phase_id,
+        payload: {
+          outcome: outcome.outcome,
+          success: outcome.outcome === "success",
+          failure_reason: outcome.message,
+          stabilized: outcome.stabilized,
+        },
+        trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+      });
+      this.logger.append({
+        sim_time_sec,
+        event_type: "session_ended",
+        source_module: "evaluation",
+        phase_id: current_phase.phase_id,
+        payload: {
+          final_outcome: outcome.outcome,
+        },
+        trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+      });
+    }
+
+    const alarm_history = this.mergeAlarmHistory(
+      this.snapshot.alarm_history,
+      alarm_evaluation.alarm_set.newly_raised_alarm_ids,
+      alarm_evaluation.alarm_set.newly_cleared_alarm_ids,
+      sim_time_sec,
+    );
+
+    this.snapshot = {
+      ...this.snapshot,
+      current_phase: current_phase,
+      sim_time_sec,
+      tick_index: this.snapshot.tick_index + 1,
+      plant_tick: {
+        ...plant_tick,
+        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id],
+      },
+      alarm_set: alarm_evaluation.alarm_set,
+      alarm_history,
+      events: this.logger.list(),
+      outcome,
+    };
+    this.emit();
+    return this.snapshot;
+  }
+
+  runUntilComplete(maximum_ticks = 100): SessionSnapshot {
+    let current = this.snapshot;
+    let ticks = 0;
+
+    while (!current.outcome && ticks < maximum_ticks) {
+      current = this.advanceTick();
+      ticks += 1;
+    }
+
+    return current;
+  }
+}
+
+export function useAuraSessionSnapshot(store: AuraSessionStore): SessionSnapshot {
+  return useSyncExternalStore(
+    (listener) => store.subscribe(listener),
+    () => store.getSnapshot(),
+    () => store.getSnapshot(),
+  );
+}
+
+export function createDefaultSessionStore(): AuraSessionStore {
+  return new AuraSessionStore();
+}

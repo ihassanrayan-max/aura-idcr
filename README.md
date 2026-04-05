@@ -20,6 +20,13 @@ This repository is a **student-feasible, competition-oriented prototype**. It is
 
 ## Repository status
 
-There is **no runnable application** in this repository yet. Bootstrap files (README, `.gitignore`, `.env.example`, `.editorconfig`) support a clean base for later implementation phases.
+Phase 1 includes a runnable **Vite + React + TypeScript** operator shell and deterministic scenario runtime aligned with the Phase 0 contracts in `docs/`.
+
+```bash
+npm install
+npm run dev      # local development
+npm run build    # production build
+npm test         # verification tests
+```
 
 For supplementary pointers, see [docs/README.md](./docs/README.md).
