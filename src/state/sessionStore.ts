@@ -4,6 +4,7 @@ import type {
   ActionValidationResult,
   AlarmIntelligenceSnapshot,
   CombinedRiskSnapshot,
+  CompletedSessionReview,
   PendingActionConfirmation,
   ExecutedAction,
   FirstResponseLane,
@@ -53,6 +54,7 @@ import {
 } from "../runtime/supportModePolicy";
 import { validateAction } from "../runtime/actionValidator";
 import { computeKpiSummary } from "../runtime/kpiSummary";
+import { buildCompletedSessionReview } from "../runtime/sessionReview";
 
 type SessionStoreOptions = {
   scenario?: ScenarioDefinition;
@@ -490,6 +492,7 @@ export class AuraSessionStore {
       last_validation_result: undefined,
       pending_action_confirmation: undefined,
       kpi_summary: undefined,
+      completed_review: undefined,
       logging_active: true,
       validation_status_available: true,
     };
@@ -1011,6 +1014,7 @@ export class AuraSessionStore {
     }
 
     let kpi_summary: KpiSummary | undefined = this.snapshot.kpi_summary;
+    let completed_review: CompletedSessionReview | undefined = undefined;
     if (outcome) {
       this.logger.append({
         sim_time_sec,
@@ -1061,6 +1065,19 @@ export class AuraSessionStore {
         },
         trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
       });
+
+      completed_review = buildCompletedSessionReview({
+        session_id: this.session_id,
+        session_mode: this.session_mode,
+        scenario: {
+          scenario_id: this.scenario.scenario_id,
+          version: this.scenario.version,
+          title: this.scenario.title,
+        },
+        outcome,
+        kpi_summary,
+        events: this.logger.list(),
+      });
     }
 
     const alarm_history = this.mergeAlarmHistory(
@@ -1094,6 +1111,7 @@ export class AuraSessionStore {
       events: this.logger.list(),
       outcome,
       kpi_summary,
+      completed_review,
     };
     this.emit();
     return this.snapshot;

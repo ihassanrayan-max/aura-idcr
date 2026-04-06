@@ -279,6 +279,10 @@ type KpiMetric = {
 }
 ```
 
+## `CompletedSessionReview`
+
+Single-session, post-terminal review bundle (Phase 5 Slice B). It is **derived** deterministically from canonical `SessionLogEvent[]`, the terminal `ScenarioOutcome`, scenario identity, and `KpiSummary`. It does not replace the append-only log; it provides a bounded, human-readable index (key events, milestones, highlights) for the supervisor panel and for future baseline-vs-adaptive comparison work. See the authoritative TypeScript definitions in `src/contracts/aura.ts` and builder `src/runtime/sessionReview.ts`.
+
 ## `OperatorStateSnapshot`
 
 `OperatorStateSnapshot` is the compact deterministic operator-state proxy published from existing runtime/session signals only.

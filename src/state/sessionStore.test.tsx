@@ -95,6 +95,8 @@ describe("AuraSessionStore", () => {
 
     expect(finalSnapshot.outcome).toBeDefined();
     expect(finalSnapshot.outcome?.outcome).not.toBe("success");
+    expect(finalSnapshot.completed_review).toBeDefined();
+    expect(finalSnapshot.completed_review?.terminal_outcome.outcome).toBe(finalSnapshot.outcome?.outcome);
   });
 
   it("keeps the rendered HMI synchronized with the session store", () => {
@@ -131,6 +133,11 @@ describe("AuraSessionStore", () => {
     expect(eventTypes).toContain("kpi_summary_generated");
     expect(snapshot.kpi_summary).toBeDefined();
     expect(snapshot.kpi_summary?.completeness).toBe("complete");
+    expect(snapshot.completed_review).toBeDefined();
+    expect(snapshot.completed_review?.schema_version).toBe(1);
+    expect(snapshot.completed_review?.session_id).toBe(snapshot.session_id);
+    expect(snapshot.completed_review?.terminal_outcome.outcome).toBe(snapshot.outcome?.outcome);
+    expect(snapshot.completed_review?.kpi_summary.kpi_summary_id).toBe(snapshot.kpi_summary?.kpi_summary_id);
   });
 
   it("reduces visible overload with grouped alarms and keeps the dominant hypothesis stable", () => {
@@ -354,7 +361,7 @@ describe("AuraSessionStore", () => {
     render(<App store={store} autoRun={false} />);
 
     expect(screen.getByText("Support State / Combined Risk")).toBeInTheDocument();
-    expect(screen.getByText(/AURA-IDCR Phase 5 Slice A/i)).toBeInTheDocument();
+    expect(screen.getByText(/AURA-IDCR Phase 5 Slice B/i)).toBeInTheDocument();
     expect(screen.getByText("Workload")).toBeInTheDocument();
     expect(screen.getByText("Attention Stability")).toBeInTheDocument();
     expect(screen.getByText("Signal Confidence")).toBeInTheDocument();
@@ -462,6 +469,14 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Dynamic First-Response Lane/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Storyline \/ Root-Cause Area/i })).toBeInTheDocument();
+  });
+
+  it("renders the completed-session review panel after a terminal outcome", () => {
+    const store = runSuccessfulSession();
+    render(<App store={store} autoRun={false} />);
+    expect(screen.getByTestId("completed-session-review")).toBeInTheDocument();
+    expect(screen.getByTestId("kpi-summary-block")).toBeInTheDocument();
+    expect(screen.getByText(/Completed session review/i)).toBeInTheDocument();
   });
 
   it("keeps critical alarms visibly pinned in the alarm area when they are active", () => {

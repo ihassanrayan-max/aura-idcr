@@ -769,7 +769,7 @@ Use these statuses exactly:
 
 ### Phase 5 — Evaluation Harness
 - [x] Baseline vs adaptive run selector — **Done** (Phase 5 Slice A: `SessionMode` threaded through store/logs/ticks; reset uses selected mode; default live run remains `adaptive`)
-- [ ] Replay view — **Not Started**
+- [x] Replay view — **Done** (Phase 5 Slice B: `CompletedSessionReview` from canonical logs + KPI; bounded replay/review UI in supervisor log panel after terminal outcome; `buildCompletedSessionReview` in `src/runtime/sessionReview.ts`)
 - [x] KPI aggregation — **Done** (Phase 5 Slice A: `computeKpiSummary` from canonical `SessionLogEvent[]`, `kpi_summary_generated` on terminal outcome, demo KPI shortlist in payload)
 - [ ] Comparison reporting — **Not Started**
 - [ ] Judge-friendly results summary — **Not Started**
@@ -785,12 +785,12 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Phase 4 slice 3 is now implemented for the deterministic feedwater-side / Loss of Feedwater scenario family.
+Phase 4 slice 3 is implemented for the deterministic feedwater-side / Loss of Feedwater scenario family. Phase 5 Slice A (session mode + KPI foundation) and Phase 5 Slice B (single-session completed-run review / bounded replay UI) are implemented.
 
 The immediate next recommended step should remain explicit and scope-controlled:
 1. treat Phase 4 as effectively complete for the current bounded operator-facing scope of assistance modes, adaptive UI behavior, action validation, and critical visibility,
 2. keep override workflows explicitly deferred unless the human opens that narrow scope on purpose,
-3. continue to defer replay/reporting expansion, KPI dashboards, and evaluation harness work unless the human explicitly opens that scope,
+3. when opening Phase 5 further, prefer **Slice C — comparison reporting** (baseline vs adaptive using `CompletedSessionReview`) or **judge-friendly results summary** over broad KPI dashboards or export/report workflows unless explicitly requested,
 4. if the human wants to stay in Phase 4, limit further work to compact supervisor/intervention presentation or bounded override logic rather than broad redesign.
 
 Do not replace the current Phase 2 storyline/procedure structures, and do not jump into broad evaluation or stretch features unless the human explicitly opens that phase.
@@ -843,6 +843,21 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
 
 ### Entries
+- Date: 2026-04-05
+- Agent/session: Phase 5 Slice B implementation session
+- Task worked on: Single-session completed-run review artifact (`CompletedSessionReview`), deterministic `buildCompletedSessionReview`, supervisor-panel replay UI after terminal outcome
+- Status: Done
+- What changed:
+  - Added `CompletedSessionReview` and related types to `src/contracts/aura.ts`; optional `completed_review` on `SessionSnapshot`
+  - Added `src/runtime/sessionReview.ts` (`buildCompletedSessionReview`) and `src/runtime/sessionReview.test.ts`
+  - `AuraSessionStore` finalizes `completed_review` after terminal KPI generation; tests extended in `src/state/sessionStore.test.tsx`
+  - `App.tsx` supervisor log panel switches to bounded review (milestones, highlights, stepped key events, KPI); optional raw payload in `<details>`; styles in `src/styles.css`; shell label Phase 5 Slice B in `src/runtime/presentationPolicy.ts`
+- What remains:
+  - Phase 4 supervisor override slice (not implemented), Phase 5 comparison reporting (Slice C), judge-friendly summary, export/report workflows
+- Blockers: None
+- Next recommended step:
+  - Phase 5 Slice C (baseline vs adaptive comparison) or judge summary slice, per human priority; or narrow Phase 4 override slice if prioritized
+
 - Date: 2026-04-05
 - Agent/session: Phase 5 Slice A implementation session
 - Task worked on: Baseline vs adaptive session mode, baseline gating for assistance/validator, KPI foundation from canonical logs

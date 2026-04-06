@@ -400,6 +400,66 @@ export type KpiSummary = {
   metrics: KpiMetric[];
 };
 
+/** Single-session completed-run review artifact (Phase 5 Slice B). Slice C can compare two of these. */
+export type CompletedSessionReviewSchemaVersion = 1;
+
+export type CompletedSessionReviewEvent = {
+  sequence: number;
+  source_event_id: string;
+  sim_time_sec: number;
+  event_type: SessionLogEventType;
+  title: string;
+  summary: string;
+  tick_id?: string;
+};
+
+export type CompletedSessionReviewMilestoneKind =
+  | "session_start"
+  | "phase_entry"
+  | "diagnosis"
+  | "support_escalation"
+  | "validator_intervention"
+  | "operator_action"
+  | "terminal_outcome";
+
+export type CompletedSessionReviewMilestone = {
+  milestone_id: string;
+  kind: CompletedSessionReviewMilestoneKind;
+  sim_time_sec: number;
+  label: string;
+  detail: string;
+  source_event_id: string;
+};
+
+export type CompletedSessionReviewHighlightKind =
+  | "storyline"
+  | "assistance"
+  | "intervention"
+  | "workload"
+  | "outcome";
+
+export type CompletedSessionReviewHighlight = {
+  highlight_id: string;
+  kind: CompletedSessionReviewHighlightKind;
+  label: string;
+  detail: string;
+};
+
+export type CompletedSessionReview = {
+  schema_version: CompletedSessionReviewSchemaVersion;
+  session_id: string;
+  session_mode: SessionMode;
+  scenario_id: string;
+  scenario_version: string;
+  scenario_title: string;
+  terminal_outcome: ScenarioOutcome;
+  completion_sim_time_sec: number;
+  kpi_summary: KpiSummary;
+  key_events: CompletedSessionReviewEvent[];
+  milestones: CompletedSessionReviewMilestone[];
+  highlights: CompletedSessionReviewHighlight[];
+};
+
 export type SessionSnapshot = {
   session_id: string;
   session_mode: SessionMode;
@@ -424,6 +484,8 @@ export type SessionSnapshot = {
   pending_action_confirmation?: PendingActionConfirmation;
   outcome?: ScenarioOutcome;
   kpi_summary?: KpiSummary;
+  /** Present only after a terminal outcome; derived deterministically from canonical logs + KPI. */
+  completed_review?: CompletedSessionReview;
   logging_active: boolean;
   validation_status_available: boolean;
 };

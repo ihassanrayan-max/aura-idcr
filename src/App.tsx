@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
-import type { SessionMode } from "./contracts/aura";
+import type { CompletedSessionReview, SessionLogEvent, SessionMode } from "./contracts/aura";
 import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
 import { formatSupportModeLabel } from "./runtime/supportModePolicy";
 import {
@@ -86,6 +86,136 @@ function formatDemoKpiValue(value: number, unit: string): string {
     return value.toFixed(1);
   }
   return String(value);
+}
+
+function CompletedSessionReviewPanel(props: {
+  review: CompletedSessionReview;
+  canonicalEvents: SessionLogEvent[];
+}) {
+  const { review, canonicalEvents } = props;
+  const [eventIndex, setEventIndex] = useState(0);
+
+  useEffect(() => {
+    setEventIndex(0);
+  }, [review.session_id]);
+
+  const keyEvents = review.key_events;
+  const maxIdx = Math.max(0, keyEvents.length - 1);
+  const safeIdx = Math.min(eventIndex, maxIdx);
+  const selected = keyEvents[safeIdx];
+  const rawSelected = selected ? canonicalEvents.find((e) => e.event_id === selected.source_event_id) : undefined;
+
+  function step(delta: number): void {
+    setEventIndex((current) => Math.min(maxIdx, Math.max(0, current + delta)));
+  }
+
+  return (
+    <div className="completed-session-review" data-testid="completed-session-review">
+      <div className="review-summary-card">
+        <h3 className="review-summary-title">Completed session review</h3>
+        <p className="muted">
+          <strong>{review.scenario_title}</strong> · {review.scenario_id} v{review.scenario_version} · Session{" "}
+          <code>{review.session_id}</code> · Mode <strong>{review.session_mode}</strong>
+        </p>
+        <p className="review-outcome-line">
+          Outcome: <span className="badge alert">{review.terminal_outcome.outcome}</span> at{" "}
+          <strong>t+{formatClock(review.completion_sim_time_sec)}</strong> sim time
+        </p>
+        <p className="muted">{review.terminal_outcome.message}</p>
+      </div>
+
+      <div className="kpi-summary-block" data-testid="kpi-summary-block">
+        <h3 className="kpi-summary-title">Session KPI summary</h3>
+        <p className="muted">
+          Completeness: {review.kpi_summary.completeness} · Generated {review.kpi_summary.generated_at_iso}
+        </p>
+        <ul className="kpi-metric-list">
+          {review.kpi_summary.metrics
+            .filter((entry) => entry.audience === "demo_facing")
+            .map((entry) => (
+              <li key={entry.kpi_id}>
+                <strong>{entry.label}</strong>: {formatDemoKpiValue(entry.value, entry.unit)} {entry.unit}
+              </li>
+            ))}
+        </ul>
+      </div>
+
+      <div className="review-milestones">
+        <h4 className="review-subheading">Milestones</h4>
+        <ol className="review-milestone-list">
+          {review.milestones.map((m) => (
+            <li key={m.milestone_id}>
+              <span className="review-milestone-time">{formatClock(m.sim_time_sec)}</span>{" "}
+              <strong>{m.label}</strong> — <span className="muted">{m.detail}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="review-highlights">
+        <h4 className="review-subheading">Highlights</h4>
+        <ul className="review-highlight-list">
+          {review.highlights.map((h) => (
+            <li key={h.highlight_id}>
+              <strong>{h.label}</strong>
+              <p className="muted">{h.detail}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="review-key-events">
+        <h4 className="review-subheading">Key events (replay)</h4>
+        <p className="muted">Step through the bounded timeline. Details use canonical log fields.</p>
+        <div className="review-stepper">
+          <button type="button" className="ghost-button" onClick={() => step(-1)} disabled={safeIdx <= 0}>
+            Previous
+          </button>
+          <span className="review-stepper-position">
+            {safeIdx + 1} / {keyEvents.length}
+          </span>
+          <button type="button" className="ghost-button" onClick={() => step(1)} disabled={safeIdx >= maxIdx}>
+            Next
+          </button>
+        </div>
+        {selected ? (
+          <div className="review-selected-event">
+            <div className="alarm-title-row">
+              <strong>{selected.title}</strong>
+              <span>
+                {formatClock(selected.sim_time_sec)} · {selected.event_type}
+              </span>
+            </div>
+            <p className="muted">{selected.summary}</p>
+            {selected.tick_id ? (
+              <p className="alarm-meta">
+                Tick anchor: <code>{selected.tick_id}</code>
+              </p>
+            ) : null}
+            {rawSelected ? (
+              <details className="review-technical-detail">
+                <summary>Canonical event payload (optional)</summary>
+                <pre>{JSON.stringify(rawSelected.payload, null, 2)}</pre>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+        <ol className="review-key-event-index">
+          {keyEvents.map((ke, i) => (
+            <li key={ke.source_event_id}>
+              <button
+                type="button"
+                className={`review-key-event-link ${i === safeIdx ? "is-active" : ""}`}
+                onClick={() => setEventIndex(i)}
+              >
+                {formatClock(ke.sim_time_sec)} — {ke.title}
+              </button>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
 }
 
 function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "neutral" | "alert" {
@@ -772,37 +902,47 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         <aside className="panel log-panel">
           <div className="panel-header">
             <h2>Supervisor / Log Preview</h2>
-            <p className="muted">Structured runtime event stream for replay-ready verification.</p>
+            <p className="muted">
+              {snapshot.completed_review
+                ? "Completed run — deterministic single-session review and bounded replay."
+                : "Structured runtime event stream for replay-ready verification."}
+            </p>
           </div>
-          {snapshot.kpi_summary ? (
-            <div className="kpi-summary-block" data-testid="kpi-summary-block">
-              <h3 className="kpi-summary-title">Session KPI summary</h3>
-              <p className="muted">
-                Completeness: {snapshot.kpi_summary.completeness} · Generated {snapshot.kpi_summary.generated_at_iso}
-              </p>
-              <ul className="kpi-metric-list">
-                {snapshot.kpi_summary.metrics
-                  .filter((entry) => entry.audience === "demo_facing")
-                  .map((entry) => (
-                    <li key={entry.kpi_id}>
-                      <strong>{entry.label}</strong>: {formatDemoKpiValue(entry.value, entry.unit)} {entry.unit}
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ) : null}
-          <div className="log-list">
-            {recentEvents.map((event) => (
-              <article key={event.event_id} className="log-card">
-                <div className="alarm-title-row">
-                  <strong>{event.event_type}</strong>
-                  <span>t+{event.sim_time_sec}s</span>
+          {snapshot.completed_review ? (
+            <CompletedSessionReviewPanel review={snapshot.completed_review} canonicalEvents={snapshot.events} />
+          ) : (
+            <>
+              {snapshot.kpi_summary ? (
+                <div className="kpi-summary-block" data-testid="kpi-summary-block">
+                  <h3 className="kpi-summary-title">Session KPI summary</h3>
+                  <p className="muted">
+                    Completeness: {snapshot.kpi_summary.completeness} · Generated {snapshot.kpi_summary.generated_at_iso}
+                  </p>
+                  <ul className="kpi-metric-list">
+                    {snapshot.kpi_summary.metrics
+                      .filter((entry) => entry.audience === "demo_facing")
+                      .map((entry) => (
+                        <li key={entry.kpi_id}>
+                          <strong>{entry.label}</strong>: {formatDemoKpiValue(entry.value, entry.unit)} {entry.unit}
+                        </li>
+                      ))}
+                  </ul>
                 </div>
-                <p className="muted">{event.source_module}</p>
-                <pre>{JSON.stringify(event.payload, null, 2)}</pre>
-              </article>
-            ))}
-          </div>
+              ) : null}
+              <div className="log-list">
+                {recentEvents.map((event) => (
+                  <article key={event.event_id} className="log-card">
+                    <div className="alarm-title-row">
+                      <strong>{event.event_type}</strong>
+                      <span>t+{event.sim_time_sec}s</span>
+                    </div>
+                    <p className="muted">{event.source_module}</p>
+                    <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
         </aside>
       </main>
     </div>

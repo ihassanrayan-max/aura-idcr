@@ -208,7 +208,7 @@ export function buildPresentationPolicy(params: BuildPresentationPolicyParams): 
     params.session_mode === "baseline" ? "Baseline session (no adaptive assistance)" : "Adaptive session (full assistance)";
 
   return {
-    shell_slice_label: `AURA-IDCR Phase 5 Slice A · ${session_mode_label}`,
+    shell_slice_label: `AURA-IDCR Phase 5 Slice B · ${session_mode_label}`,
     shell_mode_summary: `${formatSupportModeLabel(params.support_mode)} is shaping emphasis strength, watch-now prominence, and caution density while ${params.support_policy.critical_visibility.summary.toLowerCase()}`,
     status_tone: status.tone,
     validation_status_label: status.label,
