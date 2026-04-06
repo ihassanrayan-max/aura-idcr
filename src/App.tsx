@@ -361,6 +361,74 @@ function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
   );
 }
 
+function EidMassBalanceOverlay(props: {
+  feedwaterFlowPct: number;
+  steamFlowPct: number;
+  vesselLevelM: number;
+}) {
+  const { feedwaterFlowPct, steamFlowPct, vesselLevelM } = props;
+
+  const netFlow = feedwaterFlowPct - steamFlowPct;
+  const isLosingInventory = netFlow < -1;
+  const tripSetpointLevel = 6.15;
+  const marginToTrip = vesselLevelM - tripSetpointLevel;
+
+  let etttStr = "Stable";
+  if (isLosingInventory && marginToTrip > 0) {
+    const rateOfDrop = Math.abs(netFlow) * 0.0031;
+    const secondsToTrip = marginToTrip / rateOfDrop;
+    if (secondsToTrip > 3600) {
+      etttStr = "> 60m";
+    } else {
+      const min = Math.floor(secondsToTrip / 60);
+      const sec = Math.floor(secondsToTrip % 60);
+      etttStr = `${min}m ${sec}s`;
+    }
+  } else if (marginToTrip <= 0) {
+    etttStr = "Tripped";
+  } else if (netFlow > 1) {
+    etttStr = "Recovering";
+  }
+
+  // 8.2m is max normal level, 6.15m is trip. Span is ~2.05m.
+  const fillPct = Math.max(0, Math.min(100, (marginToTrip / 2.05) * 100));
+
+  return (
+    <div className="eid-overlay" data-testid="eid-mass-balance-overlay">
+      <h3 className="review-subheading">Plant Ecological Constraints</h3>
+      <div className="eid-metrics">
+        <article className={`metric-card ${isLosingInventory ? "alert-border" : ""}`}>
+          <span className="metric-label">Mass Inventory Balance (FW - Steam)</span>
+          <div className="eid-balance-row">
+            <span className={`badge ${isLosingInventory ? "alert" : "ok"}`}>
+              {netFlow > 0 ? "+" : ""}{netFlow.toFixed(1)}% net
+            </span>
+            <span className="muted">
+              In: {feedwaterFlowPct.toFixed(1)}% | Out: {steamFlowPct.toFixed(1)}%
+            </span>
+          </div>
+        </article>
+
+        <article className={`metric-card ${marginToTrip < 0.25 && marginToTrip > 0 ? "alert-border" : ""}`}>
+          <span className="metric-label">Reactor Trip Margin (Level &lt; 6.15m)</span>
+          <div className="eid-margin-row">
+            <strong>{marginToTrip > 0 ? marginToTrip.toFixed(2) : "0.00"} m</strong>
+            <span className={`badge ${isLosingInventory ? "alert" : "neutral"}`}>
+              Proj. limit: {etttStr}
+            </span>
+          </div>
+          <div className="eid-progress-bar">
+            <div
+              className={`eid-progress-fill ${isLosingInventory ? "depleting" : "stable"}`}
+              style={{ width: `${fillPct}%` }}
+            />
+          </div>
+        </article>
+      </div>
+    </div>
+  );
+}
+
 function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "neutral" | "alert" {
   switch (priority) {
     case "standard":
@@ -622,6 +690,12 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               Isolation condenser: {snapshot.plant_tick.plant_state.isolation_condenser_available ? "Available" : "Unavailable"}
             </span>
           </div>
+          
+          <EidMassBalanceOverlay 
+            feedwaterFlowPct={Number(snapshot.plant_tick.plant_state.feedwater_flow_pct)}
+            steamFlowPct={Number(snapshot.plant_tick.plant_state.main_steam_flow_pct)}
+            vesselLevelM={Number(snapshot.plant_tick.plant_state.vessel_water_level_m)}
+          />
         </section>
 
         <aside className="panel alarm-panel">

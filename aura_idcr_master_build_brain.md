@@ -778,7 +778,7 @@ Use these statuses exactly:
 Phase 5 is **complete** for the frozen MVP harness scope: baseline/adaptive selection, single-session replay/review, KPI aggregation, deterministic baseline-vs-adaptive comparison from two `CompletedSessionReview` captures, and a concise judge-facing summary in the supervisor panel.
 
 ### Phase 6 — Stretch / Polish
-- [ ] Richer ecological overlays — **Not Started**
+- [x] Richer ecological overlays — **Done**
 - [ ] Supervisor dashboard polish — **Not Started**
 - [ ] Projected outcome support — **Not Started**
 - [ ] Optional LLM explanation layer — **Not Started**
@@ -845,6 +845,18 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
 
 ### Entries
+- Date: 2026-04-06
+- Agent/session: Phase 6 Task 1 implementation session
+- Task worked on: Richer ecological overlays (EID Mass Inventory and Trip Margin)
+- Status: Done
+- What changed:
+  - Added `EidMassBalanceOverlay` in `App.tsx` underneath Plant Mimic Area to track Mass Inventory Balance (FW - Steam) and Reactor Trip Margin vs the 6.15m baseline limit.
+  - Added corresponding styling and `.eid-overlay` layout in `styles.css`.
+  - Added deterministic projected limit (Estimated Time To Trip) purely based on derived metrics from `plant_state_snapshot`.
+  - Did NOT alter the underlying deterministic engine.
+- What remains: Phase 4 supervisor override (optional), further Phase 6 polish.
+- Blockers: None
+- Next recommended step: Await further Phase 6 direction from user or Phase 4 override per product priority.
 - Date: 2026-04-05
 - Agent/session: Phase 5 Slice C implementation session
 - Task worked on: Baseline vs adaptive comparison (`SessionRunComparison`), judge-facing summary UI, `evaluation_capture` persistence, per-run session id + fresh logger on reset
