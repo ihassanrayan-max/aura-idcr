@@ -16,6 +16,7 @@ import type {
   KpiSummary,
   ScenarioOutcome,
   SessionMode,
+  SessionEvaluationCapture,
   SessionSnapshot,
   SupportMode,
   SupportPolicySnapshot,
@@ -152,11 +153,16 @@ function criticalEscalationActive(active_alarm_ids: string[]): boolean {
 
 export class AuraSessionStore {
   private readonly scenario: ScenarioDefinition;
-  private readonly session_id: string;
+  private readonly session_index: number;
+  /** Increments on each reset(); part of deterministic per-run session_id. */
+  private run_sequence = 1;
+  private session_id: string;
   private readonly tick_duration_sec: number;
   private session_mode: SessionMode;
   private readonly listeners = new Set<() => void>();
-  private readonly logger: SessionLogger;
+  private logger: SessionLogger;
+  /** Survives reset so baseline and adaptive completed reviews can be compared in one app session. */
+  private evaluation_capture: SessionEvaluationCapture = {};
 
   private action_sequence = 0;
   private validation_sequence = 0;
@@ -168,9 +174,14 @@ export class AuraSessionStore {
   private support_mode_runtime_state = createSupportModeRuntimeState();
   private snapshot: SessionSnapshot;
 
+  private computeSessionId(): string {
+    return `session_${String(this.session_index).padStart(3, "0")}_r${this.run_sequence}`;
+  }
+
   constructor(options: SessionStoreOptions = {}) {
     this.scenario = options.scenario ?? scnAlarmCascadeRootCause;
-    this.session_id = `session_${String(options.session_index ?? 1).padStart(3, "0")}`;
+    this.session_index = options.session_index ?? 1;
+    this.session_id = this.computeSessionId();
     this.tick_duration_sec = options.tick_duration_sec ?? 5;
     this.session_mode = options.session_mode ?? "adaptive";
     this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
@@ -493,6 +504,7 @@ export class AuraSessionStore {
       pending_action_confirmation: undefined,
       kpi_summary: undefined,
       completed_review: undefined,
+      evaluation_capture: { ...this.evaluation_capture },
       logging_active: true,
       validation_status_available: true,
     };
@@ -562,6 +574,9 @@ export class AuraSessionStore {
   }
 
   reset(): void {
+    this.run_sequence += 1;
+    this.session_id = this.computeSessionId();
+    this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
     this.action_sequence = 0;
     this.validation_sequence = 0;
     this.activation_sequence = 0;
@@ -1078,6 +1093,12 @@ export class AuraSessionStore {
         kpi_summary,
         events: this.logger.list(),
       });
+      this.evaluation_capture = {
+        ...this.evaluation_capture,
+        ...(this.session_mode === "baseline"
+          ? { baseline_completed: completed_review }
+          : { adaptive_completed: completed_review }),
+      };
     }
 
     const alarm_history = this.mergeAlarmHistory(
@@ -1112,6 +1133,7 @@ export class AuraSessionStore {
       outcome,
       kpi_summary,
       completed_review,
+      evaluation_capture: { ...this.evaluation_capture },
     };
     this.emit();
     return this.snapshot;

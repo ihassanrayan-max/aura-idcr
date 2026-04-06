@@ -460,6 +460,72 @@ export type CompletedSessionReview = {
   highlights: CompletedSessionReviewHighlight[];
 };
 
+/** Phase 5 Slice C: deterministic comparison of one baseline and one adaptive completed review. */
+export type SessionRunComparisonSchemaVersion = 1;
+
+export type SessionRunComparisonKpiFavors = "baseline" | "adaptive" | "tie" | "not_comparable";
+
+export type SessionRunComparisonKpiDelta = {
+  kpi_id: string;
+  label: string;
+  unit: string;
+  baseline_value: number;
+  adaptive_value: number;
+  /** adaptive_value minus baseline_value */
+  delta: number;
+  lower_is_better: boolean;
+  favors: SessionRunComparisonKpiFavors;
+};
+
+export type SessionRunComparisonMilestoneKindCount = {
+  kind: CompletedSessionReviewMilestoneKind;
+  baseline_count: number;
+  adaptive_count: number;
+};
+
+export type SessionRunComparisonJudgeOverall =
+  | "adaptive"
+  | "baseline"
+  | "tie"
+  | "mixed"
+  | "inconclusive";
+
+export type SessionRunComparisonJudgeSummary = {
+  overall_favors: SessionRunComparisonJudgeOverall;
+  headline: string;
+  metric_bullets: string[];
+  why_it_matters: string;
+};
+
+export type SessionRunComparison = {
+  schema_version: SessionRunComparisonSchemaVersion;
+  comparison_id: string;
+  scenario_id: string;
+  scenario_version: string;
+  scenario_title: string;
+  valid: boolean;
+  mismatch_reason?: string;
+  baseline_session_id: string;
+  adaptive_session_id: string;
+  baseline_outcome: OutcomeKind;
+  adaptive_outcome: OutcomeKind;
+  baseline_stabilized: boolean;
+  adaptive_stabilized: boolean;
+  completion_sim_time_sec_delta: number;
+  kpi_deltas: SessionRunComparisonKpiDelta[];
+  milestone_kind_counts: SessionRunComparisonMilestoneKindCount[];
+  key_event_count_baseline: number;
+  key_event_count_adaptive: number;
+  interpretation_lines: string[];
+  judge_summary: SessionRunComparisonJudgeSummary;
+};
+
+/** Latest captured completed reviews per mode for in-browser baseline vs adaptive comparison (Phase 5 Slice C). */
+export type SessionEvaluationCapture = {
+  baseline_completed?: CompletedSessionReview;
+  adaptive_completed?: CompletedSessionReview;
+};
+
 export type SessionSnapshot = {
   session_id: string;
   session_mode: SessionMode;
@@ -486,6 +552,8 @@ export type SessionSnapshot = {
   kpi_summary?: KpiSummary;
   /** Present only after a terminal outcome; derived deterministically from canonical logs + KPI. */
   completed_review?: CompletedSessionReview;
+  /** Latest terminal review per session mode; survives reset for comparison (Phase 5 Slice C). */
+  evaluation_capture?: SessionEvaluationCapture;
   logging_active: boolean;
   validation_status_available: boolean;
 };

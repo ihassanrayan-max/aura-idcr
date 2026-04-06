@@ -281,7 +281,11 @@ type KpiMetric = {
 
 ## `CompletedSessionReview`
 
-Single-session, post-terminal review bundle (Phase 5 Slice B). It is **derived** deterministically from canonical `SessionLogEvent[]`, the terminal `ScenarioOutcome`, scenario identity, and `KpiSummary`. It does not replace the append-only log; it provides a bounded, human-readable index (key events, milestones, highlights) for the supervisor panel and for future baseline-vs-adaptive comparison work. See the authoritative TypeScript definitions in `src/contracts/aura.ts` and builder `src/runtime/sessionReview.ts`.
+Single-session, post-terminal review bundle (Phase 5 Slice B). It is **derived** deterministically from canonical `SessionLogEvent[]`, the terminal `ScenarioOutcome`, scenario identity, and `KpiSummary`. It does not replace the append-only log; it provides a bounded, human-readable index (key events, milestones, highlights) for the supervisor panel and for baseline-vs-adaptive comparison (Phase 5 Slice C). See the authoritative TypeScript definitions in `src/contracts/aura.ts` and builder `src/runtime/sessionReview.ts`.
+
+## `SessionEvaluationCapture` / `SessionRunComparison`
+
+Phase 5 Slice C adds **in-memory** capture of the latest completed baseline review and latest completed adaptive review (`SessionEvaluationCapture` on `SessionSnapshot`), and a pure **comparison artifact** `SessionRunComparison` built by `buildSessionRunComparison` in `src/runtime/sessionComparison.ts` from two `CompletedSessionReview` objects with matching `scenario_id` and `scenario_version`. The artifact includes KPI deltas (adaptive − baseline), milestone kind counts, key event counts, deterministic interpretation lines, and a concise judge-facing summary. It is for presentation and evaluation; it does not replace the append-only log.
 
 ## `OperatorStateSnapshot`
 

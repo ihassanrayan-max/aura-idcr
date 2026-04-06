@@ -361,7 +361,7 @@ describe("AuraSessionStore", () => {
     render(<App store={store} autoRun={false} />);
 
     expect(screen.getByText("Support State / Combined Risk")).toBeInTheDocument();
-    expect(screen.getByText(/AURA-IDCR Phase 5 Slice B/i)).toBeInTheDocument();
+    expect(screen.getByText(/AURA-IDCR Phase 5 Slice C/i)).toBeInTheDocument();
     expect(screen.getByText("Workload")).toBeInTheDocument();
     expect(screen.getByText("Attention Stability")).toBeInTheDocument();
     expect(screen.getByText("Signal Confidence")).toBeInTheDocument();
@@ -488,5 +488,37 @@ describe("AuraSessionStore", () => {
 
     expect(screen.getByText(/Critical alarms pinned in view/i)).toBeInTheDocument();
     expect(screen.getAllByTestId("critical-alarm-chip").length).toBeGreaterThan(0);
+  });
+
+  it("uses a fresh log on reset with a deterministic per-run session id", () => {
+    const store = new AuraSessionStore({ session_index: 42, tick_duration_sec: 5 });
+    expect(store.getSnapshot().session_id).toMatch(/session_042_r1/);
+    expect(store.getSnapshot().events.filter((e) => e.event_type === "session_started").length).toBe(1);
+    store.setSessionMode("adaptive");
+    expect(store.getSnapshot().session_id).toMatch(/session_042_r2/);
+    expect(store.getSnapshot().events.filter((e) => e.event_type === "session_started").length).toBe(1);
+  });
+
+  it("retains evaluation_capture for baseline and adaptive across reset", () => {
+    const store = new AuraSessionStore({ session_index: 43, tick_duration_sec: 5, session_mode: "baseline" });
+    store.runUntilComplete(100);
+    const s1 = store.getSnapshot();
+    expect(s1.evaluation_capture?.baseline_completed).toBeDefined();
+    expect(s1.evaluation_capture?.adaptive_completed).toBeUndefined();
+    store.setSessionMode("adaptive");
+    store.runUntilComplete(100);
+    const s2 = store.getSnapshot();
+    expect(s2.evaluation_capture?.baseline_completed).toBeDefined();
+    expect(s2.evaluation_capture?.adaptive_completed).toBeDefined();
+  });
+
+  it("renders session comparison when both modes have completed captures", () => {
+    const store = new AuraSessionStore({ session_index: 44, tick_duration_sec: 5, session_mode: "baseline" });
+    store.runUntilComplete(100);
+    store.setSessionMode("adaptive");
+    store.runUntilComplete(100);
+    render(<App store={store} autoRun={false} />);
+    expect(screen.getByTestId("session-run-comparison")).toBeInTheDocument();
+    expect(screen.getByText(/Judge-facing summary/i)).toBeInTheDocument();
   });
 });

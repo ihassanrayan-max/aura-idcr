@@ -771,8 +771,11 @@ Use these statuses exactly:
 - [x] Baseline vs adaptive run selector — **Done** (Phase 5 Slice A: `SessionMode` threaded through store/logs/ticks; reset uses selected mode; default live run remains `adaptive`)
 - [x] Replay view — **Done** (Phase 5 Slice B: `CompletedSessionReview` from canonical logs + KPI; bounded replay/review UI in supervisor log panel after terminal outcome; `buildCompletedSessionReview` in `src/runtime/sessionReview.ts`)
 - [x] KPI aggregation — **Done** (Phase 5 Slice A: `computeKpiSummary` from canonical `SessionLogEvent[]`, `kpi_summary_generated` on terminal outcome, demo KPI shortlist in payload)
-- [ ] Comparison reporting — **Not Started**
-- [ ] Judge-friendly results summary — **Not Started**
+- [x] Comparison reporting — **Done** (Phase 5 Slice C: `SessionEvaluationCapture` on `SessionSnapshot`; per-run `session_*_rN` id + fresh `SessionLogger` on reset; `buildSessionRunComparison` in `src/runtime/sessionComparison.ts`; supervisor `SessionComparisonPanel` in `App.tsx`)
+- [x] Judge-friendly results summary — **Done** (Phase 5 Slice C: `SessionRunComparison.judge_summary` + UI block grounded in KPI deltas and outcomes)
+
+### Phase 5 exit (evaluation harness)
+Phase 5 is **complete** for the frozen MVP harness scope: baseline/adaptive selection, single-session replay/review, KPI aggregation, deterministic baseline-vs-adaptive comparison from two `CompletedSessionReview` captures, and a concise judge-facing summary in the supervisor panel.
 
 ### Phase 6 — Stretch / Polish
 - [ ] Richer ecological overlays — **Not Started**
@@ -785,15 +788,14 @@ Use these statuses exactly:
 ---
 
 ## 22) Current recommended next step
-Phase 4 slice 3 is implemented for the deterministic feedwater-side / Loss of Feedwater scenario family. Phase 5 Slice A (session mode + KPI foundation) and Phase 5 Slice B (single-session completed-run review / bounded replay UI) are implemented.
+Phase 5 (evaluation harness) is **closed**: Slice A (session mode + KPIs), Slice B (`CompletedSessionReview` + replay UI), and Slice C (comparison + judge summary + per-run log isolation) are implemented.
 
 The immediate next recommended step should remain explicit and scope-controlled:
-1. treat Phase 4 as effectively complete for the current bounded operator-facing scope of assistance modes, adaptive UI behavior, action validation, and critical visibility,
-2. keep override workflows explicitly deferred unless the human opens that narrow scope on purpose,
-3. when opening Phase 5 further, prefer **Slice C — comparison reporting** (baseline vs adaptive using `CompletedSessionReview`) or **judge-friendly results summary** over broad KPI dashboards or export/report workflows unless explicitly requested,
-4. if the human wants to stay in Phase 4, limit further work to compact supervisor/intervention presentation or bounded override logic rather than broad redesign.
+1. treat Phase 4 as effectively complete for the current bounded operator-facing scope except **supervisor override**, which remains optional and narrow if opened,
+2. prefer **Phase 6 — Demo polish / stretch** (only if time/value) or **Phase 4 override** only if explicitly prioritized — not broad KPI dashboards or export/report pipelines unless requested,
+3. keep new work additive; do not replace Phase 2 storyline/procedure structures without cause.
 
-Do not replace the current Phase 2 storyline/procedure structures, and do not jump into broad evaluation or stretch features unless the human explicitly opens that phase.
+Do not jump into large evaluation or stretch features unless the human explicitly opens that phase.
 
 ---
 
@@ -844,6 +846,20 @@ Use this section to track meaningful progress across sessions.
 
 ### Entries
 - Date: 2026-04-05
+- Agent/session: Phase 5 Slice C implementation session
+- Task worked on: Baseline vs adaptive comparison (`SessionRunComparison`), judge-facing summary UI, `evaluation_capture` persistence, per-run session id + fresh logger on reset
+- Status: Done
+- What changed:
+  - Added `SessionRunComparison`, `SessionEvaluationCapture`, and related types in `src/contracts/aura.ts`; `evaluation_capture` on `SessionSnapshot`
+  - Added `src/runtime/sessionComparison.ts` (`buildSessionRunComparison`) and `src/runtime/sessionComparison.test.ts`
+  - `AuraSessionStore`: `session_{index}_r{run}` ids, new `SessionLogger` each reset, merge terminal `completed_review` into `evaluation_capture` by mode; tests in `src/state/sessionStore.test.tsx`
+  - `App.tsx`: `SessionComparisonPanel` in supervisor column; `src/styles.css` comparison/judge styles; shell label Phase 5 Slice C in `src/runtime/presentationPolicy.ts`
+  - `docs/aura_module_contracts.md` updated for Slice C artifacts
+- What remains: Phase 4 supervisor override (optional), Phase 6 polish, optional export/report workflows
+- Blockers: None
+- Next recommended step: Phase 6 polish/stretch or narrow Phase 4 override, per product priority
+
+- Date: 2026-04-05
 - Agent/session: Phase 5 Slice B implementation session
 - Task worked on: Single-session completed-run review artifact (`CompletedSessionReview`), deterministic `buildCompletedSessionReview`, supervisor-panel replay UI after terminal outcome
 - Status: Done
@@ -853,10 +869,10 @@ Use this section to track meaningful progress across sessions.
   - `AuraSessionStore` finalizes `completed_review` after terminal KPI generation; tests extended in `src/state/sessionStore.test.tsx`
   - `App.tsx` supervisor log panel switches to bounded review (milestones, highlights, stepped key events, KPI); optional raw payload in `<details>`; styles in `src/styles.css`; shell label Phase 5 Slice B in `src/runtime/presentationPolicy.ts`
 - What remains:
-  - Phase 4 supervisor override slice (not implemented), Phase 5 comparison reporting (Slice C), judge-friendly summary, export/report workflows
+  - Phase 4 supervisor override slice (not implemented); export/report workflows (optional); Phase 5 Slice C completed in a later session entry
 - Blockers: None
 - Next recommended step:
-  - Phase 5 Slice C (baseline vs adaptive comparison) or judge summary slice, per human priority; or narrow Phase 4 override slice if prioritized
+  - (Superseded by Phase 5 Slice C entry.) Phase 6 polish or Phase 4 override if prioritized
 
 - Date: 2026-04-05
 - Agent/session: Phase 5 Slice A implementation session

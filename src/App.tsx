@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
-import type { CompletedSessionReview, SessionLogEvent, SessionMode } from "./contracts/aura";
+import type {
+  CompletedSessionReview,
+  SessionLogEvent,
+  SessionMode,
+  SessionRunComparison,
+} from "./contracts/aura";
+import { buildSessionRunComparison } from "./runtime/sessionComparison";
 import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
 import { formatSupportModeLabel } from "./runtime/supportModePolicy";
 import {
@@ -218,6 +224,143 @@ function CompletedSessionReviewPanel(props: {
   );
 }
 
+const DEMO_KPI_IDS = new Set([
+  "diagnosis_time_sec",
+  "response_stabilization_time_sec",
+  "critical_action_error_rate",
+  "harmful_actions_prevented_count",
+  "workload_peak_index",
+]);
+
+function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
+  const { comparison: c } = props;
+  const demoDeltas = c.kpi_deltas.filter((d) => DEMO_KPI_IDS.has(d.kpi_id));
+
+  return (
+    <div className="session-run-comparison" data-testid="session-run-comparison">
+      <div className="comparison-summary-card">
+        <h3 className="review-summary-title">Baseline vs adaptive comparison</h3>
+        <p className="muted">
+          <strong>{c.scenario_title}</strong> · {c.scenario_id} v{c.scenario_version}
+        </p>
+        {!c.valid ? (
+          <p className="comparison-invalid">{c.mismatch_reason}</p>
+        ) : null}
+      </div>
+
+      <div className="judge-summary-card">
+        <h4 className="review-subheading">Judge-facing summary</h4>
+        <p className="judge-headline">{c.judge_summary.headline}</p>
+        <p className="muted judge-overall">
+          Overall (observed): <strong>{c.judge_summary.overall_favors}</strong>
+        </p>
+        <ul className="judge-metric-bullets">
+          {c.judge_summary.metric_bullets.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+        <p className="muted judge-why">{c.judge_summary.why_it_matters}</p>
+      </div>
+
+      <div className="comparison-run-headers">
+        <div className="comparison-run-card">
+          <span className="metric-label">Baseline run</span>
+          <p>
+            <code>{c.baseline_session_id}</code>
+          </p>
+          <p>
+            Outcome: <span className="badge alert">{c.baseline_outcome}</span>
+            {c.baseline_stabilized ? " · stabilized" : ""}
+          </p>
+        </div>
+        <div className="comparison-run-card">
+          <span className="metric-label">Adaptive run</span>
+          <p>
+            <code>{c.adaptive_session_id}</code>
+          </p>
+          <p>
+            Outcome: <span className="badge alert">{c.adaptive_outcome}</span>
+            {c.adaptive_stabilized ? " · stabilized" : ""}
+          </p>
+        </div>
+      </div>
+
+      {c.valid ? (
+        <>
+          <div className="comparison-kpi-block">
+            <h4 className="review-subheading">KPI deltas (adaptive − baseline)</h4>
+            <table className="comparison-kpi-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Baseline</th>
+                  <th>Adaptive</th>
+                  <th>Delta</th>
+                  <th>Favors</th>
+                </tr>
+              </thead>
+              <tbody>
+                {demoDeltas.map((row) => (
+                  <tr key={row.kpi_id}>
+                    <td>{row.label}</td>
+                    <td>
+                      {formatDemoKpiValue(row.baseline_value, row.unit)} {row.unit}
+                    </td>
+                    <td>
+                      {formatDemoKpiValue(row.adaptive_value, row.unit)} {row.unit}
+                    </td>
+                    <td>
+                      {row.delta >= 0 ? "+" : ""}
+                      {formatDemoKpiValue(row.delta, row.unit)}
+                    </td>
+                    <td>{row.favors}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="comparison-milestone-block">
+            <h4 className="review-subheading">Milestone counts (by kind)</h4>
+            <table className="comparison-kpi-table">
+              <thead>
+                <tr>
+                  <th>Kind</th>
+                  <th>Baseline</th>
+                  <th>Adaptive</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.milestone_kind_counts.map((row) => (
+                  <tr key={row.kind}>
+                    <td>{row.kind}</td>
+                    <td>{row.baseline_count}</td>
+                    <td>{row.adaptive_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="muted">
+              Key events indexed: baseline {c.key_event_count_baseline}, adaptive {c.key_event_count_adaptive}. Completion
+              time delta: {c.completion_sim_time_sec_delta >= 0 ? "+" : ""}
+              {c.completion_sim_time_sec_delta}s sim time.
+            </p>
+          </div>
+
+          <div className="comparison-interpretation">
+            <h4 className="review-subheading">Plain-English interpretation</h4>
+            <ul className="review-highlight-list">
+              {c.interpretation_lines.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "neutral" | "alert" {
   switch (priority) {
     case "standard":
@@ -334,6 +477,18 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
       ...cardMap[id],
     }));
   }, [presentationPolicy.support_section_order, snapshot.support_policy, snapshot.support_refinement]);
+
+  const sessionRunComparison = useMemo(() => {
+    const cap = snapshot.evaluation_capture;
+    if (!cap?.baseline_completed || !cap?.adaptive_completed) {
+      return undefined;
+    }
+    return buildSessionRunComparison(cap.baseline_completed, cap.adaptive_completed);
+  }, [snapshot.evaluation_capture]);
+
+  const comparisonCaptureHint =
+    snapshot.evaluation_capture &&
+    Boolean(snapshot.evaluation_capture.baseline_completed) !== Boolean(snapshot.evaluation_capture.adaptive_completed);
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -904,10 +1059,17 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             <h2>Supervisor / Log Preview</h2>
             <p className="muted">
               {snapshot.completed_review
-                ? "Completed run — deterministic single-session review and bounded replay."
+                ? "Completed run — deterministic single-session review, KPI comparison when both modes are captured, and bounded replay."
                 : "Structured runtime event stream for replay-ready verification."}
             </p>
           </div>
+          {sessionRunComparison ? <SessionComparisonPanel comparison={sessionRunComparison} /> : null}
+          {comparisonCaptureHint ? (
+            <p className="muted comparison-capture-hint">
+              Capture comparison: run the other session mode (Next run), then <strong>Reset session</strong> and complete a
+              terminal outcome for that mode. Both baseline and adaptive completed runs are kept for this browser session.
+            </p>
+          ) : null}
           {snapshot.completed_review ? (
             <CompletedSessionReviewPanel review={snapshot.completed_review} canonicalEvents={snapshot.events} />
           ) : (
