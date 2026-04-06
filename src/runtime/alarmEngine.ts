@@ -42,6 +42,26 @@ function triggerIsSatisfied(
 function thresholdAlarmStates(plant_state: PlantStateSnapshot): string[] {
   const active_ids: string[] = [];
 
+  if (!Boolean(plant_state.offsite_power_available)) {
+    active_ids.push("ALM_OFFSITE_POWER_LOSS");
+  }
+
+  if (!Boolean(plant_state.condenser_heat_sink_available)) {
+    active_ids.push("ALM_CONDENSER_HEAT_SINK_LOST");
+  }
+
+  if (Number(plant_state.dc_bus_soc_pct) < 40) {
+    active_ids.push("ALM_DC_BUS_LOW");
+  }
+
+  if (
+    !Boolean(plant_state.offsite_power_available) &&
+    Boolean(plant_state.isolation_condenser_available) &&
+    Number(plant_state.isolation_condenser_flow_pct) < 52
+  ) {
+    active_ids.push("ALM_ISOLATION_CONDENSER_FLOW_LOW");
+  }
+
   if (Number(plant_state.condenser_backpressure_kpa) > 18) {
     active_ids.push("ALM_CONDENSER_BACKPRESSURE_HIGH");
   }

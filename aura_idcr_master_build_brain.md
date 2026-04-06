@@ -846,6 +846,23 @@ Use this section to track meaningful progress across sessions.
 
 ### Entries
 - Date: 2026-04-06
+- Agent/session: Cluster 1 Plan A implementation session
+- Task worked on: Multi-scenario runtime generalization plus Scenario B (Loss of Offsite Power toward Station Blackout)
+- Status: Done
+- What changed:
+  - Added a scenario registry and runtime-profile seam so the store, UI, and runtime now support more than one deterministic scenario while preserving the Scenario A default path.
+  - Added scenario-aware reset/config flow, scenario catalog exposure in the session snapshot, scenario-specific manual control schemas, and scenario-keyed baseline/adaptive evaluation capture so mixed-scenario runs no longer compare against each other.
+  - Added Scenario B (`scn_loss_of_offsite_power_sbo`) with bounded LoOP/SBO progression, isolation-condenser operator control, scenario-specific alarm metadata, alarm clustering, reasoning hypotheses, first-response lane behavior, validator rules, and terminal outcome messaging.
+  - Kept the generic scenario engine intact, preserved Scenario A deterministic behavior, extended tests to 55 passing checks, and re-verified the repo with `npm test` and `npm run build`.
+- What remains:
+  - Scenario C is still intentionally not implemented.
+  - Supervisor override, broad export/report workflows, and wider plant-model expansion remain intentionally deferred.
+- Blockers:
+  - None in the completed Cluster 1 Plan A slice.
+- Next recommended step:
+  - Hold the new multi-scenario seam stable, then take the next bounded slice on Scenario C or on judge-facing/reporting polish only if the human explicitly prioritizes it.
+
+- Date: 2026-04-06
 - Agent/session: Phase 6 Task 1 implementation session
 - Task worked on: Richer ecological overlays (EID Mass Inventory and Trip Margin)
 - Status: Done
@@ -1058,4 +1075,3 @@ Build the system in clean, verified slices.
 No scope chaos.
 No random reinvention.
 No replacing the core idea with something easier.
-

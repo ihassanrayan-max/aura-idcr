@@ -1,4 +1,11 @@
-import type { AlarmCluster, AlarmIntelligenceSnapshot, AlarmPriority, AlarmRecord, AlarmSet } from "../contracts/aura";
+import type {
+  AlarmCluster,
+  AlarmIntelligenceSnapshot,
+  AlarmPriority,
+  AlarmRecord,
+  AlarmSet,
+  ScenarioRuntimeProfileId,
+} from "../contracts/aura";
 
 type ClusterRule = {
   cluster_id: string;
@@ -7,7 +14,7 @@ type ClusterRule = {
   group_hints: string[];
 };
 
-const clusterRules: ClusterRule[] = [
+const feedwaterClusterRules: ClusterRule[] = [
   {
     cluster_id: "cluster_feedwater_inventory",
     title: "Feedwater / Inventory Challenge",
@@ -27,6 +34,37 @@ const clusterRules: ClusterRule[] = [
     group_hints: ["containment_challenge", "post_trip_recovery"],
   },
 ];
+
+const lossOfOffsitePowerClusterRules: ClusterRule[] = [
+  {
+    cluster_id: "cluster_electrical_disturbance",
+    title: "Electrical Disturbance",
+    summary: "Loss of offsite power and battery-margin alarms define the dominant electrical upset picture.",
+    group_hints: ["electrical_disturbance"],
+  },
+  {
+    cluster_id: "cluster_decay_heat_removal_unavailable",
+    title: "Decay-Heat Removal Gap",
+    summary: "Normal heat-sink loss and weak isolation-condenser recovery leave decay heat insufficiently managed.",
+    group_hints: ["decay_heat_removal_unavailable"],
+  },
+  {
+    cluster_id: "cluster_pressure_consequence_escalation",
+    title: "Pressure / Consequence Escalation",
+    summary: "Pressure-side and containment alarms indicate the missed-recovery path is now escalating consequences.",
+    group_hints: ["pressure_transient", "containment_challenge", "post_trip_recovery"],
+  },
+];
+
+function clusterRulesForProfile(runtime_profile_id: ScenarioRuntimeProfileId): ClusterRule[] {
+  switch (runtime_profile_id) {
+    case "loss_of_offsite_power_sbo":
+      return lossOfOffsitePowerClusterRules;
+    case "feedwater_degradation":
+    default:
+      return feedwaterClusterRules;
+  }
+}
 
 function priorityRank(priority: AlarmPriority): number {
   switch (priority) {
@@ -91,7 +129,11 @@ function fallbackRule(alarm: AlarmRecord): ClusterRule {
   };
 }
 
-export function buildAlarmIntelligence(alarm_set: AlarmSet): AlarmIntelligenceSnapshot {
+export function buildAlarmIntelligence(
+  alarm_set: AlarmSet,
+  runtime_profile_id: ScenarioRuntimeProfileId = "feedwater_degradation",
+): AlarmIntelligenceSnapshot {
+  const clusterRules = clusterRulesForProfile(runtime_profile_id);
   const alarms_by_cluster = new Map<string, { rule: ClusterRule; alarms: AlarmRecord[] }>();
 
   for (const alarm of alarm_set.active_alarms) {

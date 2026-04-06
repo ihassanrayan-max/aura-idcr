@@ -5,6 +5,7 @@ import type {
   PlantStateSnapshot,
   ReasoningSnapshot,
   ScalarValue,
+  ScenarioRuntimeProfileId,
 } from "../contracts/aura";
 
 function makeItem(params: {
@@ -201,15 +202,135 @@ function buildPostTripLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet)
   ];
 }
 
+function buildLoopDiagnosisLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet): FirstResponseItem[] {
+  return [
+    makeItem({
+      item_id: "loop_check_picture",
+      label: "Confirm LoOP, trip, and generation collapse together",
+      item_kind: "check",
+      why: "The first bounded task is to confirm that the event is an electrical loss with trip, not an isolated turbine indication.",
+      completion_hint: "Use offsite power, reactor trip, and turbine output together before narrowing the response path.",
+      source_alarm_ids: ["ALM_OFFSITE_POWER_LOSS", "ALM_REACTOR_TRIP_ACTIVE", "ALM_TURBINE_OUTPUT_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["offsite_power_available", "reactor_trip_active", "turbine_output_mwe"],
+    }),
+    makeItem({
+      item_id: "loop_watch_dc",
+      label: "Watch DC margin while the recovery path is forming",
+      item_kind: "watch",
+      why: `DC bus state of charge is ${Number(plant_state.dc_bus_soc_pct).toFixed(1)}%, so the response window is battery-limited if recovery drifts.`,
+      completion_hint: "Battery margin should stay comfortably above the low band while the decay-heat path is established.",
+      source_alarm_ids: ["ALM_DC_BUS_LOW"].filter((alarm_id) => alarm_set.active_alarm_ids.includes(alarm_id)),
+      source_variable_ids: ["dc_bus_soc_pct"],
+    }),
+  ];
+}
+
+function buildDecayHeatRemovalLane(
+  plant_state: PlantStateSnapshot,
+  alarm_set: AlarmSet,
+  allowed_action_ids: Set<string>,
+): FirstResponseItem[] {
+  const items: FirstResponseItem[] = [
+    makeItem({
+      item_id: "sbo_check_ic",
+      label: "Confirm isolation condenser flow is establishing decay-heat removal",
+      item_kind: "check",
+      why: `Isolation condenser flow is ${Number(plant_state.isolation_condenser_flow_pct).toFixed(1)}% rated while the normal sink remains unavailable.`,
+      completion_hint: "The bounded recovery path is to establish IC flow before pressure and DC margin worsen.",
+      source_alarm_ids: ["ALM_CONDENSER_HEAT_SINK_LOST", "ALM_ISOLATION_CONDENSER_FLOW_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["condenser_heat_sink_available", "isolation_condenser_flow_pct", "vessel_pressure_mpa"],
+    }),
+  ];
+
+  if (allowed_action_ids.has("act_adjust_isolation_condenser")) {
+    items.push(
+      makeItem({
+        item_id: "sbo_action_ic",
+        label: "Align isolation condenser demand toward 68% rated",
+        item_kind: "action",
+        why: "The current first-response path is to establish bounded IC flow before blackout pressure accumulates.",
+        completion_hint: "Use the bounded IC-demand alignment first, then re-check pressure, containment, and battery margin.",
+        source_alarm_ids: ["ALM_ISOLATION_CONDENSER_FLOW_LOW"].filter((alarm_id) => alarm_set.active_alarm_ids.includes(alarm_id)),
+        source_variable_ids: ["isolation_condenser_flow_pct", "vessel_pressure_mpa"],
+        recommended_action_id: "act_adjust_isolation_condenser",
+        recommended_value: 68,
+      }),
+    );
+  }
+
+  items.push(
+    makeItem({
+      item_id: "sbo_watch_pressure",
+      label: "Watch pressure and containment while IC flow comes up",
+      item_kind: "watch",
+      why: "A successful recovery should flatten pressure and keep containment from escalating while DC margin is preserved.",
+      completion_hint: "Pressure should trend back inside the bounded band and containment should stop climbing.",
+      source_alarm_ids: ["ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["vessel_pressure_mpa", "containment_pressure_kpa", "dc_bus_soc_pct"],
+    }),
+  );
+
+  return items;
+}
+
+function buildBlackoutProgressionLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet): FirstResponseItem[] {
+  return [
+    makeItem({
+      item_id: "sbo_watch_blackout",
+      label: "Watch battery margin and consequence escalation markers together",
+      item_kind: "watch",
+      why: `DC bus is ${Number(plant_state.dc_bus_soc_pct).toFixed(1)}% and containment pressure is ${Number(plant_state.containment_pressure_kpa).toFixed(1)} kPa.`,
+      completion_hint: "If battery margin keeps falling while pressure indicators worsen, the bounded recovery path is being missed.",
+      source_alarm_ids: ["ALM_DC_BUS_LOW", "ALM_CONTAINMENT_PRESSURE_HIGH", "ALM_SRV_STUCK_OPEN"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["dc_bus_soc_pct", "containment_pressure_kpa", "safety_relief_valve_open"],
+    }),
+  ];
+}
+
 export function buildFirstResponseLane(params: {
   sim_time_sec: number;
   plant_state: PlantStateSnapshot;
   alarm_set: AlarmSet;
   reasoning_snapshot: ReasoningSnapshot;
   allowed_action_ids: string[];
+  runtime_profile_id?: ScenarioRuntimeProfileId;
 }): FirstResponseLane {
   const allowed_action_ids = new Set(params.allowed_action_ids);
   let items: FirstResponseItem[];
+  const runtime_profile_id = params.runtime_profile_id ?? "feedwater_degradation";
+
+  if (runtime_profile_id === "loss_of_offsite_power_sbo") {
+    switch (params.reasoning_snapshot.dominant_hypothesis_id) {
+      case "hyp_decay_heat_removal_gap":
+        items = buildDecayHeatRemovalLane(params.plant_state, params.alarm_set, allowed_action_ids);
+        break;
+      case "hyp_station_blackout_progression":
+      case "hyp_pressure_consequence_management":
+        items = buildBlackoutProgressionLane(params.plant_state, params.alarm_set);
+        break;
+      case "hyp_loss_of_offsite_power":
+      default:
+        items = buildLoopDiagnosisLane(params.plant_state, params.alarm_set);
+        break;
+    }
+
+    return {
+      lane_id: `lane_${params.reasoning_snapshot.dominant_hypothesis_id ?? "monitor"}_${params.sim_time_sec}`,
+      dominant_hypothesis_id: params.reasoning_snapshot.dominant_hypothesis_id,
+      updated_at_sec: params.sim_time_sec,
+      prototype_notice:
+        "Prototype guidance only. This lane narrows likely first checks and actions for the current bounded LoOP/SBO scenario; it is not an official procedure.",
+      items,
+    };
+  }
 
   switch (params.reasoning_snapshot.dominant_hypothesis_id) {
     case "hyp_heat_sink_stress":

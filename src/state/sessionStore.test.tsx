@@ -17,6 +17,26 @@ function runSuccessfulSession(): AuraSessionStore {
   return store;
 }
 
+function runSuccessfulLoopSession(): AuraSessionStore {
+  const store = new AuraSessionStore({
+    session_index: 111,
+    tick_duration_sec: 5,
+    scenario_id: "scn_loss_of_offsite_power_sbo",
+  });
+  store.advanceTick();
+  store.advanceTick();
+  store.advanceTick();
+  store.advanceTick();
+  store.requestAction({
+    action_id: "act_adjust_isolation_condenser",
+    requested_value: 68,
+    ui_region: "plant_mimic",
+    reason_note: "Deterministic LoOP recovery test correction",
+  });
+  store.runUntilComplete(80);
+  return store;
+}
+
 function summarizeStore(store: AuraSessionStore) {
   const snapshot = store.getSnapshot();
   return {
@@ -494,7 +514,7 @@ describe("AuraSessionStore", () => {
     const store = new AuraSessionStore({ session_index: 42, tick_duration_sec: 5 });
     expect(store.getSnapshot().session_id).toMatch(/session_042_r1/);
     expect(store.getSnapshot().events.filter((e) => e.event_type === "session_started").length).toBe(1);
-    store.setSessionMode("adaptive");
+    store.reset({ session_mode: "adaptive" });
     expect(store.getSnapshot().session_id).toMatch(/session_042_r2/);
     expect(store.getSnapshot().events.filter((e) => e.event_type === "session_started").length).toBe(1);
   });
@@ -503,22 +523,89 @@ describe("AuraSessionStore", () => {
     const store = new AuraSessionStore({ session_index: 43, tick_duration_sec: 5, session_mode: "baseline" });
     store.runUntilComplete(100);
     const s1 = store.getSnapshot();
-    expect(s1.evaluation_capture?.baseline_completed).toBeDefined();
-    expect(s1.evaluation_capture?.adaptive_completed).toBeUndefined();
-    store.setSessionMode("adaptive");
+    const scenarioKey = `${s1.scenario.scenario_id}@${s1.scenario.version}`;
+    expect(s1.evaluation_capture?.[scenarioKey]?.baseline_completed).toBeDefined();
+    expect(s1.evaluation_capture?.[scenarioKey]?.adaptive_completed).toBeUndefined();
+    store.reset({ session_mode: "adaptive" });
     store.runUntilComplete(100);
     const s2 = store.getSnapshot();
-    expect(s2.evaluation_capture?.baseline_completed).toBeDefined();
-    expect(s2.evaluation_capture?.adaptive_completed).toBeDefined();
+    expect(s2.evaluation_capture?.[scenarioKey]?.baseline_completed).toBeDefined();
+    expect(s2.evaluation_capture?.[scenarioKey]?.adaptive_completed).toBeDefined();
   });
 
   it("renders session comparison when both modes have completed captures", () => {
     const store = new AuraSessionStore({ session_index: 44, tick_duration_sec: 5, session_mode: "baseline" });
     store.runUntilComplete(100);
-    store.setSessionMode("adaptive");
+    store.reset({ session_mode: "adaptive" });
     store.runUntilComplete(100);
     render(<App store={store} autoRun={false} />);
     expect(screen.getByTestId("session-run-comparison")).toBeInTheDocument();
     expect(screen.getByText(/Judge-facing summary/i)).toBeInTheDocument();
+  });
+
+  it("applies next-run scenario and session mode together on reset", () => {
+    const store = new AuraSessionStore({ session_index: 45, tick_duration_sec: 5 });
+
+    store.advanceTick();
+    store.requestAction({
+      action_id: "act_ack_alarm",
+      ui_region: "alarm_area",
+      reason_note: "pre-reset confirmation",
+    });
+    expect(store.getSnapshot().executed_actions).toHaveLength(1);
+
+    store.reset({
+      session_mode: "baseline",
+      scenario_id: "scn_loss_of_offsite_power_sbo",
+    });
+
+    const snapshot = store.getSnapshot();
+    expect(snapshot.session_mode).toBe("baseline");
+    expect(snapshot.scenario.scenario_id).toBe("scn_loss_of_offsite_power_sbo");
+    expect(snapshot.executed_actions).toHaveLength(0);
+    expect(snapshot.pending_action_confirmation).toBeUndefined();
+    expect(snapshot.events.find((event) => event.event_type === "session_started")?.payload.session_mode).toBe("baseline");
+  });
+
+  it("runs Scenario B deterministically on the bounded successful recovery path", () => {
+    const first = summarizeStore(runSuccessfulLoopSession());
+    const second = summarizeStore(runSuccessfulLoopSession());
+
+    expect(first).toEqual(second);
+    expect(first.outcome?.outcome).toBe("success");
+  });
+
+  it("keeps scenario comparison buckets separate between Scenario A and Scenario B", () => {
+    const store = new AuraSessionStore({ session_index: 46, tick_duration_sec: 5, session_mode: "baseline" });
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive" });
+    store.runUntilComplete(100);
+
+    store.reset({ session_mode: "baseline", scenario_id: "scn_loss_of_offsite_power_sbo" });
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive", scenario_id: "scn_loss_of_offsite_power_sbo" });
+    store.runUntilComplete(100);
+
+    const capture = store.getSnapshot().evaluation_capture ?? {};
+    expect(capture["scn_alarm_cascade_root_cause@1.0.0"]?.baseline_completed).toBeDefined();
+    expect(capture["scn_alarm_cascade_root_cause@1.0.0"]?.adaptive_completed).toBeDefined();
+    expect(capture["scn_loss_of_offsite_power_sbo@1.0.0"]?.baseline_completed).toBeDefined();
+    expect(capture["scn_loss_of_offsite_power_sbo@1.0.0"]?.adaptive_completed).toBeDefined();
+  });
+
+  it("renders scenario selection and the Scenario B IC control in the HMI", () => {
+    const store = new AuraSessionStore({
+      session_index: 47,
+      tick_duration_sec: 5,
+      scenario_id: "scn_loss_of_offsite_power_sbo",
+    });
+
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByLabelText(/Next scenario/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Next run/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Isolation Condenser Demand Target/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Apply IC alignment/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Feedwater Demand Target/i)).not.toBeInTheDocument();
   });
 });

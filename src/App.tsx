@@ -3,6 +3,7 @@ import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
 import type {
   CompletedSessionReview,
+  ScenarioControlRangeSchema,
   SessionLogEvent,
   SessionMode,
   SessionRunComparison,
@@ -443,9 +444,20 @@ function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "n
 export default function App({ store = defaultStore, autoRun = true }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
   const [isRunning, setIsRunning] = useState(true);
-  const [feedwaterDemand, setFeedwaterDemand] = useState(82);
+  const [controlValues, setControlValues] = useState<Record<string, number>>({});
   const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
   const [selectedSessionMode, setSelectedSessionMode] = useState<SessionMode>("adaptive");
+  const [selectedScenarioId, setSelectedScenarioId] = useState(snapshot.scenario.scenario_id);
+
+  useEffect(() => {
+    setSelectedSessionMode(snapshot.session_mode);
+    setSelectedScenarioId(snapshot.scenario.scenario_id);
+    setControlValues(
+      Object.fromEntries(
+        snapshot.manual_control_schema.controls.map((control) => [control.control_id, control.default_value]),
+      ) as Record<string, number>,
+    );
+  }, [snapshot.manual_control_schema.controls, snapshot.scenario.scenario_id, snapshot.session_mode]);
 
   useEffect(() => {
     if (!autoRun || !isRunning || snapshot.outcome) {
@@ -547,16 +559,19 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   }, [presentationPolicy.support_section_order, snapshot.support_policy, snapshot.support_refinement]);
 
   const sessionRunComparison = useMemo(() => {
-    const cap = snapshot.evaluation_capture;
+    const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
+    const cap = snapshot.evaluation_capture?.[captureKey];
     if (!cap?.baseline_completed || !cap?.adaptive_completed) {
       return undefined;
     }
     return buildSessionRunComparison(cap.baseline_completed, cap.adaptive_completed);
-  }, [snapshot.evaluation_capture]);
+  }, [snapshot.evaluation_capture, snapshot.scenario.scenario_id, snapshot.scenario.version]);
 
-  const comparisonCaptureHint =
-    snapshot.evaluation_capture &&
-    Boolean(snapshot.evaluation_capture.baseline_completed) !== Boolean(snapshot.evaluation_capture.adaptive_completed);
+  const comparisonCaptureHint = useMemo(() => {
+    const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
+    const capture = snapshot.evaluation_capture?.[captureKey];
+    return capture && Boolean(capture.baseline_completed) !== Boolean(capture.adaptive_completed);
+  }, [snapshot.evaluation_capture, snapshot.scenario.scenario_id, snapshot.scenario.version]);
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -576,6 +591,54 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     });
   }
 
+  function renderManualControl(control: ScenarioControlRangeSchema) {
+    const controlValue = controlValues[control.control_id] ?? control.default_value;
+
+    return (
+      <div key={control.control_id} className="control-block">
+        <div className="panel-header compact-header">
+          <h3>{snapshot.manual_control_schema.title}</h3>
+          <p className="muted">{snapshot.manual_control_schema.helper_text}</p>
+        </div>
+        <label htmlFor={control.control_id}>{control.label}</label>
+        <input
+          id={control.control_id}
+          type="range"
+          min={control.min}
+          max={control.max}
+          step={control.step}
+          value={controlValue}
+          onChange={(event) =>
+            setControlValues((current) => ({
+              ...current,
+              [control.control_id]: Number(event.target.value),
+            }))
+          }
+        />
+        <div className="control-row">
+          <strong>
+            {controlValue}
+            {control.unit_label ? ` ${control.unit_label}` : ""}
+          </strong>
+          <button
+            type="button"
+            disabled={actionConfirmationPending}
+            onClick={() =>
+              store.requestAction({
+                action_id: control.action_id,
+                requested_value: controlValue,
+                ui_region: "plant_mimic",
+                reason_note: control.reason_note,
+              })
+            }
+          >
+            {control.apply_button_label}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <header className="top-status-bar">
@@ -587,9 +650,23 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         </div>
         <div className="status-grid">
           <div className="status-cell">
-            <span className="status-label">Session Mode</span>
+            <span className="status-label">Scenario / Mode</span>
             <div className="session-mode-row">
               <strong>{snapshot.session_mode}</strong>
+              <label className="muted session-mode-label" htmlFor="scenario-select">
+                Next scenario
+              </label>
+              <select
+                id="scenario-select"
+                value={selectedScenarioId}
+                onChange={(event) => setSelectedScenarioId(event.target.value)}
+              >
+                {snapshot.scenario_catalog.map((scenario) => (
+                  <option key={scenario.scenario_id} value={scenario.scenario_id}>
+                    {scenario.title}
+                  </option>
+                ))}
+              </select>
               <label className="muted session-mode-label" htmlFor="session-mode-select">
                 Next run
               </label>
@@ -691,11 +768,13 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             </span>
           </div>
           
-          <EidMassBalanceOverlay 
-            feedwaterFlowPct={Number(snapshot.plant_tick.plant_state.feedwater_flow_pct)}
-            steamFlowPct={Number(snapshot.plant_tick.plant_state.main_steam_flow_pct)}
-            vesselLevelM={Number(snapshot.plant_tick.plant_state.vessel_water_level_m)}
-          />
+          {snapshot.runtime_profile_id === "feedwater_degradation" ? (
+            <EidMassBalanceOverlay
+              feedwaterFlowPct={Number(snapshot.plant_tick.plant_state.feedwater_flow_pct)}
+              steamFlowPct={Number(snapshot.plant_tick.plant_state.main_steam_flow_pct)}
+              vesselLevelM={Number(snapshot.plant_tick.plant_state.vessel_water_level_m)}
+            />
+          ) : null}
         </section>
 
         <aside className="panel alarm-panel">
@@ -917,38 +996,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             </div>
           </div>
 
-          <div className="control-block">
-            <div className="panel-header compact-header">
-              <h3>Manual Control Input</h3>
-              <p className="muted">The baseline bounded controls remain available for deterministic replay.</p>
-            </div>
-            <label htmlFor="feedwater-demand">Feedwater Demand Target</label>
-            <input
-              id="feedwater-demand"
-              type="range"
-              min={35}
-              max={95}
-              value={feedwaterDemand}
-              onChange={(event) => setFeedwaterDemand(Number(event.target.value))}
-            />
-            <div className="control-row">
-              <strong>{feedwaterDemand}% rated</strong>
-              <button
-                type="button"
-                disabled={actionConfirmationPending}
-                onClick={() =>
-                  store.requestAction({
-                    action_id: "act_adjust_feedwater",
-                    requested_value: feedwaterDemand,
-                    ui_region: "plant_mimic",
-                    reason_note: "Manual feedwater correction request from the baseline HMI.",
-                  })
-                }
-              >
-                Apply feedwater correction
-              </button>
-            </div>
-          </div>
+          {snapshot.manual_control_schema.controls.map(renderManualControl)}
 
           <div className="control-row">
             <button
@@ -974,8 +1022,10 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               type="button"
               onClick={() => {
                 setIsRunning(true);
-                setFeedwaterDemand(82);
-                store.setSessionMode(selectedSessionMode);
+                store.reset({
+                  session_mode: selectedSessionMode,
+                  scenario_id: selectedScenarioId,
+                });
               }}
             >
               Reset session

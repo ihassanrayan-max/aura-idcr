@@ -5,6 +5,7 @@ import type {
   HypothesisEvidence,
   PlantStateSnapshot,
   ReasoningSnapshot,
+  ScenarioRuntimeProfileId,
 } from "../contracts/aura";
 
 export type ReasoningRuntimeState = {
@@ -22,7 +23,7 @@ type HypothesisConfig = {
   watch_items: string[];
 };
 
-const hypothesisCatalog: HypothesisConfig[] = [
+const feedwaterHypothesisCatalog: HypothesisConfig[] = [
   {
     hypothesis_id: "hyp_feedwater_degradation",
     label: "Feedwater Degradation",
@@ -46,6 +47,33 @@ const hypothesisCatalog: HypothesisConfig[] = [
     label: "Post-Trip Stabilization",
     summary: "Protection has already engaged and the scenario has shifted into post-trip consequence management.",
     watch_items: ["reactor_trip_active", "vessel_water_level_m", "containment_pressure_kpa"],
+  },
+];
+
+const lossOfOffsitePowerHypothesisCatalog: HypothesisConfig[] = [
+  {
+    hypothesis_id: "hyp_loss_of_offsite_power",
+    label: "Loss of Offsite Power",
+    summary: "Loss of offsite power is the dominant initiating event and explains the trip plus generation collapse.",
+    watch_items: ["offsite_power_available", "reactor_trip_active", "turbine_output_mwe"],
+  },
+  {
+    hypothesis_id: "hyp_decay_heat_removal_gap",
+    label: "Decay-Heat Removal Gap",
+    summary: "Normal sink loss without sufficient isolation-condenser recovery is now the main operating problem.",
+    watch_items: ["condenser_heat_sink_available", "isolation_condenser_flow_pct", "vessel_pressure_mpa"],
+  },
+  {
+    hypothesis_id: "hyp_station_blackout_progression",
+    label: "Station Blackout Progression",
+    summary: "DC margin is draining while recovery remains incomplete, pushing the scenario toward blackout risk.",
+    watch_items: ["dc_bus_soc_pct", "isolation_condenser_flow_pct", "containment_pressure_kpa"],
+  },
+  {
+    hypothesis_id: "hyp_pressure_consequence_management",
+    label: "Pressure / Consequence Management",
+    summary: "The missed-recovery path is now presenting as a pressure and containment consequence-management problem.",
+    watch_items: ["vessel_pressure_mpa", "safety_relief_valve_open", "containment_pressure_kpa"],
   },
 ];
 
@@ -293,20 +321,218 @@ function scorePostTripStabilization(
   return { score, evidence };
 }
 
+function scoreLossOfOffsitePower(plant_state: PlantStateSnapshot, alarm_ids: Set<string>): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+
+  if (alarm_ids.has("ALM_OFFSITE_POWER_LOSS")) {
+    score += 1.5;
+    pushEvidence(
+      evidence,
+      "loop_alarm",
+      "Offsite power loss alarm active",
+      "The alarm picture explicitly identifies the electrical disturbance as the initiating event.",
+      "strong",
+      ["ALM_OFFSITE_POWER_LOSS"],
+      ["offsite_power_available"],
+    );
+  }
+
+  if (Boolean(plant_state.reactor_trip_active)) {
+    score += 0.9;
+    pushEvidence(
+      evidence,
+      "trip_support",
+      "Trip status aligns with LoOP onset",
+      "Trip plus electrical loss is consistent with the dominant initiating-event picture.",
+      "moderate",
+      ["ALM_REACTOR_TRIP_ACTIVE"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["reactor_trip_active"],
+    );
+  }
+
+  if (Number(plant_state.turbine_output_mwe) < 40) {
+    score += 0.75;
+    pushEvidence(
+      evidence,
+      "generation_collapse",
+      "Turbine output collapsed",
+      "Generation output has fallen away from the normal operating band after the electrical upset.",
+      "moderate",
+      ["ALM_TURBINE_OUTPUT_LOW"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["turbine_output_mwe"],
+    );
+  }
+
+  return { score, evidence };
+}
+
+function scoreDecayHeatRemovalGap(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+  const icFlow = Number(plant_state.isolation_condenser_flow_pct);
+
+  if (alarm_ids.has("ALM_CONDENSER_HEAT_SINK_LOST")) {
+    score += 1.2;
+    pushEvidence(
+      evidence,
+      "sink_lost",
+      "Normal heat sink lost",
+      "The normal condenser path is unavailable, so alternative decay-heat removal is required.",
+      "strong",
+      ["ALM_CONDENSER_HEAT_SINK_LOST"],
+      ["condenser_heat_sink_available"],
+    );
+  }
+
+  if (alarm_ids.has("ALM_ISOLATION_CONDENSER_FLOW_LOW")) {
+    score += 1.3;
+    pushEvidence(
+      evidence,
+      "ic_low",
+      "Isolation condenser flow remains low",
+      "The bounded recovery path has not yet established enough isolation-condenser flow.",
+      "strong",
+      ["ALM_ISOLATION_CONDENSER_FLOW_LOW"],
+      ["isolation_condenser_flow_pct"],
+    );
+  } else if (icFlow >= 55) {
+    score -= 0.2;
+  }
+
+  if (Number(plant_state.vessel_pressure_mpa) > 7.24) {
+    score += 0.55;
+  }
+
+  return { score, evidence };
+}
+
+function scoreStationBlackoutProgression(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+  const dcBus = Number(plant_state.dc_bus_soc_pct);
+
+  if (alarm_ids.has("ALM_DC_BUS_LOW")) {
+    score += 1.15;
+    pushEvidence(
+      evidence,
+      "dc_low",
+      "DC bus margin is low",
+      "Battery margin is now part of the operating risk picture.",
+      "strong",
+      ["ALM_DC_BUS_LOW"],
+      ["dc_bus_soc_pct"],
+    );
+  }
+
+  if (dcBus < 55) {
+    score += Math.min((55 - dcBus) / 18, 0.8);
+    pushEvidence(
+      evidence,
+      "dc_trend",
+      "DC margin is draining",
+      `DC bus state of charge is ${dcBus.toFixed(1)}%, which shortens the bounded response window.`,
+      dcBus < 32 ? "strong" : "moderate",
+      [],
+      ["dc_bus_soc_pct"],
+    );
+  }
+
+  if (Number(plant_state.isolation_condenser_flow_pct) < 58) {
+    score += 0.45;
+  }
+
+  return { score, evidence };
+}
+
+function scorePressureConsequenceManagement(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+  const containment = Number(plant_state.containment_pressure_kpa);
+
+  if (alarm_ids.has("ALM_RPV_PRESSURE_HIGH")) {
+    score += 1.05;
+    pushEvidence(
+      evidence,
+      "pressure_high",
+      "Pressure high alarm active",
+      "The scenario has moved beyond the initiating event into direct pressure management.",
+      "strong",
+      ["ALM_RPV_PRESSURE_HIGH"],
+      ["vessel_pressure_mpa"],
+    );
+  }
+
+  if (Boolean(plant_state.safety_relief_valve_open)) {
+    score += 0.95;
+    pushEvidence(
+      evidence,
+      "srv_relief",
+      "SRV relief is active",
+      "Pressure relief is open, indicating the event is no longer staying inside clean recovery limits.",
+      "strong",
+      ["ALM_SRV_STUCK_OPEN"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["safety_relief_valve_open"],
+    );
+  }
+
+  if (containment > 106) {
+    score += 0.8;
+    pushEvidence(
+      evidence,
+      "containment_consequence",
+      "Containment pressure is rising",
+      `Containment pressure is ${containment.toFixed(1)} kPa, which signals consequence exposure if recovery remains incomplete.`,
+      containment > 110 ? "strong" : "moderate",
+      ["ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["containment_pressure_kpa"],
+    );
+  }
+
+  return { score, evidence };
+}
+
+function getHypothesisCatalog(runtime_profile_id: ScenarioRuntimeProfileId): HypothesisConfig[] {
+  switch (runtime_profile_id) {
+    case "loss_of_offsite_power_sbo":
+      return lossOfOffsitePowerHypothesisCatalog;
+    case "feedwater_degradation":
+    default:
+      return feedwaterHypothesisCatalog;
+  }
+}
+
 function buildScoredHypotheses(
   plant_state: PlantStateSnapshot,
   alarm_set: AlarmSet,
   previous_state: ReasoningRuntimeState,
+  runtime_profile_id: ScenarioRuntimeProfileId,
 ): ScoredHypothesis[] {
   const alarm_ids = new Set(alarm_set.active_alarm_ids);
   const raw_scores = new Map<string, { score: number; evidence: HypothesisEvidence[] }>();
 
-  raw_scores.set("hyp_feedwater_degradation", scoreFeedwaterDegradation(plant_state, alarm_ids));
-  raw_scores.set("hyp_heat_sink_stress", scoreHeatSinkStress(plant_state, alarm_ids));
-  raw_scores.set("hyp_pressure_control_transient", scorePressureControlTransient(plant_state, alarm_ids));
-  raw_scores.set("hyp_post_trip_stabilization", scorePostTripStabilization(plant_state, alarm_ids));
+  if (runtime_profile_id === "loss_of_offsite_power_sbo") {
+    raw_scores.set("hyp_loss_of_offsite_power", scoreLossOfOffsitePower(plant_state, alarm_ids));
+    raw_scores.set("hyp_decay_heat_removal_gap", scoreDecayHeatRemovalGap(plant_state, alarm_ids));
+    raw_scores.set("hyp_station_blackout_progression", scoreStationBlackoutProgression(plant_state, alarm_ids));
+    raw_scores.set("hyp_pressure_consequence_management", scorePressureConsequenceManagement(plant_state, alarm_ids));
+  } else {
+    raw_scores.set("hyp_feedwater_degradation", scoreFeedwaterDegradation(plant_state, alarm_ids));
+    raw_scores.set("hyp_heat_sink_stress", scoreHeatSinkStress(plant_state, alarm_ids));
+    raw_scores.set("hyp_pressure_control_transient", scorePressureControlTransient(plant_state, alarm_ids));
+    raw_scores.set("hyp_post_trip_stabilization", scorePostTripStabilization(plant_state, alarm_ids));
+  }
 
-  return hypothesisCatalog.map((hypothesis) => {
+  return getHypothesisCatalog(runtime_profile_id).map((hypothesis) => {
     const raw = raw_scores.get(hypothesis.hypothesis_id) ?? { score: 0, evidence: [] };
     const previous = previous_state.smoothed_scores[hypothesis.hypothesis_id] ?? 0;
     const smoothed_score = roundScore(previous * 0.6 + raw.score * 0.4);
@@ -380,8 +606,11 @@ export function buildReasoningSnapshot(params: {
   alarm_intelligence: AlarmIntelligenceSnapshot;
   previous_state: ReasoningRuntimeState;
   expected_root_cause_hypothesis_id?: string;
+  runtime_profile_id?: ScenarioRuntimeProfileId;
 }): { reasoning_snapshot: ReasoningSnapshot; runtime_state: ReasoningRuntimeState } {
-  const scored = buildScoredHypotheses(params.plant_state, params.alarm_set, params.previous_state);
+  const runtime_profile_id = params.runtime_profile_id ?? "feedwater_degradation";
+  const hypothesisCatalog = getHypothesisCatalog(runtime_profile_id);
+  const scored = buildScoredHypotheses(params.plant_state, params.alarm_set, params.previous_state, runtime_profile_id);
   const dominant_state = selectDominantHypothesis(scored, params.previous_state);
   const ranked_hypotheses = scored
     .sort((left, right) => right.smoothed_score - left.smoothed_score)

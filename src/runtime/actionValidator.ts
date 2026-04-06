@@ -8,6 +8,7 @@ import type {
   OperatorStateSnapshot,
   PlantStateSnapshot,
   ReasoningSnapshot,
+  ScenarioRuntimeProfileId,
   SessionMode,
   SupportMode,
 } from "../contracts/aura";
@@ -25,6 +26,7 @@ type ValidateActionParams = {
   support_mode: SupportMode;
   first_response_lane: FirstResponseLane;
   validation_sequence: number;
+  runtime_profile_id?: ScenarioRuntimeProfileId;
 };
 
 const escalationAlarmIds = ["ALM_RPV_LEVEL_LOW_LOW", "ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"] as const;
@@ -109,6 +111,12 @@ export function validateAction(params: ValidateActionParams): ActionValidationRe
       "baseline_session_pass_through",
       "Baseline session mode keeps bounded actions pass-through without adaptive interception.",
     );
+  }
+
+  const runtime_profile_id = params.runtime_profile_id ?? "feedwater_degradation";
+
+  if (runtime_profile_id === "loss_of_offsite_power_sbo") {
+    return validateLossOfOffsitePowerAction(params);
   }
 
   if (params.action_request.action_id !== "act_adjust_feedwater") {
@@ -277,5 +285,188 @@ export function validateAction(params: ValidateActionParams): ActionValidationRe
     prevented_harm: false,
     nuisance_flag: false,
     recommended_safe_alternative: `Use the bounded recovery target near ${bounded_recovery_target}% rated if you want the lowest-friction recovery path.`,
+  };
+}
+
+function laneRecommendedIcTarget(first_response_lane: FirstResponseLane): number {
+  const recommended_item = first_response_lane.items.find(
+    (item) => item.recommended_action_id === "act_adjust_isolation_condenser" && typeof item.recommended_value === "number",
+  );
+  return typeof recommended_item?.recommended_value === "number" ? Number(recommended_item.recommended_value) : 68;
+}
+
+function validateLossOfOffsitePowerAction(params: ValidateActionParams): ActionValidationResult {
+  if (params.action_request.action_id !== "act_adjust_isolation_condenser") {
+    return passResult(
+      params,
+      "bounded_action_pass",
+      "This bounded action does not currently require additional interception logic in this slice.",
+    );
+  }
+
+  const requested_setpoint = clamp(Number(params.action_request.requested_value ?? params.plant_state.isolation_condenser_flow_pct), 0, 100);
+  const bounded_recovery_target = laneRecommendedIcTarget(params.first_response_lane);
+  const lane_relevant = laneSupportsAction(params.first_response_lane, params.action_request.action_id);
+  const pressure = Number(params.plant_state.vessel_pressure_mpa);
+  const dcBus = Number(params.plant_state.dc_bus_soc_pct);
+  const escalation_active =
+    pressure >= 7.45 ||
+    dcBus < 32 ||
+    params.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+    params.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN");
+  const risk_context = `${formatSupportModeLabel(params.support_mode)} is active, combined risk is ${params.combined_risk.combined_risk_band} (${params.combined_risk.combined_risk_score.toFixed(
+    1,
+  )}/100), the dominant hypothesis is ${dominantHypothesisLabel(params.reasoning_snapshot)}, IC target is near ${bounded_recovery_target}% rated, pressure is ${pressure.toFixed(
+    2,
+  )} MPa, and DC margin is ${dcBus.toFixed(1)}%.`;
+  const current_confidence_note = confidenceNote(params.operator_state);
+  const aligned_with_recovery_lane =
+    (lane_relevant ||
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_decay_heat_removal_gap" ||
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_loss_of_offsite_power") &&
+    requested_setpoint >= 60 &&
+    requested_setpoint <= 76;
+
+  if (requested_setpoint < 20) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "hard_prevent",
+      requires_confirmation: false,
+      override_allowed: false,
+      reason_code: "ic_below_safe_floor",
+      explanation: "Requested isolation-condenser demand is below the bounded safe floor for this recovery path, so the action is blocked.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: true,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Move isolation-condenser demand toward the bounded recovery band near ${bounded_recovery_target}% rated.`,
+    };
+  }
+
+  if (escalation_active && requested_setpoint < 45) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "hard_prevent",
+      requires_confirmation: false,
+      override_allowed: false,
+      reason_code: "reduced_ic_during_escalation",
+      explanation: "Escalation markers are active, and reducing IC demand conflicts with the bounded recovery path, so the action is blocked.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: true,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Hold or increase IC demand near ${bounded_recovery_target}% rated while pressure and DC margin remain stressed.`,
+    };
+  }
+
+  if (requested_setpoint < 60) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "ic_below_guided_recovery_band",
+      explanation: "Requested isolation-condenser demand is below the guided recovery band, so explicit confirmation is required.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: `A safer direction is the bounded IC recovery target near ${bounded_recovery_target}% rated.`,
+    };
+  }
+
+  if (requested_setpoint > 82) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "ic_above_guided_recovery_band",
+      explanation: "Requested isolation-condenser demand is above the bounded guided band for this slice, so explicit confirmation is required.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Stay near ${bounded_recovery_target}% rated unless the pressure picture clearly demands otherwise.`,
+    };
+  }
+
+  if (
+    !lane_relevant &&
+    params.reasoning_snapshot.dominant_hypothesis_id !== "hyp_loss_of_offsite_power" &&
+    params.reasoning_snapshot.dominant_hypothesis_id !== "hyp_decay_heat_removal_gap"
+  ) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "ic_not_current_recovery_lane",
+      explanation: "The requested IC action is not strongly supported by the current first-response picture, so explicit confirmation is required.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: "Re-check the current storyline and first-response lane before changing the IC path.",
+    };
+  }
+
+  if (params.support_mode === "protected_response" && escalation_active && requested_setpoint !== bounded_recovery_target) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "protected_response_ic_precision_check",
+      explanation: "Protected response is active, so moving IC demand away from the bounded target requires explicit confirmation.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Stay with the bounded IC recovery target near ${bounded_recovery_target}% rated while the escalation picture is active.`,
+    };
+  }
+
+  if (aligned_with_recovery_lane) {
+    return passResult(
+      params,
+      "bounded_ic_recovery_pass",
+      "Requested isolation-condenser demand matches the current bounded recovery path for this deterministic scenario.",
+    );
+  }
+
+  return {
+    validation_result_id: buildValidationId(params.validation_sequence),
+    action_request_id: params.action_request.action_request_id,
+    sim_time_sec: params.action_request.sim_time_sec,
+    outcome: "soft_warning",
+    requires_confirmation: true,
+    override_allowed: false,
+    reason_code: "bounded_ic_confirmation_required",
+    explanation: "This isolation-condenser action is not clearly unsafe, but it sits outside the clean pass band and needs explicit confirmation.",
+    risk_context,
+    confidence_note: current_confidence_note,
+    affected_variable_ids: params.allowed_action.target_variable_ids,
+    prevented_harm: false,
+    nuisance_flag: false,
+    recommended_safe_alternative: `Use the bounded IC recovery target near ${bounded_recovery_target}% rated if you want the lowest-friction recovery path.`,
   };
 }

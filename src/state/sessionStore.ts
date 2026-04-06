@@ -13,8 +13,11 @@ import type {
   PlantTick,
   ReasoningSnapshot,
   ScenarioDefinition,
+  ScenarioRuntimeProfileId,
+  ScenarioUiControlSchema,
   KpiSummary,
   ScenarioOutcome,
+  SessionEvaluationCaptureBucket,
   SessionMode,
   SessionEvaluationCapture,
   SessionSnapshot,
@@ -22,7 +25,12 @@ import type {
   SupportPolicySnapshot,
   SupportRefinementSnapshot,
 } from "../contracts/aura";
-import { scnAlarmCascadeRootCause } from "../scenarios/scn_alarm_cascade_root_cause";
+import {
+  getDefaultScenarioCatalogEntry,
+  listScenarioCatalogEntries,
+  resolveScenarioCatalogEntry,
+  type ScenarioCatalogEntry,
+} from "../scenarios/registry";
 import { alarmDictionaryById } from "../data/alarmDictionary";
 import { evaluateAlarmSet, createAlarmRuntimeState, type AlarmRuntimeState } from "../runtime/alarmEngine";
 import { buildAlarmIntelligence } from "../runtime/alarmIntelligence";
@@ -59,6 +67,7 @@ import { buildCompletedSessionReview } from "../runtime/sessionReview";
 
 type SessionStoreOptions = {
   scenario?: ScenarioDefinition;
+  scenario_id?: string;
   session_index?: number;
   tick_duration_sec?: number;
   session_mode?: SessionMode;
@@ -152,7 +161,7 @@ function criticalEscalationActive(active_alarm_ids: string[]): boolean {
 }
 
 export class AuraSessionStore {
-  private readonly scenario: ScenarioDefinition;
+  private scenario_catalog_entry: ScenarioCatalogEntry;
   private readonly session_index: number;
   /** Increments on each reset(); part of deterministic per-run session_id. */
   private run_sequence = 1;
@@ -178,8 +187,30 @@ export class AuraSessionStore {
     return `session_${String(this.session_index).padStart(3, "0")}_r${this.run_sequence}`;
   }
 
+  private get scenario(): ScenarioDefinition {
+    return this.scenario_catalog_entry.definition;
+  }
+
+  private get runtime_profile_id(): ScenarioRuntimeProfileId {
+    return this.scenario_catalog_entry.runtime_profile_id;
+  }
+
+  private get manual_control_schema(): ScenarioUiControlSchema {
+    return this.scenario_catalog_entry.ui_control_schema;
+  }
+
+  private currentScenarioCaptureKey(): string {
+    return `${this.scenario.scenario_id}@${this.scenario.version}`;
+  }
+
+  private currentScenarioCaptureBucket(): SessionEvaluationCaptureBucket | undefined {
+    return this.evaluation_capture[this.currentScenarioCaptureKey()];
+  }
+
   constructor(options: SessionStoreOptions = {}) {
-    this.scenario = options.scenario ?? scnAlarmCascadeRootCause;
+    this.scenario_catalog_entry = options.scenario
+      ? resolveScenarioCatalogEntry(options.scenario.scenario_id)
+      : resolveScenarioCatalogEntry(options.scenario_id ?? getDefaultScenarioCatalogEntry().definition.scenario_id);
     this.session_index = options.session_index ?? 1;
     this.session_id = this.computeSessionId();
     this.tick_duration_sec = options.tick_duration_sec ?? 5;
@@ -202,13 +233,15 @@ export class AuraSessionStore {
     reasoning_snapshot: ReasoningSnapshot;
     first_response_lane: FirstResponseLane;
   } {
-    const alarm_intelligence = buildAlarmIntelligence(params.alarm_set);
+    const runtime_profile_id = this.runtime_profile_id;
+    const alarm_intelligence = buildAlarmIntelligence(params.alarm_set, runtime_profile_id);
     const reasoning_result = buildReasoningSnapshot({
       plant_state: params.plant_state,
       alarm_set: params.alarm_set,
       alarm_intelligence,
       previous_state: this.reasoning_runtime_state,
       expected_root_cause_hypothesis_id: this.scenario.expected_root_cause_hypothesis_id,
+      runtime_profile_id,
     });
     this.reasoning_runtime_state = reasoning_result.runtime_state;
 
@@ -218,6 +251,7 @@ export class AuraSessionStore {
       alarm_set: params.alarm_set,
       reasoning_snapshot: reasoning_result.reasoning_snapshot,
       allowed_action_ids: params.allowed_action_ids,
+      runtime_profile_id,
     });
 
     return {
@@ -358,7 +392,7 @@ export class AuraSessionStore {
         active_alarm_cluster_count: initial_alarm_eval.alarm_set.active_alarm_cluster_count,
       },
     };
-    const initial_alarm_intelligence = buildAlarmIntelligence(initial_alarm_eval.alarm_set);
+    const initial_alarm_intelligence = buildAlarmIntelligence(initial_alarm_eval.alarm_set, this.runtime_profile_id);
 
     const session_started_event = this.logger.append({
       sim_time_sec: 0,
@@ -475,6 +509,15 @@ export class AuraSessionStore {
       session_mode: this.session_mode,
       support_mode: phase3_state.support_mode,
       scenario: this.scenario,
+      scenario_catalog: listScenarioCatalogEntries().map((entry) => ({
+        scenario_id: entry.definition.scenario_id,
+        version: entry.definition.version,
+        title: entry.definition.title,
+        summary: entry.definition.summary,
+        runtime_profile_id: entry.runtime_profile_id,
+      })),
+      runtime_profile_id: this.runtime_profile_id,
+      manual_control_schema: this.manual_control_schema,
       current_phase: initial_phase,
       sim_time_sec: 0,
       tick_index: 0,
@@ -508,6 +551,119 @@ export class AuraSessionStore {
       logging_active: true,
       validation_status_available: true,
     };
+  }
+
+  private evaluateScenarioOutcome(params: {
+    sim_time_sec: number;
+    plant_state: PlantTick["plant_state"];
+    alarm_set: SessionSnapshot["alarm_set"];
+    reasoning_snapshot: ReasoningSnapshot;
+    executed_actions: ExecutedAction[];
+  }): { outcome?: ScenarioOutcome; diagnosis_ready: boolean } {
+    const outcome_context = {
+      plant_state: params.plant_state,
+      executed_actions: params.executed_actions,
+      elapsed_time_sec: params.sim_time_sec,
+    };
+
+    if (this.runtime_profile_id === "loss_of_offsite_power_sbo") {
+      const diagnosis_ready =
+        ["hyp_loss_of_offsite_power", "hyp_decay_heat_removal_gap"].includes(
+          params.reasoning_snapshot.dominant_hypothesis_id ?? "",
+        ) && params.reasoning_snapshot.stable_for_ticks >= 2;
+      const stabilizedRecoveryPicture =
+        Number(params.plant_state.isolation_condenser_flow_pct) >= 60 &&
+        Number(params.plant_state.vessel_pressure_mpa) <= 7.2 &&
+        Number(params.plant_state.containment_pressure_kpa) <= 106 &&
+        Number(params.plant_state.dc_bus_soc_pct) >= 40;
+
+      if (evaluateCondition(this.scenario.failure_condition, outcome_context)) {
+        return {
+          diagnosis_ready,
+          outcome: {
+            outcome: "failure",
+            stabilized: false,
+            message:
+              "The LoOP response window crossed a bounded blackout or pressure-consequence marker before decay-heat removal stabilized.",
+            sim_time_sec: params.sim_time_sec,
+          },
+        };
+      }
+
+      if (evaluateCondition(this.scenario.success_condition, outcome_context) && diagnosis_ready && stabilizedRecoveryPicture) {
+        return {
+          diagnosis_ready,
+          outcome: {
+            outcome: "success",
+            stabilized: true,
+            message:
+              "The LoOP picture stabilized into bounded decay-heat removal with IC flow established, pressure recovering, and DC margin preserved.",
+            sim_time_sec: params.sim_time_sec,
+          },
+        };
+      }
+
+      if (evaluateCondition(this.scenario.timeout_condition, outcome_context)) {
+        return {
+          diagnosis_ready,
+          outcome: {
+            outcome: "timeout",
+            stabilized: false,
+            message: diagnosis_ready
+              ? "The response window expired before the bounded IC recovery path fully stabilized pressure and battery margin."
+              : "The response window expired before the LoOP and decay-heat-removal picture stabilized into a successful recovery path.",
+            sim_time_sec: params.sim_time_sec,
+          },
+        };
+      }
+
+      return { diagnosis_ready };
+    }
+
+    const diagnosis_ready =
+      params.reasoning_snapshot.expected_root_cause_aligned && params.reasoning_snapshot.stable_for_ticks >= 2;
+    const stabilized_alarm_picture =
+      !criticalEscalationActive(params.alarm_set.active_alarm_ids) && params.alarm_set.active_alarm_count <= 2;
+
+    if (evaluateCondition(this.scenario.failure_condition, outcome_context)) {
+      return {
+        diagnosis_ready,
+        outcome: {
+          outcome: "failure",
+          stabilized: false,
+          message: "The plant crossed a hard escalation marker before the Phase 2 response path could stabilize it.",
+          sim_time_sec: params.sim_time_sec,
+        },
+      };
+    }
+
+    if (evaluateCondition(this.scenario.success_condition, outcome_context) && diagnosis_ready && stabilized_alarm_picture) {
+      return {
+        diagnosis_ready,
+        outcome: {
+          outcome: "success",
+          stabilized: true,
+          message: "The feedwater-side diagnosis converged, the bounded first-response path was relevant, and the plant stabilized.",
+          sim_time_sec: params.sim_time_sec,
+        },
+      };
+    }
+
+    if (evaluateCondition(this.scenario.timeout_condition, outcome_context)) {
+      return {
+        diagnosis_ready,
+        outcome: {
+          outcome: "timeout",
+          stabilized: false,
+          message: diagnosis_ready
+            ? "The response window expired before alarms and plant state fully stabilized."
+            : "The response window expired before the dominant hypothesis stabilized into a successful recovery path.",
+          sim_time_sec: params.sim_time_sec,
+        },
+      };
+    }
+
+    return { diagnosis_ready };
   }
 
   private mergeAlarmHistory(
@@ -569,11 +725,16 @@ export class AuraSessionStore {
   }
 
   setSessionMode(mode: SessionMode): void {
-    this.session_mode = mode;
-    this.reset();
+    this.reset({ session_mode: mode });
   }
 
-  reset(): void {
+  setScenario(scenario_id: string): void {
+    this.reset({ scenario_id });
+  }
+
+  reset(next_run?: { session_mode?: SessionMode; scenario_id?: string }): void {
+    this.session_mode = next_run?.session_mode ?? this.session_mode;
+    this.scenario_catalog_entry = resolveScenarioCatalogEntry(next_run?.scenario_id ?? this.scenario.scenario_id);
     this.run_sequence += 1;
     this.session_id = this.computeSessionId();
     this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
@@ -735,6 +896,7 @@ export class AuraSessionStore {
       support_mode: this.snapshot.support_mode,
       first_response_lane: this.snapshot.first_response_lane,
       validation_sequence: this.validation_sequence,
+      runtime_profile_id: this.runtime_profile_id,
     });
     this.publishValidationResult(action_request, validation_result);
 
@@ -821,7 +983,12 @@ export class AuraSessionStore {
     );
     this.plant_internal_state = with_injections.internal_state;
 
-    const stepped = stepPlantTwin(with_injections.plant_state, this.plant_internal_state, this.tick_duration_sec);
+    const stepped = stepPlantTwin(
+      with_injections.plant_state,
+      this.plant_internal_state,
+      this.tick_duration_sec,
+      this.runtime_profile_id,
+    );
     this.plant_internal_state = stepped.internal_state;
 
     const next_tick_id = `tick_${String(this.snapshot.tick_index + 1).padStart(4, "0")}`;
@@ -992,41 +1159,15 @@ export class AuraSessionStore {
       };
     }
 
-    let outcome: ScenarioOutcome | undefined;
-    const outcome_context = {
+    const outcomeResult = this.evaluateScenarioOutcome({
+      sim_time_sec,
       plant_state: plant_tick.plant_state,
+      alarm_set: alarm_evaluation.alarm_set,
+      reasoning_snapshot: phase3_state.reasoning_snapshot,
       executed_actions: this.snapshot.executed_actions,
-      elapsed_time_sec: sim_time_sec,
-    };
-    const diagnosis_ready =
-      phase3_state.reasoning_snapshot.expected_root_cause_aligned && phase3_state.reasoning_snapshot.stable_for_ticks >= 2;
-    const stabilized_alarm_picture =
-      !criticalEscalationActive(alarm_evaluation.alarm_set.active_alarm_ids) && alarm_evaluation.alarm_set.active_alarm_count <= 2;
-
-    if (evaluateCondition(this.scenario.failure_condition, outcome_context)) {
-      outcome = {
-        outcome: "failure",
-        stabilized: false,
-        message: "The plant crossed a hard escalation marker before the Phase 2 response path could stabilize it.",
-        sim_time_sec,
-      };
-    } else if (evaluateCondition(this.scenario.success_condition, outcome_context) && diagnosis_ready && stabilized_alarm_picture) {
-      outcome = {
-        outcome: "success",
-        stabilized: true,
-        message: "The feedwater-side diagnosis converged, the bounded first-response path was relevant, and the plant stabilized.",
-        sim_time_sec,
-      };
-    } else if (evaluateCondition(this.scenario.timeout_condition, outcome_context)) {
-      outcome = {
-        outcome: "timeout",
-        stabilized: false,
-        message: diagnosis_ready
-          ? "The response window expired before alarms and plant state fully stabilized."
-          : "The response window expired before the dominant hypothesis stabilized into a successful recovery path.",
-        sim_time_sec,
-      };
-    }
+    });
+    const outcome = outcomeResult.outcome;
+    const diagnosis_ready = outcomeResult.diagnosis_ready;
 
     let kpi_summary: KpiSummary | undefined = this.snapshot.kpi_summary;
     let completed_review: CompletedSessionReview | undefined = undefined;
@@ -1093,11 +1234,15 @@ export class AuraSessionStore {
         kpi_summary,
         events: this.logger.list(),
       });
+      const captureKey = this.currentScenarioCaptureKey();
       this.evaluation_capture = {
         ...this.evaluation_capture,
-        ...(this.session_mode === "baseline"
-          ? { baseline_completed: completed_review }
-          : { adaptive_completed: completed_review }),
+        [captureKey]: {
+          ...this.evaluation_capture[captureKey],
+          ...(this.session_mode === "baseline"
+            ? { baseline_completed: completed_review }
+            : { adaptive_completed: completed_review }),
+        },
       };
     }
 

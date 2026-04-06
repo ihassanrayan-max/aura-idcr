@@ -106,6 +106,35 @@ export type ScenarioDefinition = {
   timeout_condition: ScenarioCondition;
 };
 
+export type ScenarioRuntimeProfileId = "feedwater_degradation" | "loss_of_offsite_power_sbo";
+
+export type ScenarioControlRangeSchema = {
+  control_id: string;
+  label: string;
+  action_id: string;
+  min: number;
+  max: number;
+  step: number;
+  default_value: number;
+  unit_label: string;
+  apply_button_label: string;
+  reason_note: string;
+};
+
+export type ScenarioUiControlSchema = {
+  title: string;
+  helper_text: string;
+  controls: ScenarioControlRangeSchema[];
+};
+
+export type ScenarioCatalogSummary = {
+  scenario_id: string;
+  version: string;
+  title: string;
+  summary: string;
+  runtime_profile_id: ScenarioRuntimeProfileId;
+};
+
 export type ScenarioPhase = {
   phase_id: string;
   label: string;
@@ -521,16 +550,22 @@ export type SessionRunComparison = {
 };
 
 /** Latest captured completed reviews per mode for in-browser baseline vs adaptive comparison (Phase 5 Slice C). */
-export type SessionEvaluationCapture = {
+export type SessionEvaluationCaptureBucket = {
   baseline_completed?: CompletedSessionReview;
   adaptive_completed?: CompletedSessionReview;
 };
+
+/** Captured terminal reviews grouped by scenario_id@version so mixed-scenario runs never compare against each other. */
+export type SessionEvaluationCapture = Record<string, SessionEvaluationCaptureBucket>;
 
 export type SessionSnapshot = {
   session_id: string;
   session_mode: SessionMode;
   support_mode: SupportMode;
   scenario: ScenarioDefinition;
+  scenario_catalog: ScenarioCatalogSummary[];
+  runtime_profile_id: ScenarioRuntimeProfileId;
+  manual_control_schema: ScenarioUiControlSchema;
   current_phase: ScenarioPhase;
   sim_time_sec: number;
   tick_index: number;
