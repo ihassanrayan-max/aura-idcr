@@ -1123,6 +1123,26 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Hold scope unless the human explicitly opens a later bounded cluster beyond Cluster 3B, such as stretch-phase polish or new scenario/control families.
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 operator-first frontend overhaul session
+- Task worked on: Implemented `Frontend_enhancement_PLAN.md` as an operator-first shell overhaul centered on first-open comprehension of the Operate workspace
+- Status: Done
+- What changed:
+  - Replaced the monolithic `src/App.tsx` shell with a workspace-based frontend structure: default `Operate` plus dedicated `Review`, while preserving the existing deterministic runtime/store contracts and scenario behavior
+  - Added extracted UI modules under `src/ui/` for formatting, presentation selectors, workspace components, and shared primitives so ordering/formatting logic no longer lives inline in one JSX file
+  - Rebuilt the default Operate screen around a top command bar, an explicit "what's happening / what matters / do next" orientation band, a larger situation board, a right-side alarm board, a primary next-actions lane, a compact support-posture board, and a compressed storyline board
+  - Moved completed review, comparison, export, and live oversight surfaces out of the default operator view into the dedicated Review workspace with explicit empty states and preserved supervisor-override access there
+  - Replaced the old single-file stylesheet with tokenized layered CSS (`tokens`, `base`, `layout`, `workspaces`) using the restrained engineering palette and added accessibility polish such as a skip link, focus-visible states, tabular numbers, reduced-motion handling, and polite live regions for validation/override updates
+  - Updated `src/state/sessionStore.test.tsx` so app-level verification now checks the workspace split and the new operator-first headings while keeping all prior deterministic runtime assertions green
+  - Updated `docs/aura_hmi_wireframe.md` and `AGENTS.md` so the repo's shell/design rules now reflect the Operate/Review split and the new internal frontend conventions
+- What remains:
+  - No runtime/reasoning logic was changed; later-phase stretch work remains untouched
+  - If the human wants more polish later, the most natural next frontend slice is deeper mobile refinement or URL-deep-linking of workspace state without reopening evaluator clutter on Operate
+- Blockers:
+  - The `agent-browser` CLI referenced by the verification skill was not installed in this workspace, so browser verification used the approved headless Edge screenshot flow instead
+- Next recommended step:
+  - Hold scope unless the human explicitly requests further frontend polish, deeper Review ergonomics, or a new later-phase feature slice
+
 ---
 
 ## 26) Final reminder to all future agents

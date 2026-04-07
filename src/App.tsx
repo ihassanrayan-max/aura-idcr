@@ -1,26 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import type { AuraSessionStore } from "./state/sessionStore";
-import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
-import type {
-  CompletedSessionReview,
-  KpiMetric,
-  ScenarioControlRangeSchema,
-  SessionLogEvent,
-  SessionMode,
-  SessionRunComparison,
-  SessionRunComparisonKpiDelta,
-} from "./contracts/aura";
-import { buildSessionRunComparison } from "./runtime/sessionComparison";
+import { startTransition, useEffect, useMemo, useState } from "react";
+import type { ScenarioControlRangeSchema, SessionMode } from "./contracts/aura";
+import { buildPresentationPolicy, orderPresentedLaneItems } from "./runtime/presentationPolicy";
 import { buildComparisonReportArtifact, buildSessionAfterActionReport } from "./runtime/reportArtifacts";
 import { downloadReportArtifact } from "./runtime/reportExport";
-import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
-import { getValidatorDemoPresets } from "./runtime/actionValidator";
+import { buildSessionRunComparison } from "./runtime/sessionComparison";
 import { formatSupportModeLabel } from "./runtime/supportModePolicy";
-import {
-  buildPresentationPolicy,
-  orderPresentedLaneItems,
-  type SupportSectionId,
-} from "./runtime/presentationPolicy";
+import type { AuraSessionStore } from "./state/sessionStore";
+import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
+import { formatClock, riskBadgeTone } from "./ui/format";
+import { OperateWorkspace } from "./ui/OperateWorkspace";
+import { MetricStrip, StatusPill } from "./ui/primitives";
+import { ReviewWorkspace } from "./ui/ReviewWorkspace";
+import { buildOperateWorkspaceModel, buildReviewWorkspaceModel, type WorkspaceId } from "./ui/viewModel";
 
 type AppProps = {
   store?: AuraSessionStore;
@@ -29,461 +20,9 @@ type AppProps = {
 
 const defaultStore = createDefaultSessionStore();
 
-function formatValue(value: number | boolean | string, unit?: string): string {
-  if (typeof value === "boolean") {
-    return value ? "Available" : "Unavailable";
-  }
-
-  if (typeof value === "number") {
-    const digits = Math.abs(value) >= 100 ? 0 : value % 1 === 0 ? 0 : 2;
-    return `${value.toFixed(digits)}${unit ? ` ${unit}` : ""}`;
-  }
-
-  return value;
-}
-
-function formatClock(simTimeSec: number): string {
-  const minutes = Math.floor(simTimeSec / 60);
-  const seconds = simTimeSec % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatSignalLabel(signalId: string): string {
-  const labels = variableLabels as Record<string, string>;
-  return labels[signalId] ?? signalId.replace(/_/g, " ");
-}
-
-function riskBadgeTone(riskBand: "low" | "guarded" | "elevated" | "high"): "ok" | "neutral" | "alert" {
-  switch (riskBand) {
-    case "low":
-      return "ok";
-    case "guarded":
-      return "neutral";
-    case "elevated":
-    case "high":
-      return "alert";
-  }
-}
-
-function urgencyBadgeTone(urgencyLevel: "standard" | "priority" | "urgent"): "ok" | "neutral" | "alert" {
-  switch (urgencyLevel) {
-    case "standard":
-      return "ok";
-    case "priority":
-      return "neutral";
-    case "urgent":
-      return "alert";
-  }
-}
-
-function validationBadgeTone(outcome: "pass" | "soft_warning" | "hard_prevent"): "ok" | "neutral" | "alert" {
-  switch (outcome) {
-    case "pass":
-      return "ok";
-    case "soft_warning":
-      return "neutral";
-    case "hard_prevent":
-      return "alert";
-  }
-}
-
-function formatDemoKpiValue(value: number, unit: string): string {
-  if (Number.isNaN(value)) {
-    return "N/A";
-  }
-  if (unit === "count" || unit === "index") {
-    return String(Math.round(value));
-  }
-  if (unit === "ratio") {
-    return value.toFixed(4);
-  }
-  if (unit === "sec") {
-    return value.toFixed(1);
-  }
-  return String(value);
-}
-
-function formatKpiMetric(metric: KpiMetric): string {
-  if (metric.value_status !== "measured") {
-    return metric.unavailable_reason ? `N/A (${metric.unavailable_reason})` : "N/A";
-  }
-
-  return `${formatDemoKpiValue(metric.value, metric.unit)} ${metric.unit}`;
-}
-
-function formatKpiSummaryGeneratedAt(simTimeSec: number): string {
-  return `Generated at t+${formatClock(simTimeSec)} sim time`;
-}
-
-function formatComparisonMetricValue(
-  value: number,
-  unit: string,
-  status: SessionRunComparisonKpiDelta["baseline_value_status"],
-  unavailableReason?: string,
-): string {
-  if (status !== "measured") {
-    return unavailableReason ? `N/A (${unavailableReason})` : "N/A";
-  }
-
-  return `${formatDemoKpiValue(value, unit)} ${unit}`;
-}
-
-function formatComparisonDelta(row: SessionRunComparisonKpiDelta): string {
-  if (Number.isNaN(row.delta)) {
-    return "N/A";
-  }
-
-  return `${row.delta >= 0 ? "+" : ""}${formatDemoKpiValue(row.delta, row.unit)}`;
-}
-
-function CompletedSessionReviewPanel(props: {
-  review: CompletedSessionReview;
-  canonicalEvents: SessionLogEvent[];
-}) {
-  const { review, canonicalEvents } = props;
-  const [eventIndex, setEventIndex] = useState(0);
-
-  useEffect(() => {
-    setEventIndex(0);
-  }, [review.session_id]);
-
-  const keyEvents = review.key_events;
-  const maxIdx = Math.max(0, keyEvents.length - 1);
-  const safeIdx = Math.min(eventIndex, maxIdx);
-  const selected = keyEvents[safeIdx];
-  const rawSelected = selected ? canonicalEvents.find((e) => e.event_id === selected.source_event_id) : undefined;
-
-  function step(delta: number): void {
-    setEventIndex((current) => Math.min(maxIdx, Math.max(0, current + delta)));
-  }
-
-  return (
-    <div className="completed-session-review" data-testid="completed-session-review">
-      <div className="review-summary-card">
-        <h3 className="review-summary-title">Completed session review</h3>
-        <p className="muted">
-          <strong>{review.scenario_title}</strong> · {review.scenario_id} v{review.scenario_version} · Session{" "}
-          <code>{review.session_id}</code> · Mode <strong>{review.session_mode}</strong>
-        </p>
-        <p className="review-outcome-line">
-          Outcome: <span className="badge alert">{review.terminal_outcome.outcome}</span> at{" "}
-          <strong>t+{formatClock(review.completion_sim_time_sec)}</strong> sim time
-        </p>
-        <p className="muted">{review.terminal_outcome.message}</p>
-      </div>
-
-      <div className="kpi-summary-block" data-testid="kpi-summary-block">
-        <h3 className="kpi-summary-title">Session KPI summary</h3>
-        <p className="muted">
-          Completeness: {review.kpi_summary.completeness} · Generated {review.kpi_summary.generated_at_iso}
-        </p>
-        <ul className="kpi-metric-list">
-          {review.kpi_summary.metrics
-            .filter((entry) => entry.audience === "demo_facing")
-            .map((entry) => (
-              <li key={entry.kpi_id}>
-                <strong>{entry.label}</strong>: {formatDemoKpiValue(entry.value, entry.unit)} {entry.unit}
-              </li>
-            ))}
-        </ul>
-      </div>
-
-      <div className="review-milestones">
-        <h4 className="review-subheading">Milestones</h4>
-        <ol className="review-milestone-list">
-          {review.milestones.map((m) => (
-            <li key={m.milestone_id}>
-              <span className="review-milestone-time">{formatClock(m.sim_time_sec)}</span>{" "}
-              <strong>{m.label}</strong> — <span className="muted">{m.detail}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
-
-      <div className="review-highlights">
-        <h4 className="review-subheading">Highlights</h4>
-        <ul className="review-highlight-list">
-          {review.highlights.map((h) => (
-            <li key={h.highlight_id}>
-              <strong>{h.label}</strong>
-              <p className="muted">{h.detail}</p>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="review-key-events">
-        <h4 className="review-subheading">Key events (replay)</h4>
-        <p className="muted">Step through the bounded timeline. Details use canonical log fields.</p>
-        <div className="review-stepper">
-          <button type="button" className="ghost-button" onClick={() => step(-1)} disabled={safeIdx <= 0}>
-            Previous
-          </button>
-          <span className="review-stepper-position">
-            {safeIdx + 1} / {keyEvents.length}
-          </span>
-          <button type="button" className="ghost-button" onClick={() => step(1)} disabled={safeIdx >= maxIdx}>
-            Next
-          </button>
-        </div>
-        {selected ? (
-          <div className="review-selected-event">
-            <div className="alarm-title-row">
-              <strong>{selected.title}</strong>
-              <span>
-                {formatClock(selected.sim_time_sec)} · {selected.event_type}
-              </span>
-            </div>
-            <p className="muted">{selected.summary}</p>
-            {selected.tick_id ? (
-              <p className="alarm-meta">
-                Tick anchor: <code>{selected.tick_id}</code>
-              </p>
-            ) : null}
-            {rawSelected ? (
-              <details className="review-technical-detail">
-                <summary>Canonical event payload (optional)</summary>
-                <pre>{JSON.stringify(rawSelected.payload, null, 2)}</pre>
-              </details>
-            ) : null}
-          </div>
-        ) : null}
-        <ol className="review-key-event-index">
-          {keyEvents.map((ke, i) => (
-            <li key={ke.source_event_id}>
-              <button
-                type="button"
-                className={`review-key-event-link ${i === safeIdx ? "is-active" : ""}`}
-                onClick={() => setEventIndex(i)}
-              >
-                {formatClock(ke.sim_time_sec)} — {ke.title}
-              </button>
-            </li>
-          ))}
-        </ol>
-      </div>
-    </div>
-  );
-}
-
-const DEMO_KPI_IDS = new Set([
-  "diagnosis_time_sec",
-  "response_stabilization_time_sec",
-  "critical_action_error_rate",
-  "harmful_actions_prevented_count",
-  "workload_peak_index",
-]);
-
-function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
-  const { comparison: c } = props;
-  const demoDeltas = c.kpi_deltas.filter((d) => DEMO_KPI_IDS.has(d.kpi_id));
-
-  return (
-    <div className="session-run-comparison" data-testid="session-run-comparison">
-      <div className="comparison-summary-card">
-        <h3 className="review-summary-title">Baseline vs adaptive comparison</h3>
-        <p className="muted">
-          <strong>{c.scenario_title}</strong> · {c.scenario_id} v{c.scenario_version}
-        </p>
-        {!c.valid ? (
-          <p className="comparison-invalid">{c.mismatch_reason}</p>
-        ) : null}
-      </div>
-
-      <div className="judge-summary-card">
-        <h4 className="review-subheading">Judge-facing summary</h4>
-        <p className="judge-headline">{c.judge_summary.headline}</p>
-        <p className="muted judge-overall">
-          Overall (observed): <strong>{c.judge_summary.overall_favors}</strong>
-        </p>
-        <ul className="judge-metric-bullets">
-          {c.judge_summary.metric_bullets.map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
-        <p className="muted judge-why">{c.judge_summary.why_it_matters}</p>
-      </div>
-
-      <div className="comparison-run-headers">
-        <div className="comparison-run-card">
-          <span className="metric-label">Baseline run</span>
-          <p>
-            <code>{c.baseline_session_id}</code>
-          </p>
-          <p>
-            Outcome: <span className="badge alert">{c.baseline_outcome}</span>
-            {c.baseline_stabilized ? " · stabilized" : ""}
-          </p>
-        </div>
-        <div className="comparison-run-card">
-          <span className="metric-label">Adaptive run</span>
-          <p>
-            <code>{c.adaptive_session_id}</code>
-          </p>
-          <p>
-            Outcome: <span className="badge alert">{c.adaptive_outcome}</span>
-            {c.adaptive_stabilized ? " · stabilized" : ""}
-          </p>
-        </div>
-      </div>
-
-      {c.valid ? (
-        <>
-          <div className="comparison-kpi-block">
-            <h4 className="review-subheading">KPI deltas (adaptive − baseline)</h4>
-            <table className="comparison-kpi-table">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>Baseline</th>
-                  <th>Adaptive</th>
-                  <th>Delta</th>
-                  <th>Favors</th>
-                </tr>
-              </thead>
-              <tbody>
-                {demoDeltas.map((row) => (
-                  <tr key={row.kpi_id}>
-                    <td>{row.label}</td>
-                    <td>
-                      {formatDemoKpiValue(row.baseline_value, row.unit)} {row.unit}
-                    </td>
-                    <td>
-                      {formatDemoKpiValue(row.adaptive_value, row.unit)} {row.unit}
-                    </td>
-                    <td>
-                      {row.delta >= 0 ? "+" : ""}
-                      {formatDemoKpiValue(row.delta, row.unit)}
-                    </td>
-                    <td>{row.favors}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="comparison-milestone-block">
-            <h4 className="review-subheading">Milestone counts (by kind)</h4>
-            <table className="comparison-kpi-table">
-              <thead>
-                <tr>
-                  <th>Kind</th>
-                  <th>Baseline</th>
-                  <th>Adaptive</th>
-                </tr>
-              </thead>
-              <tbody>
-                {c.milestone_kind_counts.map((row) => (
-                  <tr key={row.kind}>
-                    <td>{row.kind}</td>
-                    <td>{row.baseline_count}</td>
-                    <td>{row.adaptive_count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="muted">
-              Key events indexed: baseline {c.key_event_count_baseline}, adaptive {c.key_event_count_adaptive}. Completion
-              time delta: {c.completion_sim_time_sec_delta >= 0 ? "+" : ""}
-              {c.completion_sim_time_sec_delta}s sim time.
-            </p>
-          </div>
-
-          <div className="comparison-interpretation">
-            <h4 className="review-subheading">Plain-English interpretation</h4>
-            <ul className="review-highlight-list">
-              {c.interpretation_lines.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function EidMassBalanceOverlay(props: {
-  feedwaterFlowPct: number;
-  steamFlowPct: number;
-  vesselLevelM: number;
-}) {
-  const { feedwaterFlowPct, steamFlowPct, vesselLevelM } = props;
-
-  const netFlow = feedwaterFlowPct - steamFlowPct;
-  const isLosingInventory = netFlow < -1;
-  const tripSetpointLevel = 6.15;
-  const marginToTrip = vesselLevelM - tripSetpointLevel;
-
-  let etttStr = "Stable";
-  if (isLosingInventory && marginToTrip > 0) {
-    const rateOfDrop = Math.abs(netFlow) * 0.0031;
-    const secondsToTrip = marginToTrip / rateOfDrop;
-    if (secondsToTrip > 3600) {
-      etttStr = "> 60m";
-    } else {
-      const min = Math.floor(secondsToTrip / 60);
-      const sec = Math.floor(secondsToTrip % 60);
-      etttStr = `${min}m ${sec}s`;
-    }
-  } else if (marginToTrip <= 0) {
-    etttStr = "Tripped";
-  } else if (netFlow > 1) {
-    etttStr = "Recovering";
-  }
-
-  // 8.2m is max normal level, 6.15m is trip. Span is ~2.05m.
-  const fillPct = Math.max(0, Math.min(100, (marginToTrip / 2.05) * 100));
-
-  return (
-    <div className="eid-overlay" data-testid="eid-mass-balance-overlay">
-      <h3 className="review-subheading">Plant Ecological Constraints</h3>
-      <div className="eid-metrics">
-        <article className={`metric-card ${isLosingInventory ? "alert-border" : ""}`}>
-          <span className="metric-label">Mass Inventory Balance (FW - Steam)</span>
-          <div className="eid-balance-row">
-            <span className={`badge ${isLosingInventory ? "alert" : "ok"}`}>
-              {netFlow > 0 ? "+" : ""}{netFlow.toFixed(1)}% net
-            </span>
-            <span className="muted">
-              In: {feedwaterFlowPct.toFixed(1)}% | Out: {steamFlowPct.toFixed(1)}%
-            </span>
-          </div>
-        </article>
-
-        <article className={`metric-card ${marginToTrip < 0.25 && marginToTrip > 0 ? "alert-border" : ""}`}>
-          <span className="metric-label">Reactor Trip Margin (Level &lt; 6.15m)</span>
-          <div className="eid-margin-row">
-            <strong>{marginToTrip > 0 ? marginToTrip.toFixed(2) : "0.00"} m</strong>
-            <span className={`badge ${isLosingInventory ? "alert" : "neutral"}`}>
-              Proj. limit: {etttStr}
-            </span>
-          </div>
-          <div className="eid-progress-bar">
-            <div
-              className={`eid-progress-fill ${isLosingInventory ? "depleting" : "stable"}`}
-              style={{ width: `${fillPct}%` }}
-            />
-          </div>
-        </article>
-      </div>
-    </div>
-  );
-}
-
-function priorityTone(priority: "standard" | "priority" | "critical"): "ok" | "neutral" | "alert" {
-  switch (priority) {
-    case "standard":
-      return "ok";
-    case "priority":
-      return "neutral";
-    case "critical":
-      return "alert";
-  }
-}
-
 export default function App({ store = defaultStore, autoRun = true }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
+  const [workspace, setWorkspace] = useState<WorkspaceId>("operate");
   const [isRunning, setIsRunning] = useState(true);
   const [controlValues, setControlValues] = useState<Record<string, number>>({});
   const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
@@ -523,10 +62,11 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     setSupervisorOverrideNote("");
   }, [snapshot.pending_supervisor_override?.action_request.action_request_id, snapshot.pending_supervisor_override?.request_status]);
 
-  const activeAlarmIds = useMemo(
-    () => new Set(snapshot.alarm_set.active_alarm_ids),
-    [snapshot.alarm_set.active_alarm_ids],
-  );
+  useEffect(() => {
+    setExpandedClusterIds([]);
+    setWorkspace("operate");
+  }, [snapshot.session_id]);
+
   const actionLabels = useMemo(
     () =>
       Object.fromEntries(snapshot.scenario.allowed_operator_actions.map((action) => [action.action_id, action.label])) as Record<
@@ -535,14 +75,12 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
       >,
     [snapshot.scenario.allowed_operator_actions],
   );
-  const recentEvents = snapshot.events.slice(-8).reverse();
-  const pinnedCriticalAlarmIds = new Set(snapshot.support_policy.critical_visibility.pinned_alarm_ids);
-  const pinnedCriticalAlarms = snapshot.alarm_set.active_alarms.filter((alarm) => pinnedCriticalAlarmIds.has(alarm.alarm_id));
+
   const pendingConfirmation = snapshot.pending_action_confirmation;
   const pendingSupervisorOverride = snapshot.pending_supervisor_override;
   const actionConfirmationPending =
     Boolean(pendingConfirmation) || pendingSupervisorOverride?.request_status === "requested";
-  const lastValidation = snapshot.last_validation_result;
+
   const presentationPolicy = useMemo(
     () =>
       buildPresentationPolicy({
@@ -564,55 +102,11 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
       snapshot.support_refinement,
     ],
   );
+
   const presentedLaneItems = useMemo(
     () => orderPresentedLaneItems(snapshot.first_response_lane.items, presentationPolicy.procedure_item_order),
     [presentationPolicy.procedure_item_order, snapshot.first_response_lane.items],
   );
-  const supportCards = useMemo(() => {
-    const cardMap: Record<SupportSectionId, { title: string; body: string }> = {
-      mode: {
-        title: "Current assistance mode",
-        body: snapshot.support_policy.current_mode_reason,
-      },
-      watch: {
-        title: "Watch next",
-        body: snapshot.support_refinement.watch_now_summary,
-      },
-      effect: {
-        title: "Mode effect on presentation",
-        body: snapshot.support_policy.support_behavior_changes.join(" "),
-      },
-      focus: {
-        title: "Current support focus",
-        body: snapshot.support_refinement.current_support_focus,
-      },
-      guardrails: {
-        title: "Critical visibility guardrails",
-        body: snapshot.support_policy.critical_visibility.summary,
-      },
-      confidence: {
-        title: "Degraded-confidence effect",
-        body: snapshot.support_policy.degraded_confidence_effect,
-      },
-      operator: {
-        title: "Operator context",
-        body: snapshot.support_refinement.operator_context_note,
-      },
-      transition: {
-        title: "Mode transition status",
-        body: `${snapshot.support_policy.transition_reason} ${snapshot.support_policy.mode_change_summary}`.trim(),
-      },
-      risk: {
-        title: "Why this is emphasized now",
-        body: snapshot.support_refinement.summary_explanation,
-      },
-    };
-
-    return presentationPolicy.support_section_order.map((id) => ({
-      id,
-      ...cardMap[id],
-    }));
-  }, [presentationPolicy.support_section_order, snapshot.support_policy, snapshot.support_refinement]);
 
   const comparisonCapture = useMemo(() => {
     const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
@@ -623,6 +117,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     if (!comparisonCapture?.baseline_completed || !comparisonCapture.adaptive_completed) {
       return undefined;
     }
+
     return buildSessionRunComparison(comparisonCapture.baseline_completed, comparisonCapture.adaptive_completed);
   }, [comparisonCapture]);
 
@@ -643,12 +138,69 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     });
   }, [comparisonCapture, sessionRunComparison]);
 
-  const comparisonCaptureHint = useMemo(() => {
-    return (
-      comparisonCapture &&
-      Boolean(comparisonCapture.baseline_completed) !== Boolean(comparisonCapture.adaptive_completed)
-    );
-  }, [comparisonCapture]);
+  const comparisonCaptureHint = useMemo(
+    () => comparisonCapture && Boolean(comparisonCapture.baseline_completed) !== Boolean(comparisonCapture.adaptive_completed),
+    [comparisonCapture],
+  );
+
+  const operateModel = useMemo(
+    () =>
+      buildOperateWorkspaceModel({
+        snapshot,
+        actionLabels,
+        expandedClusterIds,
+        presentedLaneItems,
+        pendingConfirmation,
+        pendingSupervisorOverride,
+      }),
+    [actionLabels, expandedClusterIds, pendingConfirmation, pendingSupervisorOverride, presentedLaneItems, snapshot],
+  );
+
+  const reviewModel = useMemo(
+    () =>
+      buildReviewWorkspaceModel({
+        snapshot,
+        sessionRunComparison,
+        comparisonCaptureHint: Boolean(comparisonCaptureHint),
+      }),
+    [comparisonCaptureHint, sessionRunComparison, snapshot],
+  );
+
+  const commandMetrics = useMemo(
+    () => [
+      {
+        label: "Simulation clock",
+        value: formatClock(snapshot.sim_time_sec),
+      },
+      {
+        label: "Support mode",
+        value: formatSupportModeLabel(snapshot.support_mode),
+      },
+      {
+        label: "Alarm compression",
+        value: `${snapshot.alarm_intelligence.compression_ratio.toFixed(2)}x`,
+      },
+      {
+        label: "Review status",
+        value: snapshot.completed_review || pendingSupervisorOverride ? "Ready" : "Standby",
+      },
+    ],
+    [pendingSupervisorOverride, snapshot.alarm_intelligence.compression_ratio, snapshot.completed_review, snapshot.sim_time_sec, snapshot.support_mode],
+  );
+
+  const pendingSupervisorOverrideCard = pendingSupervisorOverride
+    ? {
+        actionLabel:
+          actionLabels[pendingSupervisorOverride.action_request.action_id] ?? pendingSupervisorOverride.action_request.action_id,
+        reasonCode: pendingSupervisorOverride.validation_result.reason_code,
+        requestStatus: pendingSupervisorOverride.request_status,
+        explanation: pendingSupervisorOverride.validation_result.explanation,
+      }
+    : undefined;
+
+  function openWorkspace(nextWorkspace: WorkspaceId): void {
+    startTransition(() => setWorkspace(nextWorkspace));
+  }
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -656,15 +208,24 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     );
   }
 
-  function requestLaneAction(actionId: string, recommendedValue?: number | boolean | string): void {
+  function requestLaneAction(actionId: string, recommendedValue?: number): void {
     store.requestAction({
       action_id: actionId,
-      requested_value: typeof recommendedValue === "number" ? recommendedValue : undefined,
+      requested_value: recommendedValue,
       ui_region: "procedure_lane",
       reason_note:
         actionId === "act_ack_alarm"
           ? snapshot.alarm_set.active_alarm_ids[0] ?? "no_active_alarm"
-          : `Phase 2 first-response guidance for ${snapshot.reasoning_snapshot.dominant_hypothesis_id ?? "monitoring"}`,
+          : `Operator-first lane guidance for ${snapshot.reasoning_snapshot.dominant_hypothesis_id ?? "monitoring"}`,
+    });
+  }
+
+  function applyControlAction(control: ScenarioControlRangeSchema, requestedValue: number): void {
+    store.requestAction({
+      action_id: control.action_id,
+      requested_value: requestedValue,
+      ui_region: "plant_mimic",
+      reason_note: control.reason_note,
     });
   }
 
@@ -681,789 +242,159 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     });
   }
 
-  function renderManualControl(control: ScenarioControlRangeSchema) {
-    const controlValue = controlValues[control.control_id] ?? control.default_value;
-    const validatorDemoPresets = getValidatorDemoPresets(snapshot.runtime_profile_id, control.action_id);
+  function acknowledgeTopAlarm(): void {
+    store.requestAction({
+      action_id: "act_ack_alarm",
+      ui_region: "alarm_area",
+      reason_note: snapshot.alarm_set.active_alarm_ids[0] ?? "no_active_alarm",
+    });
+  }
 
-    return (
-      <div key={control.control_id} className="control-block">
-        <div className="panel-header compact-header">
-          <h3>{snapshot.manual_control_schema.title}</h3>
-          <p className="muted">{snapshot.manual_control_schema.helper_text}</p>
-        </div>
-        <label htmlFor={control.control_id}>{control.label}</label>
-        <input
-          id={control.control_id}
-          type="range"
-          min={control.min}
-          max={control.max}
-          step={control.step}
-          value={controlValue}
-          onChange={(event) =>
-            setControlValues((current) => ({
-              ...current,
-              [control.control_id]: Number(event.target.value),
-            }))
-          }
-        />
-        <div className="control-row">
-          <strong>
-            {controlValue}
-            {control.unit_label ? ` ${control.unit_label}` : ""}
-          </strong>
-          <button
-            type="button"
-            disabled={actionConfirmationPending}
-            onClick={() =>
-              store.requestAction({
-                action_id: control.action_id,
-                requested_value: controlValue,
-                ui_region: "plant_mimic",
-                reason_note: control.reason_note,
-              })
-            }
-          >
-            {control.apply_button_label}
-          </button>
-        </div>
-        {validatorDemoPresets.length > 0 ? (
-          <div className="demo-preset-group">
-            <span className="metric-label">Validator demo presets</span>
-            <div className="demo-preset-row">
-              {validatorDemoPresets.map((preset) => (
-                <button
-                  key={preset.preset_id}
-                  type="button"
-                  className="ghost-button"
-                  disabled={actionConfirmationPending}
-                  onClick={() => triggerValidationDemoPreset(control, preset.requested_value, preset.label)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <ul className="demo-preset-list">
-              {validatorDemoPresets.map((preset) => (
-                <li key={`${control.control_id}-${preset.preset_id}`}>
-                  <strong>{preset.label}</strong>: {preset.requested_value}
-                  {control.unit_label ? ` ${control.unit_label}` : ""} · {preset.description}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-    );
+  function resetSession(): void {
+    setIsRunning(true);
+    store.reset({
+      session_mode: selectedSessionMode,
+      scenario_id: selectedScenarioId,
+    });
   }
 
   return (
     <div className="app-shell">
-      <header className="top-status-bar">
-        <div>
-          <p className="eyebrow">{presentationPolicy.shell_slice_label}</p>
+      <a className="skip-link" href="#app-workspace">
+        Skip to workspace
+      </a>
+      <header className="command-bar">
+        <div className="command-bar__identity">
+          <p className="eyebrow">AURA-IDCR operator-first shell</p>
           <h1>{snapshot.scenario.title}</h1>
-          <p className="muted">{snapshot.current_phase.label}</p>
-          <p className="mode-summary-note">{presentationPolicy.shell_mode_summary}</p>
+          <p className="command-bar__phase">{snapshot.current_phase.label}</p>
+          <p className="command-bar__summary">{presentationPolicy.shell_mode_summary}</p>
         </div>
-        <div className="status-grid">
-          <div className="status-cell">
-            <span className="status-label">Scenario / Mode</span>
-            <div className="session-mode-row">
-              <strong>{snapshot.session_mode}</strong>
-              <label className="muted session-mode-label" htmlFor="scenario-select">
-                Next scenario
-              </label>
-              <select
-                id="scenario-select"
-                value={selectedScenarioId}
-                onChange={(event) => setSelectedScenarioId(event.target.value)}
-              >
+
+        <div className="command-bar__controls">
+          <div className="workspace-switch" role="tablist" aria-label="Workspace switch">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspace === "operate"}
+              className={workspace === "operate" ? "workspace-switch__button is-active" : "workspace-switch__button"}
+              onClick={() => openWorkspace("operate")}
+            >
+              Operate
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspace === "review"}
+              className={workspace === "review" ? "workspace-switch__button is-active" : "workspace-switch__button"}
+              onClick={() => openWorkspace("review")}
+            >
+              Review
+            </button>
+          </div>
+
+          <div className="command-control-grid">
+            <label className="command-field">
+              <span>Next scenario</span>
+              <select name="scenario_id" value={selectedScenarioId} onChange={(event) => setSelectedScenarioId(event.target.value)}>
                 {snapshot.scenario_catalog.map((scenario) => (
                   <option key={scenario.scenario_id} value={scenario.scenario_id}>
                     {scenario.title}
                   </option>
                 ))}
               </select>
-              <label className="muted session-mode-label" htmlFor="session-mode-select">
-                Next run
-              </label>
+            </label>
+            <label className="command-field">
+              <span>Next run</span>
               <select
-                id="session-mode-select"
+                name="session_mode"
                 value={selectedSessionMode}
                 onChange={(event) => setSelectedSessionMode(event.target.value as SessionMode)}
               >
                 <option value="adaptive">adaptive</option>
                 <option value="baseline">baseline</option>
               </select>
+            </label>
+            <div className="command-actions">
+              <button type="button" className="ghost-button" onClick={() => setIsRunning((value) => !value)} disabled={Boolean(snapshot.outcome)}>
+                {isRunning ? "Hold runtime loop" : "Resume runtime loop"}
+              </button>
+              <button type="button" className="ghost-button" onClick={() => store.advanceTick()} disabled={Boolean(snapshot.outcome)}>
+                Advance one tick
+              </button>
+              <button type="button" onClick={resetSession}>
+                Reset session
+              </button>
             </div>
           </div>
-          <div className="status-cell">
-            <span className="status-label">Support Mode</span>
-            <strong>{formatSupportModeLabel(snapshot.support_mode)}</strong>
-          </div>
-          <div className="status-cell">
-            <span className="status-label">Simulation Clock</span>
-            <strong>{formatClock(snapshot.sim_time_sec)}</strong>
-          </div>
-          <div className="status-cell">
-            <span className="status-label">Alarm Compression</span>
-            <strong>{snapshot.alarm_intelligence.compression_ratio.toFixed(2)}x</strong>
-          </div>
         </div>
-        <div className="badge-row">
-          <span className="badge ok">{snapshot.logging_active ? "Logging active" : "Logging offline"}</span>
-          <span className={`badge ${snapshot.validation_status_available ? presentationPolicy.status_tone : "neutral"}`}>
-            {snapshot.validation_status_available ? presentationPolicy.validation_status_label : "Validation offline"}
-          </span>
-          <span className={`badge ${snapshot.outcome ? "alert" : "ok"}`}>
-            {snapshot.outcome ? `Outcome: ${snapshot.outcome.outcome}` : "Scenario running"}
-          </span>
+
+        <div className="command-bar__status">
+          <MetricStrip items={commandMetrics} className="metric-strip--compact" />
+          <div className="pill-row">
+            <StatusPill tone="ok">{snapshot.logging_active ? "Logging active" : "Logging offline"}</StatusPill>
+            <StatusPill tone={snapshot.validation_status_available ? presentationPolicy.status_tone : "neutral"}>
+              {snapshot.validation_status_available ? presentationPolicy.validation_status_label : "Validation offline"}
+            </StatusPill>
+            <StatusPill tone={snapshot.outcome ? "alert" : riskBadgeTone(snapshot.combined_risk.combined_risk_band)}>
+              {snapshot.outcome ? `Outcome ${snapshot.outcome.outcome}` : "Scenario running"}
+            </StatusPill>
+            {snapshot.completed_review ? <StatusPill tone="neutral">Review evidence ready</StatusPill> : null}
+          </div>
+          <p className="command-bar__summary">{presentationPolicy.validation_status_summary}</p>
         </div>
-        <p className="top-status-note">{presentationPolicy.validation_status_summary}</p>
       </header>
 
-      <main className="layout-grid">
-        <section className="panel plant-panel">
-          <div className="panel-header">
-            <h2>Plant Mimic Area</h2>
-            <p className="muted">Closed-loop baseline view with continuously visible critical variables.</p>
-          </div>
-          <div className="mimic-flow">
-            <div className="mimic-node">
-              <span>Reactor</span>
-              <strong>{formatValue(snapshot.plant_tick.plant_state.reactor_power_pct, "% rated")}</strong>
-            </div>
-            <div className="mimic-line" />
-            <div className="mimic-node">
-              <span>Vessel Level</span>
-              <strong>{formatValue(snapshot.plant_tick.plant_state.vessel_water_level_m, "m")}</strong>
-            </div>
-            <div className="mimic-line" />
-            <div className="mimic-node">
-              <span>Steam Path</span>
-              <strong>{formatValue(snapshot.plant_tick.plant_state.main_steam_flow_pct, "% rated")}</strong>
-            </div>
-            <div className="mimic-line" />
-            <div className="mimic-node">
-              <span>Turbine / Generator</span>
-              <strong>{formatValue(snapshot.plant_tick.plant_state.turbine_output_mwe, "MW_e")}</strong>
-            </div>
-            <div className="mimic-line" />
-            <div className="mimic-node">
-              <span>Condenser</span>
-              <strong>
-                {snapshot.plant_tick.plant_state.condenser_heat_sink_available ? "Heat sink available" : "Heat sink lost"}
-              </strong>
-            </div>
-          </div>
-
-          <div className="metric-grid">
-            {criticalVariableIds.map((variableId) => (
-              <article key={variableId} className="metric-card">
-                <span className="metric-label">{variableLabels[variableId]}</span>
-                <strong>{formatValue(snapshot.plant_tick.plant_state[variableId], variableUnits[variableId])}</strong>
-              </article>
-            ))}
-          </div>
-
-          <div className="state-strip">
-            <span className={snapshot.plant_tick.plant_state.reactor_trip_active ? "state-bad" : "state-good"}>
-              Reactor trip: {snapshot.plant_tick.plant_state.reactor_trip_active ? "Active" : "Clear"}
-            </span>
-            <span className={snapshot.plant_tick.plant_state.safety_relief_valve_open ? "state-bad" : "state-good"}>
-              SRV: {snapshot.plant_tick.plant_state.safety_relief_valve_open ? "Open" : "Closed"}
-            </span>
-            <span className={snapshot.plant_tick.plant_state.offsite_power_available ? "state-good" : "state-bad"}>
-              Offsite power: {snapshot.plant_tick.plant_state.offsite_power_available ? "Available" : "Lost"}
-            </span>
-            <span
-              className={
-                snapshot.plant_tick.plant_state.isolation_condenser_available ? "state-good" : "state-bad"
-              }
-            >
-              Isolation condenser: {snapshot.plant_tick.plant_state.isolation_condenser_available ? "Available" : "Unavailable"}
-            </span>
-          </div>
-          
-          {snapshot.runtime_profile_id === "feedwater_degradation" ? (
-            <EidMassBalanceOverlay
-              feedwaterFlowPct={Number(snapshot.plant_tick.plant_state.feedwater_flow_pct)}
-              steamFlowPct={Number(snapshot.plant_tick.plant_state.main_steam_flow_pct)}
-              vesselLevelM={Number(snapshot.plant_tick.plant_state.vessel_water_level_m)}
-            />
-          ) : null}
-        </section>
-
-        <aside className="panel alarm-panel">
-          <div className="panel-header">
-            <h2>Alarm Intelligence Area</h2>
-            <p className="muted">Grouped, inspectable alarm clusters with critical signals still surfaced.</p>
-          </div>
-          <div className="alarm-summary-grid">
-            <article className="metric-card compact">
-              <span className="metric-label">Raw active alarms</span>
-              <strong>{snapshot.alarm_set.active_alarm_count}</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Visible grouped cards</span>
-              <strong>{snapshot.alarm_intelligence.visible_alarm_card_count}</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Active clusters</span>
-              <strong>{snapshot.alarm_set.active_alarm_cluster_count}</strong>
-            </article>
-          </div>
-          <div className="critical-alarm-strip">
-            <div className="alarm-title-row">
-              <strong>Critical alarms pinned in view</strong>
-              <span>{pinnedCriticalAlarms.length}</span>
-            </div>
-            <p className="muted">{snapshot.support_policy.critical_visibility.summary}</p>
-            <div className="badge-row cluster-badges">
-              {pinnedCriticalAlarms.length > 0 ? (
-                pinnedCriticalAlarms.map((alarm) => (
-                  <span
-                    key={alarm.alarm_id}
-                    className={`badge priority-chip priority-${alarm.priority}`}
-                    data-testid="critical-alarm-chip"
-                  >
-                    {alarm.title}
-                  </span>
-                ))
-              ) : (
-                <span className="badge ok">No active P1/P2 or always-visible alarms</span>
-              )}
-            </div>
-          </div>
-          <div className="alarm-list">
-            {snapshot.alarm_intelligence.clusters.length === 0 ? (
-              <p className="muted">No active alarm clusters yet.</p>
-            ) : (
-              snapshot.alarm_intelligence.clusters.map((cluster) => (
-                <article
-                  key={cluster.cluster_id}
-                  className={`alarm-card active priority-${cluster.priority}`}
-                >
-                  <div className="alarm-title-row">
-                    <strong>{cluster.title}</strong>
-                    <span>{cluster.priority}</span>
-                  </div>
-                  <p className="alarm-meta">
-                    {cluster.grouped_alarm_count} related alarms | critical visible: {cluster.critical_alarm_ids.length}
-                  </p>
-                  <p className="muted">{cluster.summary}</p>
-                  <div className="badge-row cluster-badges">
-                    {cluster.alarms
-                      .filter((alarm) => cluster.primary_alarm_ids.includes(alarm.alarm_id))
-                      .map((alarm) => (
-                        <span key={alarm.alarm_id} className={`badge priority-chip priority-${alarm.priority}`}>
-                          {alarm.title}
-                        </span>
-                      ))}
-                  </div>
-                  <button type="button" className="ghost-button" onClick={() => toggleCluster(cluster.cluster_id)}>
-                    {expandedClusterIds.includes(cluster.cluster_id) ? "Hide raw alarms" : "Inspect raw alarms"}
-                  </button>
-                  {expandedClusterIds.includes(cluster.cluster_id) ? (
-                    <div className="cluster-detail-list">
-                      {cluster.alarms.map((alarm) => (
-                        <article
-                          key={alarm.alarm_id}
-                          className={`alarm-card nested ${activeAlarmIds.has(alarm.alarm_id) ? "active" : "inactive"} priority-${alarm.priority}`}
-                        >
-                          <div className="alarm-title-row">
-                            <strong>{alarm.title}</strong>
-                            <span>{alarm.priority}</span>
-                          </div>
-                          <p className="alarm-meta">
-                            {alarm.subsystem_tag} | {alarm.visibility_rule === "always_visible" ? "Always visible" : "Grouped"}
-                          </p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))
-            )}
-          </div>
-        </aside>
-
-        <section className="panel placeholder-panel">
-          <div className="panel-header">
-            <h2>Storyline / Root-Cause Area</h2>
-          </div>
-          <div className="storyline-card">
-            <div className="alarm-title-row">
-              <strong>
-                {snapshot.reasoning_snapshot.ranked_hypotheses[0]?.label ?? "Monitoring only"}
-              </strong>
-              <span>{snapshot.reasoning_snapshot.ranked_hypotheses[0]?.confidence_band ?? "low"} confidence</span>
-            </div>
-            <p className="muted">{snapshot.reasoning_snapshot.dominant_summary}</p>
-            <div className="badge-row">
-              <span className={`badge ${snapshot.reasoning_snapshot.expected_root_cause_aligned ? "ok" : "neutral"}`}>
-                {snapshot.reasoning_snapshot.expected_root_cause_aligned ? "Aligned with scenario driver" : "Alternative storyline active"}
-              </span>
-              <span className="badge neutral">Stable for {snapshot.reasoning_snapshot.stable_for_ticks} ticks</span>
-              <span className={`badge ${snapshot.support_refinement.wording_style === "concise" ? "neutral" : "ok"}`}>
-                Wording: {snapshot.support_refinement.wording_style}
-              </span>
-            </div>
-            <div className="storyline-context">
-              <article className="storyline-context-card">
-                <span className="metric-label">Support focus now</span>
-                <p className="muted">{snapshot.support_refinement.current_support_focus}</p>
-              </article>
-              <article className="storyline-context-card">
-                <span className="metric-label">Why emphasis changed</span>
-                <p className="muted">{snapshot.support_refinement.summary_explanation}</p>
-              </article>
-              <article className="storyline-context-card">
-                <span className="metric-label">Operator context</span>
-                <p className="muted">{snapshot.support_refinement.operator_context_note}</p>
-              </article>
-            </div>
-          </div>
-          <div className="storyline-list">
-            {snapshot.reasoning_snapshot.ranked_hypotheses.map((hypothesis) => (
-              <article key={hypothesis.hypothesis_id} className="storyline-item">
-                <div className="alarm-title-row">
-                  <strong>
-                    #{hypothesis.rank} {hypothesis.label}
-                  </strong>
-                  <span>{hypothesis.score.toFixed(2)}</span>
-                </div>
-                <p className="muted">{hypothesis.summary}</p>
-                <div className="evidence-list">
-                  {hypothesis.evidence.map((evidence) => (
-                    <article key={evidence.evidence_id} className="evidence-card">
-                      <strong>{evidence.label}</strong>
-                      <p className="muted">{evidence.detail}</p>
-                    </article>
-                  ))}
-                </div>
-                <p className="alarm-meta">Watch: {hypothesis.watch_items.map(formatSignalLabel).join(", ")}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel controls-panel">
-          <div className="panel-header">
-            <h2>Dynamic First-Response Lane</h2>
-            <p className="muted">Prototype guidance only. The lane narrows the bounded first checks and actions for the current storyline.</p>
-          </div>
-
-          <div className={`procedure-lane ${presentationPolicy.support_panel_mode_class}`}>
-            <p className="muted">{snapshot.first_response_lane.prototype_notice}</p>
-            <div className="badge-row">
-              <span className={`badge ${riskBadgeTone(snapshot.combined_risk.combined_risk_band)}`}>
-                Focus: {snapshot.support_refinement.current_support_focus}
-              </span>
-              <span className="badge neutral">Emphasized items: {snapshot.support_refinement.emphasized_lane_item_ids.length}</span>
-              <span className={`badge ${presentationPolicy.watch_badge_tone}`}>Watch next: {snapshot.support_refinement.watch_now_summary}</span>
-            </div>
-            <p className="mode-summary-note">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
-            <div className="procedure-list">
-              {presentedLaneItems.map((item) => (
-                <article
-                  key={item.item_id}
-                  className={`procedure-item ${item.presentation_cue?.emphasized ? "emphasized" : ""} ${presentationPolicy.support_panel_mode_class}`}
-                >
-                  <div className="alarm-title-row">
-                    <strong>{item.label}</strong>
-                    <span>{item.item_kind}</span>
-                  </div>
-                  {item.presentation_cue ? (
-                    <div className="badge-row">
-                      <span className={`badge ${urgencyBadgeTone(item.presentation_cue.urgency_level)}`}>
-                        {item.presentation_cue.urgency_level}
-                      </span>
-                      {item.presentation_cue.emphasized ? <span className="badge ok">Emphasized now</span> : null}
-                      <span className={`badge ${item.presentation_cue.wording_style === "concise" ? "neutral" : "ok"}`}>
-                        {item.presentation_cue.wording_style}
-                      </span>
-                    </div>
-                  ) : null}
-                  <p className="muted">{item.why}</p>
-                  {item.presentation_cue ? <p className="lane-why-now">{item.presentation_cue.why_this_matters_now}</p> : null}
-                  {item.presentation_cue?.attention_sensitive_caution ? (
-                    <p className="lane-caution">{item.presentation_cue.attention_sensitive_caution}</p>
-                  ) : null}
-                  {item.presentation_cue?.degraded_confidence_caveat ? (
-                    <p className="lane-caution">{item.presentation_cue.degraded_confidence_caveat}</p>
-                  ) : null}
-                  <p className="alarm-meta">{item.completion_hint}</p>
-                  {item.source_variable_ids.length > 0 ? (
-                    <p className="alarm-meta">Signals: {item.source_variable_ids.map(formatSignalLabel).join(", ")}</p>
-                  ) : null}
-                  {item.recommended_action_id ? (
-                    <button
-                      type="button"
-                      className="lane-action-button"
-                      disabled={actionConfirmationPending}
-                      onClick={() => requestLaneAction(item.recommended_action_id!, item.recommended_value)}
-                    >
-                      {actionLabels[item.recommended_action_id] ?? item.recommended_action_id}
-                      {typeof item.recommended_value === "number" ? ` (${item.recommended_value}% rated)` : ""}
-                    </button>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          </div>
-
-          {snapshot.manual_control_schema.controls.map(renderManualControl)}
-
-          <div className="control-row">
-            <button
-              type="button"
-                disabled={actionConfirmationPending}
-              onClick={() =>
-                store.requestAction({
-                  action_id: "act_ack_alarm",
-                  ui_region: "alarm_area",
-                  reason_note: snapshot.alarm_set.active_alarm_ids[0] ?? "no_active_alarm",
-                })
-              }
-            >
-              Acknowledge top alarm
-            </button>
-            <button type="button" onClick={() => setIsRunning((value) => !value)} disabled={Boolean(snapshot.outcome)}>
-              {isRunning ? "Hold runtime loop" : "Resume runtime loop"}
-            </button>
-            <button type="button" onClick={() => store.advanceTick()} disabled={Boolean(snapshot.outcome)}>
-              Advance one tick
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsRunning(true);
-                store.reset({
-                  session_mode: selectedSessionMode,
-                  scenario_id: selectedScenarioId,
-                });
-              }}
-            >
-              Reset session
-            </button>
-          </div>
-
-          {pendingConfirmation ? (
-            <div
-              className={`validation-banner ${presentationPolicy.validation_mode_class}`}
-              data-testid="pending-validation-banner"
-            >
-              <div className="alarm-title-row">
-                <strong>Soft warning confirmation required</strong>
-                <span>{actionLabels[pendingConfirmation.action_request.action_id] ?? pendingConfirmation.action_request.action_id}</span>
-              </div>
-              <p className="mode-summary-note">{presentationPolicy.pending_confirmation_intro}</p>
-              <p className="muted">{pendingConfirmation.validation_result.explanation}</p>
-              <p className="lane-why-now">{pendingConfirmation.validation_result.risk_context}</p>
-              <p className="lane-caution">{pendingConfirmation.validation_result.confidence_note}</p>
-              {pendingConfirmation.validation_result.recommended_safe_alternative ? (
-                <p className="alarm-meta">Safer direction: {pendingConfirmation.validation_result.recommended_safe_alternative}</p>
-              ) : null}
-              <div className="control-row">
-                <button type="button" onClick={() => store.confirmPendingAction()}>
-                  Confirm and apply action
-                </button>
-                <button type="button" className="ghost-button" onClick={() => store.dismissPendingActionConfirmation()}>
-                  Cancel warning
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </section>
-
-        <section className={`panel support-panel ${presentationPolicy.support_panel_mode_class}`}>
-          <div className="panel-header">
-            <h2>Support State / Combined Risk</h2>
-            <p className="muted">Compact deterministic assistance-state output, bounded action validation status, and enforced critical visibility.</p>
-          </div>
-          <div className="support-summary-grid">
-            <article className="metric-card compact">
-              <span className="metric-label">Workload</span>
-              <strong>{snapshot.operator_state.workload_index}/100</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Attention Stability</span>
-              <strong>{snapshot.operator_state.attention_stability_index}/100</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Signal Confidence</span>
-              <strong>{snapshot.operator_state.signal_confidence}/100</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Degraded Mode</span>
-              <strong>{snapshot.operator_state.degraded_mode_active ? "Active" : "Clear"}</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Assistance Mode</span>
-              <strong>{formatSupportModeLabel(snapshot.support_mode)}</strong>
-            </article>
-            <article className="metric-card compact">
-              <span className="metric-label">Combined Risk</span>
-              <strong>
-                {snapshot.combined_risk.combined_risk_score.toFixed(1)}/100 {snapshot.combined_risk.combined_risk_band}
-              </strong>
-            </article>
-          </div>
-          <div className="badge-row">
-            <span className={`badge ${snapshot.operator_state.degraded_mode_active ? "alert" : "ok"}`}>
-              Degraded mode: {snapshot.operator_state.degraded_mode_active ? "active" : "clear"}
-            </span>
-            <span className={`badge ${snapshot.support_mode === "protected_response" ? "alert" : snapshot.support_mode === "guided_support" ? "neutral" : "ok"}`}>
-              Assistance: {formatSupportModeLabel(snapshot.support_mode)}
-            </span>
-            <span className={`badge ${riskBadgeTone(snapshot.combined_risk.combined_risk_band)}`}>
-              Combined risk: {snapshot.combined_risk.combined_risk_band}
-            </span>
-            <span className="badge ok">Critical visibility guardrails active</span>
-            <span className="badge ok">Rule-based storyline active</span>
-            <span className="badge ok">Dynamic first-response lane active</span>
-          </div>
-          <div className={`mode-presentation-banner ${presentationPolicy.support_panel_mode_class}`}>
-            <strong>{formatSupportModeLabel(snapshot.support_mode)}</strong>
-            <p className="muted">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
-            <p className="muted">{presentationPolicy.validation_status_summary}</p>
-          </div>
-          <div className="support-refinement-grid">
-            {supportCards.map((card) => (
-              <article key={card.id} className="support-explanation-card">
-                <span className="metric-label">{card.title}</span>
-                <p className="muted">{card.body}</p>
-              </article>
-            ))}
-          </div>
-          {snapshot.support_refinement.degraded_confidence_caution ? (
-            <div className={`support-caution-banner caution-${presentationPolicy.caution_priority}`}>
-              <strong>Degraded-confidence caveat</strong>
-              <p className="muted">{snapshot.support_refinement.degraded_confidence_caution}</p>
-            </div>
-          ) : null}
-          {lastValidation && presentationPolicy.validator_should_surface ? (
-            <div className={`validation-banner ${presentationPolicy.validation_mode_class}`}>
-              <div className="alarm-title-row">
-                <strong>Last action validation</strong>
-                <span className={`badge ${validationBadgeTone(lastValidation.outcome)}`}>{lastValidation.outcome}</span>
-              </div>
-              <p className="mode-summary-note">{presentationPolicy.validator_mode_summary}</p>
-              <p className="muted">{lastValidation.explanation}</p>
-              <p className="alarm-meta">Reason code: {lastValidation.reason_code}</p>
-              <p className="lane-why-now">{lastValidation.risk_context}</p>
-              {lastValidation.recommended_safe_alternative ? (
-                <p className="alarm-meta">Safer direction: {lastValidation.recommended_safe_alternative}</p>
-              ) : null}
-              <p className="lane-caution">{lastValidation.confidence_note}</p>
-              <div className="badge-row">
-                <span className={`badge ${lastValidation.requires_confirmation ? "neutral" : "ok"}`}>
-                  {lastValidation.requires_confirmation ? "Confirmation required" : "No confirmation required"}
-                </span>
-                <span className={`badge ${lastValidation.prevented_harm ? "alert" : "neutral"}`}>
-                  {lastValidation.prevented_harm ? "Prevented-harm signal: yes" : "Prevented-harm signal: no"}
-                </span>
-                {lastValidation.override_allowed ? <span className="badge neutral">Supervisor review eligible</span> : null}
-              </div>
-              {lastValidation.outcome === "hard_prevent" && lastValidation.override_allowed ? (
-                <div className="control-row">
-                  {pendingSupervisorOverride?.request_status === "requested" ? (
-                    <p className="muted">{presentationPolicy.supervisor_override_summary}</p>
-                  ) : (
-                    <button type="button" className="ghost-button" onClick={() => store.requestSupervisorOverrideReview()}>
-                      Request Demo/Research Supervisor Override
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="support-explanation-grid">
-            <article className="support-explanation-card">
-              <span className="metric-label">Why risk is here now</span>
-              <p className="muted">{snapshot.combined_risk.why_risk_is_current}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">Confidence caveat</span>
-              <p className="muted">{snapshot.combined_risk.confidence_caveat}</p>
-            </article>
-            <article className="support-explanation-card">
-              <span className="metric-label">What changed</span>
-              <p className="muted">{snapshot.combined_risk.what_changed}</p>
-            </article>
-          </div>
-          <div className="support-factor-list">
-            {snapshot.combined_risk.factor_breakdown.slice(0, 3).map((factor) => (
-              <article key={factor.factor_id} className="support-factor-card">
-                <div className="alarm-title-row">
-                  <strong>{factor.label}</strong>
-                  <span>+{factor.contribution.toFixed(1)}</span>
-                </div>
-                <p className="alarm-meta">Raw index: {factor.raw_index}/100</p>
-                <p className="muted">{factor.detail}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <aside className="panel log-panel">
-          <div className="panel-header">
-            <h2>Supervisor / Log Preview</h2>
-            <p className="muted">
-              {snapshot.completed_review
-                ? "Completed run — deterministic single-session review, KPI comparison when both modes are captured, and bounded replay."
-                : "Structured runtime event stream for replay-ready verification."}
-            </p>
-          </div>
-          <div className="evaluation-status-card demo-marker-card">
-            <span className="metric-label">Validator demo checklist</span>
-            <ul className="review-highlight-list compact-list">
-              {Object.values(snapshot.validation_demo_state).map((marker) => (
-                <li key={marker.marker_kind}>
-                  <strong>{marker.marker_kind}</strong>: {marker.demonstrated ? "done" : "pending"}
-                </li>
-              ))}
-            </ul>
-          </div>
-          {pendingSupervisorOverride ? (
-            <div className="evaluation-status-card supervisor-override-card" data-testid="supervisor-override-card">
-              <span className="metric-label">Demo/Research Supervisor Override</span>
-              <strong>
-                {pendingSupervisorOverride.request_status === "requested" ? "Decision required" : "Available if requested"}
-              </strong>
-              <p className="muted">
-                Action {actionLabels[pendingSupervisorOverride.action_request.action_id] ?? pendingSupervisorOverride.action_request.action_id}
-                {" · "}reason code {pendingSupervisorOverride.validation_result.reason_code}
-              </p>
-              <p className="muted">{pendingSupervisorOverride.validation_result.explanation}</p>
-              <p className="lane-caution">Demo/Research only. Approval releases one blocked action and does not weaken future validation.</p>
-              {pendingSupervisorOverride.request_status === "requested" ? (
-                <>
-                  <label className="muted" htmlFor="supervisor-override-note">
-                    Supervisor note
-                  </label>
-                  <input
-                    id="supervisor-override-note"
-                    value={supervisorOverrideNote}
-                    onChange={(event) => setSupervisorOverrideNote(event.target.value)}
-                    placeholder="Bounded demo note"
-                  />
-                  <div className="control-row">
-                    <button type="button" onClick={() => store.approvePendingSupervisorOverride(supervisorOverrideNote)}>
-                      Approve one-shot override
-                    </button>
-                    <button type="button" className="ghost-button" onClick={() => store.denyPendingSupervisorOverride(supervisorOverrideNote)}>
-                      Deny override
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="muted">Operator can request review from the hard-prevent validation banner when the demo needs to show bounded human authority.</p>
-              )}
-            </div>
-          ) : null}
-          <div className="evaluation-action-bar" data-testid="evaluation-action-bar">
-            <div className="evaluation-status-card">
-              <span className="metric-label">Session report</span>
-              <strong>{sessionAfterActionReport ? "Ready" : "Not ready"}</strong>
-              <p className="muted">
-                {snapshot.completed_review
-                  ? `Current run: ${snapshot.completed_review.session_id}`
-                  : "Complete a terminal run to generate an after-action artifact."}
-              </p>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={!sessionAfterActionReport}
-                onClick={() => {
-                  if (sessionAfterActionReport) {
-                    downloadReportArtifact(sessionAfterActionReport);
-                  }
-                }}
-              >
-                Download session report
-              </button>
-            </div>
-            <div className="evaluation-status-card">
-              <span className="metric-label">Comparison report</span>
-              <strong>{comparisonReportArtifact ? "Ready" : "Waiting for paired runs"}</strong>
-              <p className="muted">
-                {comparisonCapture?.baseline_completed && comparisonCapture.adaptive_completed
-                  ? `Baseline ${comparisonCapture.baseline_completed.session_id} vs adaptive ${comparisonCapture.adaptive_completed.session_id}.`
-                  : "Capture one baseline and one adaptive terminal run on the same scenario/version."}
-              </p>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={!comparisonReportArtifact}
-                onClick={() => {
-                  if (comparisonReportArtifact) {
-                    downloadReportArtifact(comparisonReportArtifact);
-                  }
-                }}
-              >
-                Download comparison report
-              </button>
-            </div>
-          </div>
-          {snapshot.completed_review ? (
-            <div className="evaluation-provenance-card">
-              <h3 className="kpi-summary-title">Current evaluator context</h3>
-              <p className="muted">
-                Scenario {snapshot.completed_review.scenario_id} v{snapshot.completed_review.scenario_version} · Session{" "}
-                <code>{snapshot.completed_review.session_id}</code> · Mode <strong>{snapshot.completed_review.session_mode}</strong>
-              </p>
-              <p className="muted">
-                Outcome {snapshot.completed_review.terminal_outcome.outcome} at t+{formatClock(snapshot.completed_review.completion_sim_time_sec)} sim
-                time.
-              </p>
-            </div>
-          ) : null}
-          {sessionRunComparison ? <SessionComparisonPanel comparison={sessionRunComparison} /> : null}
-          {comparisonCaptureHint ? (
-            <p className="muted comparison-capture-hint">
-              Capture comparison: run the other session mode (Next run), then <strong>Reset session</strong> and complete a
-              terminal outcome for that mode. Both baseline and adaptive completed runs are kept for this browser session.
-            </p>
-          ) : null}
-          {snapshot.completed_review ? (
-            <CompletedSessionReviewPanel review={snapshot.completed_review} canonicalEvents={snapshot.events} />
-          ) : (
-            <>
-              {snapshot.kpi_summary ? (
-                <div className="kpi-summary-block" data-testid="kpi-summary-block">
-                  <h3 className="kpi-summary-title">Session KPI summary</h3>
-                  <p className="muted">
-                    Completeness: {snapshot.kpi_summary.completeness} · Generated {snapshot.kpi_summary.generated_at_iso}
-                  </p>
-                  <ul className="kpi-metric-list">
-                    {snapshot.kpi_summary.metrics
-                      .filter((entry) => entry.audience === "demo_facing")
-                      .map((entry) => (
-                        <li key={entry.kpi_id}>
-                          <strong>{entry.label}</strong>: {formatDemoKpiValue(entry.value, entry.unit)} {entry.unit}
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              ) : null}
-              <div className="log-list">
-                {recentEvents.map((event) => (
-                  <article key={event.event_id} className="log-card">
-                    <div className="alarm-title-row">
-                      <strong>{event.event_type}</strong>
-                      <span>t+{event.sim_time_sec}s</span>
-                    </div>
-                    <p className="muted">{event.source_module}</p>
-                    <pre>{JSON.stringify(event.payload, null, 2)}</pre>
-                  </article>
-                ))}
-              </div>
-            </>
-          )}
-        </aside>
-      </main>
+      {workspace === "operate" ? (
+        <OperateWorkspace
+          snapshot={snapshot}
+          model={operateModel}
+          controlValues={controlValues}
+          actionConfirmationPending={actionConfirmationPending}
+          pendingConfirmation={pendingConfirmation}
+          pendingSupervisorOverride={pendingSupervisorOverride}
+          presentationPolicy={presentationPolicy}
+          onToggleCluster={toggleCluster}
+          onRequestLaneAction={requestLaneAction}
+          onChangeControlValue={(controlId, value) =>
+            setControlValues((current) => ({
+              ...current,
+              [controlId]: value,
+            }))
+          }
+          onApplyControlAction={applyControlAction}
+          onTriggerValidationDemoPreset={triggerValidationDemoPreset}
+          onAcknowledgeTopAlarm={acknowledgeTopAlarm}
+          onConfirmPendingAction={() => store.confirmPendingAction()}
+          onDismissPendingActionConfirmation={() => store.dismissPendingActionConfirmation()}
+          onRequestSupervisorOverrideReview={() => store.requestSupervisorOverrideReview()}
+          onOpenReview={() => openWorkspace("review")}
+        />
+      ) : (
+        <ReviewWorkspace
+          model={reviewModel}
+          completedReview={snapshot.completed_review}
+          canonicalEvents={snapshot.events}
+          sessionRunComparison={sessionRunComparison}
+          sessionReportReady={Boolean(sessionAfterActionReport)}
+          comparisonReportReady={Boolean(comparisonReportArtifact)}
+          pendingSupervisorOverrideCard={pendingSupervisorOverrideCard}
+          supervisorOverrideNote={supervisorOverrideNote}
+          onSupervisorOverrideNoteChange={setSupervisorOverrideNote}
+          onApproveOverride={() => store.approvePendingSupervisorOverride(supervisorOverrideNote)}
+          onDenyOverride={() => store.denyPendingSupervisorOverride(supervisorOverrideNote)}
+          onDownloadSessionReport={() => {
+            if (sessionAfterActionReport) {
+              downloadReportArtifact(sessionAfterActionReport);
+            }
+          }}
+          onDownloadComparisonReport={() => {
+            if (comparisonReportArtifact) {
+              downloadReportArtifact(comparisonReportArtifact);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -12,7 +12,20 @@ It is a layout and region-responsibility contract, not a final visual design.
 
 ## Required Regions
 
-### 1. Top Status Bar
+### 1. Workspace Shell
+
+Required contents:
+
+- default `Operate` workspace for live abnormal-event response
+- secondary `Review` workspace for oversight, completed-run evidence, comparison, and export
+- a clear workspace switch that does not hide the operator shell identity
+
+Layout rule:
+
+- `Operate` is the default first-open view.
+- `Review` is secondary and may hold evaluator-heavy content that should not compete with first-response work.
+
+### 2. Top Status Bar
 
 Required contents:
 
@@ -21,12 +34,27 @@ Required contents:
 - simulation clock / elapsed time
 - current support mode
 - session health badges: logging active, validation status available
+- next-run scenario / mode controls
 
 Layout rule:
 
 - Full-width fixed band across the top of the shell.
+- It should support quick orientation without overwhelming the first scan.
 
-### 2. Plant Mimic Area
+### 3. Operator Orientation Band
+
+Required contents:
+
+- one compact "what is happening" summary
+- one compact "what matters" summary
+- one compact "do next" summary
+
+Layout rule:
+
+- Must appear near the top of `Operate`.
+- This band exists to help a first-time viewer understand the screen before reading deeper sections.
+
+### 4. Plant Mimic Area
 
 Required contents:
 
@@ -38,81 +66,99 @@ Layout rule:
 
 - This is the dominant region and must occupy the largest continuous area on the screen.
 
-### 3. Alarm Area
+### 5. Alarm Area
 
 Required contents:
 
 - prioritized active alarm list
 - alarm count and cluster count
-- room for later cluster/storyline views without changing the region identity
+- pinned critical alarms first
+- grouped clusters second
+- raw alarm details behind expansion rather than always fully expanded
 
 Layout rule:
 
 - Persistent vertical region adjacent to the plant mimic, not hidden behind tabs by default.
 
-### 4. Transparency / Root-Cause Area Placeholder
+### 6. Storyline / Root-Cause Area
 
 Required contents:
 
-- placeholder for ranked event interpretation
-- placeholder for evidence changes and uncertainty wording
-- placeholder for next-watch signal suggestions
+- dominant event interpretation
+- evidence changes and uncertainty wording
+- compressed secondary hypotheses
+- next-watch signal suggestions
 
 Layout rule:
 
-- Separate region below or beside the plant mimic, visible in the baseline shell even if initially populated with static placeholders.
+- Separate region below or beside the plant mimic.
+- The dominant explanation should lead; secondary detail can stay compressed until needed.
 
-### 5. Procedure / First-Response Area Placeholder
+### 7. Procedure / First-Response Area
 
 Required contents:
 
-- placeholder for dynamic first-response steps
+- dynamic first-response steps
 - room for validation messages tied to actions
-- room for prerequisite/completion checks later
+- room for prerequisite/completion checks
+- a smaller manual-intervention utility area below the primary lane
 
 Layout rule:
 
-- Separate region adjacent to the transparency area, sized for short action-oriented steps rather than long documents.
+- Separate region adjacent to the storyline area, sized for short action-oriented steps rather than long documents.
+- This is the primary action surface in `Operate`.
 
-### 6. Support-State Area Placeholder
+### 8. Support-State Area
 
 Required contents:
 
 - current assistance mode label
 - short non-stigmatizing operator-support summary
-- space for later human-state confidence or degraded-sensing status
+- human-state confidence or degraded-sensing status
 - compact combined-risk score / band with a short explanation and confidence caveat
+- top contributing factors
+- current mode effect on presentation
 
 Layout rule:
 
 - Compact persistent strip or panel. It must never overpower the plant mimic or alarm area.
 
-### 7. Optional Supervisor / Evaluator Panel Placeholder
+### 9. Review Workspace
 
 Required contents:
 
-- mode transition markers
-- validator intervention markers
-- future replay/evaluation affordances
+- live oversight: validator markers, pending supervisor review, recent events
+- completed run: after-action review and KPI summary
+- comparison and export: paired-mode comparison plus report download actions
 
 Layout rule:
 
-- Optional, collapsible, or secondary. It must not displace operator-critical content from the default operator view.
+- Separate workspace, not a persistent default-side rail.
+- It must not displace operator-critical content from the default operator view.
 
 ## Baseline Layout Agreement
 
 ```text
+Operate
 +--------------------------------------------------------------------------------------------------+
-| Top Status Bar                                                                                   |
-+------------------------------------------------------+---------------------------+---------------+
-| Plant Mimic Area                                     | Alarm Area                | Optional      |
-| - reactor / vessel / steam / feedwater path          | - prioritized alarms      | Supervisor /  |
-| - turbine-generator / condenser path                 | - alarm count             | Evaluator     |
-| - critical values always visible                     | - cluster placeholder     | Panel         |
-+------------------------------------------------------+---------------------------+---------------+
-| Transparency / Root-Cause Placeholder                | Procedure / First-Response Placeholder         |
-+-----------------------------------------------------------------------------------+--------------+
-| Support-State Placeholder                                                           | spare footer |
+| Top Status Bar / Workspace Switch                                                                 |
++--------------------------------------------------------------------------------------------------+
+| Operator Orientation Band                                                                        |
++--------------------------------------------------------------------------------------------------+
+| Plant Mimic Area                                                                                |
++------------------------------------------------------+---------------------------+
+| Procedure / First-Response Area                      | Alarm Area                |
++------------------------------------------------------+---------------------------+
+| Storyline / Root-Cause Area                          | Support-State Area        |
++--------------------------------------------------------------------------------------------------+
+
+Review
++--------------------------------------------------------------------------------------------------+
+| Live Oversight                                                                                    |
++--------------------------------------------------------------------------------------------------+
+| Completed Run                                                                                    |
++--------------------------------------------------------------------------------------------------+
+| Comparison & Export                                                                              |
 +--------------------------------------------------------------------------------------------------+
 ```
 
@@ -120,10 +166,10 @@ Layout rule:
 
 - The plant mimic area, top status bar, and alarm area are mandatory at all times.
 - Adaptive behavior may reprioritize, highlight, or narrow content, but it may not remove access to critical plant state or `P1` / `P2` alarm visibility.
-- The transparency and procedure regions must exist in the baseline shell even if they begin as static placeholders in Phase 1.
+- The storyline and procedure regions must remain distinct and action-oriented.
 - The support-state area must stay compact and descriptive, never punitive or medicalized.
 - Human-state confidence or degraded-sensing cues should be visible there when the bounded proxy pipeline is active.
-- Optional supervisor content should be easy to hide during operator-focused demos.
+- Evaluator/reporting content should live in `Review`, not on the default operator surface.
 
 ## Critical Visibility Baseline
 

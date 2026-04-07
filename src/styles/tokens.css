@@ -1,0 +1,46 @@
+:root {
+  color-scheme: dark;
+  --font-ui: "Segoe UI Variable Text", Aptos, "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  --bg-0: #05090d;
+  --bg-1: #0c141b;
+  --bg-2: #101c25;
+  --bg-3: #162531;
+  --surface-0: rgba(12, 20, 27, 0.92);
+  --surface-1: rgba(18, 30, 40, 0.92);
+  --surface-2: rgba(25, 39, 52, 0.94);
+  --surface-3: rgba(32, 49, 65, 0.98);
+
+  --line-soft: rgba(135, 166, 189, 0.18);
+  --line-strong: rgba(135, 166, 189, 0.34);
+  --text-0: #edf4fb;
+  --text-1: #c1d0dd;
+  --text-2: #8ea4b6;
+  --text-inverse: #081218;
+
+  --accent-info: #89d8ff;
+  --accent-info-muted: rgba(137, 216, 255, 0.18);
+  --accent-ok: #8ad8b7;
+  --accent-ok-muted: rgba(138, 216, 183, 0.18);
+  --accent-caution: #ffc978;
+  --accent-caution-muted: rgba(255, 201, 120, 0.18);
+  --accent-alert: #ff6c63;
+  --accent-alert-muted: rgba(255, 108, 99, 0.18);
+
+  --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.28);
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+
+  --space-1: 0.375rem;
+  --space-2: 0.625rem;
+  --space-3: 0.875rem;
+  --space-4: 1.125rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.75rem;
+
+  --transition-fast: 180ms ease;
+  --transition-medium: 260ms ease;
+}

@@ -69,6 +69,10 @@ function advanceUntil(
   }
 }
 
+function openReviewWorkspace(): void {
+  fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
+}
+
 function summarizeStore(store: AuraSessionStore) {
   const snapshot = store.getSnapshot();
   return {
@@ -157,13 +161,14 @@ describe("AuraSessionStore", () => {
 
     expect(screen.getByText("00:00")).toBeInTheDocument();
     expect(screen.getAllByText(/Vessel Water Level/i).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("operate-workspace")).toBeInTheDocument();
 
     act(() => {
       store.advanceTick();
     });
 
     expect(screen.getByText("00:05")).toBeInTheDocument();
-    expect(screen.getAllByText(/operator_state_snapshot_recorded/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Operator Orientation/i)).toBeInTheDocument();
   });
 
   it("records the required baseline log events for the corrected run", () => {
@@ -521,18 +526,17 @@ describe("AuraSessionStore", () => {
     const store = new AuraSessionStore({ session_index: 18, tick_duration_sec: 5 });
     render(<App store={store} autoRun={false} />);
 
-    expect(screen.getByText("Support State / Combined Risk")).toBeInTheDocument();
-    expect(screen.getByText(/AURA-IDCR Phase 5 Slice C/i)).toBeInTheDocument();
+    expect(screen.getByText("Support Posture")).toBeInTheDocument();
     expect(screen.getByText("Workload")).toBeInTheDocument();
-    expect(screen.getByText("Attention Stability")).toBeInTheDocument();
-    expect(screen.getByText("Signal Confidence")).toBeInTheDocument();
+    expect(screen.getByText("Attention stability")).toBeInTheDocument();
+    expect(screen.getByText("Signal confidence")).toBeInTheDocument();
     expect(screen.getByText(/Why risk is here now/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Confidence caveat/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Current support focus/i)).toBeInTheDocument();
+    expect(screen.getByText(/Mode effect now/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Watch next/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Why this is emphasized now/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Current assistance mode/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Critical visibility guardrails/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Combined risk/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Assistance mode/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Critical visibility guardrails active/i).length).toBeGreaterThan(0);
   });
 
   it("renders the bounded soft-warning confirmation flow inside the existing shell", () => {
@@ -555,7 +559,7 @@ describe("AuraSessionStore", () => {
 
     expect(screen.getByText(/Soft warning confirmation required/i)).toBeInTheDocument();
     expect(screen.getByText(/Confirm and apply action/i)).toBeInTheDocument();
-    expect(screen.getByText(/Validation pending confirmation/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Validation pending confirmation/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/asking for explicit confirmation before this action proceeds/i)).toBeInTheDocument();
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
   });
@@ -598,6 +602,7 @@ describe("AuraSessionStore", () => {
 
     expect(screen.getByText(/Supervisor review eligible/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Request Demo\/Research Supervisor Override/i })).toBeInTheDocument();
+    openReviewWorkspace();
     expect(screen.getByText(/Validator demo checklist/i)).toBeInTheDocument();
   });
 
@@ -628,6 +633,7 @@ describe("AuraSessionStore", () => {
 
     render(<App store={store} autoRun={false} />);
 
+    openReviewWorkspace();
     expect(screen.getByTestId("supervisor-override-card")).toBeInTheDocument();
     expect(screen.getByText(/Decision required/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Supervisor note/i)).toBeInTheDocument();
@@ -659,9 +665,9 @@ describe("AuraSessionStore", () => {
     render(<App store={store} autoRun={false} />);
 
     expect(screen.queryByText(/Last action validation/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Dynamic First-Response Lane/i })).toBeInTheDocument();
-    expect(screen.getByText(/Support State \/ Combined Risk/i)).toBeInTheDocument();
-    expect(screen.getByText(/Alarm Intelligence Area/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Next Actions/i })).toBeInTheDocument();
+    expect(screen.getByText(/Support Posture/i)).toBeInTheDocument();
+    expect(screen.getByText(/Alarm Board/i)).toBeInTheDocument();
   });
 
   it("makes protected-response hard prevents more prominent without hiding core regions", () => {
@@ -705,28 +711,43 @@ describe("AuraSessionStore", () => {
     render(<App store={mockStore} autoRun={false} />);
 
     expect(protectedSnapshot.support_mode).toBe("protected_response");
-    expect(screen.getByText(/Protected validation active/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Protected validation active/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Protected Response is elevating this validation result/i)).toBeInTheDocument();
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Dynamic First-Response Lane/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Storyline \/ Root-Cause Area/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Next Actions/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Storyline Board/i })).toBeInTheDocument();
   });
 
   it("renders the completed-session review panel after a terminal outcome", () => {
     const store = runSuccessfulSession();
     render(<App store={store} autoRun={false} />);
+    openReviewWorkspace();
     expect(screen.getByTestId("completed-session-review")).toBeInTheDocument();
     expect(screen.getByTestId("kpi-summary-block")).toBeInTheDocument();
-    expect(screen.getByText(/Completed session review/i)).toBeInTheDocument();
+    expect(screen.getByText(/Completed run summary/i)).toBeInTheDocument();
   });
 
   it("renders evaluator export controls after a terminal outcome", () => {
     const store = runSuccessfulSession();
     render(<App store={store} autoRun={false} />);
 
+    openReviewWorkspace();
     expect(screen.getByTestId("evaluation-action-bar")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Download session report/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /Download comparison report/i })).toBeDisabled();
+  });
+
+  it("keeps review artifacts off the default operator screen until the workspace is switched", () => {
+    const store = runSuccessfulSession();
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByTestId("operate-workspace")).toBeInTheDocument();
+    expect(screen.queryByTestId("evaluation-action-bar")).not.toBeInTheDocument();
+
+    openReviewWorkspace();
+
+    expect(screen.getByTestId("review-workspace")).toBeInTheDocument();
+    expect(screen.getByTestId("evaluation-action-bar")).toBeInTheDocument();
   });
 
   it("keeps critical alarms visibly pinned in the alarm area when they are active", () => {
@@ -736,7 +757,7 @@ describe("AuraSessionStore", () => {
     }
     render(<App store={store} autoRun={false} />);
 
-    expect(screen.getByText(/Critical alarms pinned in view/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Pinned critical alarms/i).length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("critical-alarm-chip").length).toBeGreaterThan(0);
   });
 
@@ -785,6 +806,7 @@ describe("AuraSessionStore", () => {
     store.reset({ session_mode: "adaptive" });
     store.runUntilComplete(100);
     render(<App store={store} autoRun={false} />);
+    openReviewWorkspace();
     expect(screen.getByTestId("session-run-comparison")).toBeInTheDocument();
     expect(screen.getByText(/Judge-facing summary/i)).toBeInTheDocument();
   });
