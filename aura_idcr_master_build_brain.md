@@ -1143,6 +1143,25 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Hold scope unless the human explicitly requests further frontend polish, deeper Review ergonomics, or a new later-phase feature slice
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 guided onboarding hardening session
+- Task worked on: Implemented `Tutorial_PLAN.md` as a production-ready guided onboarding and pacing-hardening slice on top of the existing Operate/Review shell
+- Status: Done
+- What changed:
+  - Fixed the tutorial controller in `src/App.tsx`, including the TypeScript build failures, safer tutorial step bookkeeping, clearer guided/live pace copy, checkpoint-resume labeling, Review-tour state preservation, and the new `aura-idcr.tutorial.v2.dismissed` storage key so the refreshed walkthrough appears once for existing users
+  - Hardened `src/ui/tutorial.ts` and `src/ui/TutorialOverlay.tsx` instead of replacing them, keeping the three-path architecture while refining the teaching copy, adding focus/scroll guards, exposing clearer locked-step status, and correcting the Operate-only flow so it finishes in Operate rather than drifting into Review
+  - Added the missing tutorial visual system through the existing CSS split in `src/styles/tokens.css`, `src/styles/layout.css`, and `src/styles/workspaces.css`, including the dimmed scrim, spotlight frame, anchored panel, progress bar, guided-task treatment, and mobile-safe overlay behavior for the existing `tutorial-*` classes
+  - Extended `src/state/sessionStore.test.tsx` with app-level tutorial and pacing coverage for fresh-load tutorial behavior, `v2` dismissal handling, full-tour reset/gating, guided checkpoint resume copy, and Review-tour state preservation
+  - Added a focused `src/ui/TutorialOverlay.test.tsx` file covering the tutorial launcher, spotlight rendering, progress state, and locked-action messaging
+  - Verified the slice with passing `npm test` and `npm run build`
+- What remains:
+  - No scenario logic, validator rules, review generation, or export formats were changed beyond the tutorial/pacing surface itself
+  - Manual browser-level walkthrough verification could still be useful later if the human wants another polish pass on animation feel or mobile ergonomics
+- Blockers:
+  - None in repo after verification
+- Next recommended step:
+  - Hold scope unless the human explicitly requests a follow-up tutorial polish pass, deeper mobile walkthrough refinement, or another bounded frontend slice
+
 ---
 
 ## 26) Final reminder to all future agents

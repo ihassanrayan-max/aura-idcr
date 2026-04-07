@@ -88,6 +88,11 @@
   gap: var(--space-2);
 }
 
+.command-help-text {
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
 .workspace-canvas {
   margin-top: var(--space-5);
   animation: workspace-enter var(--transition-medium) both;
@@ -131,6 +136,146 @@
   margin-top: var(--space-4);
 }
 
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.tutorial-overlay__backdrop,
+.tutorial-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--tutorial-scrim);
+  backdrop-filter: blur(6px);
+}
+
+.tutorial-scrim--top,
+.tutorial-scrim--left,
+.tutorial-scrim--right,
+.tutorial-scrim--bottom {
+  inset: unset;
+}
+
+.tutorial-scrim--right {
+  right: 0;
+}
+
+.tutorial-scrim--bottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.tutorial-spotlight {
+  position: absolute;
+  border-radius: calc(var(--radius-md) + 2px);
+  border: 2px solid var(--tutorial-spotlight-border);
+  box-shadow: var(--tutorial-spotlight-shadow);
+  background: rgba(137, 216, 255, 0.02);
+}
+
+.tutorial-panel {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  width: var(--tutorial-panel-width);
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow: auto;
+  pointer-events: auto;
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--tutorial-panel-border);
+  background:
+    linear-gradient(180deg, rgba(17, 29, 39, 0.98), var(--tutorial-panel-bg)),
+    var(--tutorial-panel-bg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+}
+
+.tutorial-panel--menu {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: min(64rem, calc(100vw - 2 * var(--space-4)));
+  max-height: min(46rem, calc(100vh - 2 * var(--space-4)));
+  transform: translate(-50%, -50%);
+}
+
+.tutorial-panel__header,
+.tutorial-panel__footer,
+.tutorial-menu-grid,
+.tutorial-copy-grid,
+.tutorial-choice-card,
+.tutorial-task,
+.tutorial-target-note {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tutorial-panel__status-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: var(--space-2);
+}
+
+.tutorial-panel__summary {
+  color: var(--text-1);
+  line-height: 1.6;
+}
+
+.tutorial-progress {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.tutorial-progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tutorial-progress-fill);
+  transition: width var(--transition-medium);
+}
+
+.tutorial-copy-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tutorial-choice-card,
+.tutorial-copy-card,
+.tutorial-task,
+.tutorial-target-note {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025));
+}
+
+.tutorial-copy-card--accent,
+.tutorial-target-note {
+  border-color: rgba(137, 216, 255, 0.24);
+}
+
+.tutorial-task {
+  border-color: rgba(255, 201, 120, 0.24);
+  background: linear-gradient(180deg, rgba(255, 201, 120, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+.tutorial-task__hint,
+.tutorial-task__lock-note {
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.tutorial-task__lock-note {
+  color: #ffe0b5;
+}
+
 @keyframes workspace-enter {
   from {
     opacity: 0;
@@ -163,6 +308,13 @@
   }
 
   .section-shell {
+    padding: var(--space-4);
+  }
+
+  .tutorial-panel {
+    right: var(--space-3);
+    bottom: var(--space-3);
+    max-height: calc(100vh - 2 * var(--space-3));
     padding: var(--space-4);
   }
 }

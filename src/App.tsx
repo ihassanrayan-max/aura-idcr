@@ -41,8 +41,9 @@ type TutorialState =
     };
 
 const defaultStore = createDefaultSessionStore();
-const tutorialDismissKey = "aura-idcr.tutorial.v1.dismissed";
+const tutorialDismissKey = "aura-idcr.tutorial.v2.dismissed";
 const introScenarioId = "scn_alarm_cascade_root_cause";
+const emptyTutorialSignals: ReadonlySet<TutorialSignal> = new Set();
 
 function readTutorialDismissed(): boolean {
   if (typeof window === "undefined") {
@@ -123,7 +124,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   const [runPace, setRunPace] = useState<RunPace>("guided");
   const [checkpointPauseEnabled, setCheckpointPauseEnabled] = useState(true);
   const [runtimePauseReason, setRuntimePauseReason] = useState(
-    "Simulation paused. Use guided pace, live pace, or one-tick stepping to begin.",
+    "Simulation paused. Guided pace is the learning/demo mode, live pace is the faster continuous mode, and one-tick stepping lets you inspect cause and effect.",
   );
   const [controlValues, setControlValues] = useState<Record<string, number>>({});
   const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
@@ -135,7 +136,8 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   );
 
   const previousSnapshotRef = useRef(snapshot);
-  const tutorialAutoAdvanceStepRef = useRef<string>();
+  const tutorialAutoAdvanceStepRef = useRef<string | null>(null);
+  const tutorialRestartPendingRef = useRef<TutorialPathId | null>(null);
 
   useEffect(() => {
     setSelectedSessionMode(snapshot.session_mode);
@@ -189,7 +191,12 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     setWorkspace("operate");
     setRunPace("guided");
     setIsRunning(false);
-    setRuntimePauseReason("Session reset. Use guided pace, live pace, or one-tick stepping to begin.");
+    setRuntimePauseReason(
+      tutorialRestartPendingRef.current
+        ? "Tutorial loaded the introductory feedwater scenario and paused the runtime."
+        : "Session reset. Guided pace is the learning/demo mode, live pace is the faster continuous mode, and one-tick stepping lets you inspect cause and effect.",
+    );
+    tutorialRestartPendingRef.current = null;
   }, [snapshot.session_id]);
 
   const actionLabels = useMemo(
@@ -292,8 +299,11 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   );
 
   const tutorialFlow = tutorialState.mode === "running" ? getTutorialFlow(tutorialState.pathId) : undefined;
-  const tutorialStep = tutorialState.mode === "running" ? tutorialFlow.steps[tutorialState.stepIndex] : undefined;
-  const tutorialSignals = tutorialState.mode === "running" ? tutorialState.signals : new Set<TutorialSignal>();
+  const tutorialStep =
+    tutorialState.mode === "running" && tutorialFlow
+      ? tutorialFlow.steps[tutorialState.stepIndex] ?? tutorialFlow.steps[0]
+      : undefined;
+  const tutorialSignals = tutorialState.mode === "running" ? tutorialState.signals : emptyTutorialSignals;
 
   const tutorialContext = useMemo(
     () => ({
@@ -314,6 +324,16 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
 
   const tutorialCanAdvance = tutorialStep ? tutorialStep.completion.kind === "manual" || tutorialStepComplete : false;
   const lockedTutorialActions = tutorialStep?.lockedActionIds;
+  const checkpointPauseActive = !isRunning && runtimePauseReason.startsWith("Checkpoint pause:");
+  const guidedRunLabel = checkpointPauseActive ? "Resume guided pace" : "Run guided pace";
+  const liveRunLabel = checkpointPauseActive ? "Resume live pace" : "Run live pace";
+  const commandControlHint = isRunning
+    ? runPace === "guided"
+      ? "Guided pace is the learning/demo mode. The twin will pause itself again at the next teaching checkpoint."
+      : "Live pace keeps the session moving continuously. Pause or step when you want to inspect the event picture more closely."
+    : checkpointPauseActive
+      ? "Checkpoint pause active. Resume guided pace to stay in teachable-stop mode, resume live pace for faster continuous playback, or step one tick to inspect a single update."
+      : "Guided pace is the safer learning/demo mode. Live pace is the faster continuous mode, and one-tick stepping is best for close reading.";
 
   const commandMetrics = useMemo(
     () => [
@@ -471,7 +491,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     setIsRunning(true);
     setRuntimePauseReason(
       nextRunPace === "guided"
-        ? "Guided pace running. Checkpoint pauses will stop the scenario at teachable moments."
+        ? "Guided pace running. Checkpoint pauses will stop the scenario at teachable moments so you can study the cause-and-effect chain."
         : "Live pace running. Pause or step whenever you want to inspect the system more closely.",
     );
     recordTutorialSignal(nextRunPace === "guided" ? "runtime-guided-started" : "runtime-live-started");
@@ -483,7 +503,9 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     }
 
     setIsRunning(false);
-    setRuntimePauseReason("Runtime paused by the operator.");
+    setRuntimePauseReason(
+      "Runtime paused. Resume guided pace for learning/demo mode, resume live pace for faster playback, or step one tick for a single deterministic update.",
+    );
   }
 
   function advanceOneTick(): void {
@@ -493,7 +515,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
 
     recordTutorialSignal("runtime-advanced");
     store.advanceTick();
-    setRuntimePauseReason("Advanced one deterministic simulation tick.");
+    setRuntimePauseReason("Advanced one deterministic simulation tick. Step again or resume guided/live pace when you are ready.");
   }
 
   function resetSession(): void {
@@ -503,7 +525,9 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
 
     setIsRunning(false);
     setRunPace("guided");
-    setRuntimePauseReason("Session reset. Use guided pace, live pace, or one-tick stepping to begin.");
+    setRuntimePauseReason(
+      "Session reset. Guided pace is the learning/demo mode, live pace is the faster continuous mode, and one-tick stepping lets you inspect cause and effect.",
+    );
     store.reset({
       session_mode: selectedSessionMode,
       scenario_id: selectedScenarioId,
@@ -512,13 +536,15 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
 
   function closeTutorial(): void {
     writeTutorialDismissed();
-    tutorialAutoAdvanceStepRef.current = undefined;
+    tutorialAutoAdvanceStepRef.current = null;
     setTutorialState({ mode: "closed" });
   }
 
   function openTutorialMenu(): void {
     setIsRunning(false);
-    setRuntimePauseReason("Runtime paused while the tutorial menu is open.");
+    setRuntimePauseReason(
+      "Runtime paused while the tutorial menu is open. Choose a walkthrough to learn the surface or close it to continue the current session.",
+    );
     setTutorialState({ mode: "menu" });
   }
 
@@ -528,20 +554,24 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     setIsRunning(false);
     setCheckpointPauseEnabled(true);
     setRunPace("guided");
-    tutorialAutoAdvanceStepRef.current = undefined;
+    tutorialAutoAdvanceStepRef.current = null;
 
     if (flow.restartMode === "reset_intro_session") {
+      tutorialRestartPendingRef.current = pathId;
       setSelectedSessionMode("adaptive");
       setSelectedScenarioId(introScenarioId);
       setWorkspace("operate");
       setExpandedClusterIds([]);
-      setRuntimePauseReason("Tutorial loaded the introductory feedwater scenario and paused the runtime.");
       store.reset({
         session_mode: "adaptive",
         scenario_id: introScenarioId,
       });
     } else {
-      setRuntimePauseReason("Runtime paused while the Review tutorial is active.");
+      setWorkspace("operate");
+      setExpandedClusterIds([]);
+      setRuntimePauseReason(
+        "Runtime paused while the Review tutorial is active. Open Review when you are ready to inspect oversight and evidence.",
+      );
     }
 
     setTutorialState({
@@ -561,11 +591,11 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
       const flow = getTutorialFlow(current.pathId);
       if (current.stepIndex >= flow.steps.length - 1) {
         writeTutorialDismissed();
-        tutorialAutoAdvanceStepRef.current = undefined;
+        tutorialAutoAdvanceStepRef.current = null;
         return { mode: "closed" };
       }
 
-      tutorialAutoAdvanceStepRef.current = undefined;
+      tutorialAutoAdvanceStepRef.current = null;
       return {
         ...current,
         stepIndex: current.stepIndex + 1,
@@ -579,7 +609,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
         return current;
       }
 
-      tutorialAutoAdvanceStepRef.current = undefined;
+      tutorialAutoAdvanceStepRef.current = null;
       return {
         ...current,
         stepIndex: Math.max(0, current.stepIndex - 1),
@@ -603,12 +633,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
       return;
     }
 
+    const tutorialWorkspace = tutorialStep.workspace;
     if (
-      tutorialStep.workspace &&
+      tutorialWorkspace &&
       !tutorialStep.requiresManualWorkspaceSwitch &&
-      tutorialStep.workspace !== workspace
+      tutorialWorkspace !== workspace
     ) {
-      startTransition(() => setWorkspace(tutorialStep.workspace));
+      startTransition(() => setWorkspace(tutorialWorkspace));
     }
   }, [tutorialState, tutorialStep, workspace]);
 
@@ -709,9 +740,10 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
                 <option value="baseline">baseline</option>
               </select>
             </label>
+            <p className="command-help-text">{commandControlHint}</p>
             <div className="command-actions">
               <button type="button" disabled={Boolean(snapshot.outcome) || !isTutorialActionAllowed("runtime:run-guided")} onClick={() => beginRun("guided")}>
-                Run guided pace
+                {guidedRunLabel}
               </button>
               <button
                 type="button"
@@ -719,7 +751,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
                 disabled={Boolean(snapshot.outcome) || !isTutorialActionAllowed("runtime:run-live")}
                 onClick={() => beginRun("live")}
               >
-                Run live pace
+                {liveRunLabel}
               </button>
               <button
                 type="button"
@@ -832,6 +864,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           targetId={tutorialStep?.targetId}
           canAdvance={tutorialCanAdvance}
           isTaskComplete={tutorialStepComplete}
+          lockedActionCount={lockedTutorialActions?.length ?? 0}
           onBack={goToPreviousTutorialStep}
           onNext={goToNextTutorialStep}
           onSkip={closeTutorial}

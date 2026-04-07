@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import App from "../App";
 import { AuraSessionStore } from "./sessionStore";
 
@@ -73,6 +74,14 @@ function openReviewWorkspace(): void {
   fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
 }
 
+function openTutorialGuideMenu(): void {
+  fireEvent.click(screen.getByRole("button", { name: /Tutorial guide/i }));
+}
+
+function startTutorialPath(label: RegExp): void {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+}
+
 function summarizeStore(store: AuraSessionStore) {
   const snapshot = store.getSnapshot();
   return {
@@ -134,6 +143,22 @@ function summarizeStore(store: AuraSessionStore) {
       alarms: snapshot.plant_tick.plant_state.alarm_load_count,
     },
   };
+}
+
+function installTutorialDomMocks() {
+  const scrollIntoView = vi.fn();
+  const focus = vi.fn();
+
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView,
+  });
+  Object.defineProperty(HTMLElement.prototype, "focus", {
+    configurable: true,
+    value: focus,
+  });
+
+  return { scrollIntoView, focus };
 }
 
 describe("AuraSessionStore", () => {
@@ -958,5 +983,101 @@ describe("AuraSessionStore", () => {
     expect(screen.getByLabelText(/Next scenario/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Isolation Condenser Demand Target/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Apply IC recovery alignment/i })).toBeInTheDocument();
+  });
+
+  it("auto-opens the refreshed tutorial when only the legacy dismissal key exists", () => {
+    installTutorialDomMocks();
+    window.localStorage.clear();
+    window.localStorage.setItem("aura-idcr.tutorial.v1.dismissed", "true");
+
+    render(<App />);
+
+    expect(screen.getByLabelText(/Tutorial launcher/i)).toBeInTheDocument();
+    expect(screen.getByText(/Runtime paused for onboarding/i)).toBeInTheDocument();
+  });
+
+  it("honors the v2 dismissal key on default-app loads", () => {
+    installTutorialDomMocks();
+    window.localStorage.clear();
+    window.localStorage.setItem("aura-idcr.tutorial.v2.dismissed", "true");
+
+    render(<App />);
+
+    expect(screen.queryByLabelText(/Tutorial launcher/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Tutorial guide/i })).toBeInTheDocument();
+  });
+
+  it("resets the full tutorial to the intro scenario and locks progression until the required step action completes", () => {
+    vi.useFakeTimers();
+    installTutorialDomMocks();
+    window.localStorage.clear();
+    const store = new AuraSessionStore({
+      session_index: 301,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    render(<App store={store} autoRun={false} />);
+
+    openTutorialGuideMenu();
+    startTutorialPath(/Start Full guided walkthrough/i);
+
+    expect(store.getSnapshot().scenario.scenario_id).toBe("scn_alarm_cascade_root_cause");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Next$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Next$/i }));
+
+    const nextButton = screen.getByRole("button", { name: /^Next$/i });
+    expect(screen.getByRole("heading", { name: /Start, pause, resume, step, and reset/i })).toBeInTheDocument();
+    expect(nextButton).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Advance one tick/i }));
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(screen.getByRole("heading", { name: /Read the screen in three questions/i })).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("pauses guided pace at checkpoints and turns the run controls into clearer resume actions", () => {
+    vi.useFakeTimers();
+    const store = new AuraSessionStore({ session_index: 302, tick_duration_sec: 5 });
+
+    render(<App store={store} autoRun={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Run guided pace/i }));
+    act(() => {
+      vi.advanceTimersByTime(7000);
+    });
+
+    expect(screen.getByText(/Checkpoint pause:/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Resume guided pace/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Resume live pace/i })).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("preserves the current scenario state for the review tutorial while guiding the user into Review", () => {
+    installTutorialDomMocks();
+    const store = new AuraSessionStore({
+      session_index: 303,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    store.advanceTick();
+    store.advanceTick();
+
+    render(<App store={store} autoRun={false} />);
+
+    openTutorialGuideMenu();
+    startTutorialPath(/Start Review workspace tour/i);
+
+    expect(store.getSnapshot().scenario.scenario_id).toBe("scn_main_steam_isolation_upset");
+    expect(screen.getByRole("heading", { name: /Why Review is separate/i })).toBeInTheDocument();
+    expect(screen.getByText(/Open the Review workspace\./i)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Review/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Next$/i })).toBeDisabled();
+    expect(store.getSnapshot().scenario.scenario_id).toBe("scn_main_steam_isolation_upset");
   });
 });

@@ -27,6 +27,13 @@
   --accent-caution-muted: rgba(255, 201, 120, 0.18);
   --accent-alert: #ff6c63;
   --accent-alert-muted: rgba(255, 108, 99, 0.18);
+  --tutorial-scrim: rgba(3, 8, 12, 0.74);
+  --tutorial-panel-bg: rgba(8, 14, 20, 0.95);
+  --tutorial-panel-border: rgba(137, 216, 255, 0.2);
+  --tutorial-spotlight-border: rgba(137, 216, 255, 0.9);
+  --tutorial-spotlight-shadow: 0 0 0 1px rgba(137, 216, 255, 0.26), 0 0 48px rgba(137, 216, 255, 0.12);
+  --tutorial-progress-fill: linear-gradient(90deg, rgba(137, 216, 255, 0.96), rgba(138, 216, 183, 0.92));
+  --tutorial-panel-width: min(30rem, calc(100vw - 2 * var(--space-4)));
 
   --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.28);
   --radius-sm: 10px;

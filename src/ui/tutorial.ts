@@ -152,9 +152,9 @@ const fullFlow: TutorialFlow = {
       workspace: "operate",
       targetId: "runtime-controls",
       title: "Start, pause, resume, step, and reset",
-      summary: "The tutorial keeps the twin paused on purpose. You should advance or run it deliberately rather than being dropped into a fast-moving upset.",
+      summary: "The tutorial keeps the twin paused on purpose. Choose the next scenario and run mode deliberately, then advance or run the twin only when you are ready to read what changed.",
       shows:
-        "The runtime controls let you choose scenario and mode for the next run, start guided pace, start live pace, pause, advance one tick, and reset cleanly.",
+        "The runtime controls let you choose scenario and mode for the next run, start or resume guided pace, start or resume live pace, pause, advance one tick, and reset cleanly.",
       whyItExists:
         "Learning suffers if the simulation starts immediately or moves faster than the user can connect causes to effects.",
       whenToCare:
@@ -491,24 +491,41 @@ const operateFlow: TutorialFlow = {
   kickoffSummary:
     "Resets to the introductory feedwater scenario, pauses the runtime, and focuses on the live operator loop without carrying you through Review.",
   restartMode: "reset_intro_session",
-  steps: fullFlow.steps.filter((step) =>
-    [
-      "full-briefing",
-      "workspace-model",
-      "runtime-step-control",
-      "orientation-band",
-      "situation-board",
-      "guided-onset",
-      "alarm-board",
-      "alarm-inspection",
-      "storyline-board",
-      "support-posture",
-      "next-actions",
-      "validator-demo",
-      "validator-result",
-      "full-finish",
-    ].includes(step.id),
-  ),
+  steps: [
+    ...fullFlow.steps.filter((step) =>
+      [
+        "full-briefing",
+        "workspace-model",
+        "runtime-step-control",
+        "orientation-band",
+        "situation-board",
+        "guided-onset",
+        "alarm-board",
+        "alarm-inspection",
+        "storyline-board",
+        "support-posture",
+        "next-actions",
+        "validator-demo",
+        "validator-result",
+      ].includes(step.id),
+    ),
+    {
+      id: "operate-finish",
+      workspace: "operate",
+      targetId: "next-actions",
+      title: "Operate workspace mental model",
+      summary: "Operate is the live decision-support loop: orient, read the plant, compress alarms into a usable story, act through the first-response lane, and let validation guard the risky edges.",
+      shows:
+        "You have seen how the operator-first surface keeps critical variables visible while grouped alarms, storyline, support posture, and the lane reinforce each other.",
+      whyItExists:
+        "A focused operator workspace is easier to trust and easier to teach than a single screen that mixes operation, evidence, comparison, and exports together.",
+      whenToCare:
+        "Reopen this tour whenever you want a refresher on the live response surface without stepping into Review.",
+      decisionSupport:
+        "It frames Operate as a closed loop: what is happening, what matters, what to do next, and what the validator will protect.",
+      completion: { kind: "manual" },
+    },
+  ],
 };
 
 const reviewFlow: TutorialFlow = {

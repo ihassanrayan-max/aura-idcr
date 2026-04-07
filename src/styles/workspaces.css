@@ -354,7 +354,8 @@
   .storyline-context-grid,
   .eid-grid,
   .comparison-run-grid,
-  .oversight-grid {
+  .oversight-grid,
+  .tutorial-copy-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -372,6 +373,36 @@
   }
 
   .summary-triad {
+    grid-template-columns: 1fr;
+  }
+
+  .tutorial-panel--menu {
+    width: calc(100vw - 2 * var(--space-3));
+    max-height: calc(100vh - 2 * var(--space-3));
+  }
+}
+
+@media (max-width: 640px) {
+  .tutorial-panel {
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: var(--space-3);
+    width: auto;
+  }
+
+  .tutorial-panel--menu {
+    left: var(--space-3);
+    right: var(--space-3);
+    top: var(--space-3);
+    bottom: var(--space-3);
+    width: auto;
+    max-height: none;
+    transform: none;
+  }
+
+  .tutorial-panel__status-row,
+  .tutorial-panel__footer,
+  .tutorial-menu-grid {
     grid-template-columns: 1fr;
   }
 }

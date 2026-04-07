@@ -9,6 +9,11 @@ type RectState = {
   height: number;
 };
 
+type SpotlightState = {
+  rect?: RectState;
+  targetFound: boolean;
+};
+
 type TutorialOverlayProps = {
   mode: "menu" | "running";
   flow?: TutorialFlow;
@@ -17,6 +22,7 @@ type TutorialOverlayProps = {
   targetId?: TutorialTargetId;
   canAdvance: boolean;
   isTaskComplete: boolean;
+  lockedActionCount?: number;
   onBack: () => void;
   onNext: () => void;
   onSkip: () => void;
@@ -24,29 +30,32 @@ type TutorialOverlayProps = {
   onPanelAction?: () => void;
 };
 
-function useSpotlightRect(targetId?: TutorialTargetId): RectState | undefined {
-  const [rect, setRect] = useState<RectState>();
+function useSpotlightRect(targetId?: TutorialTargetId): SpotlightState {
+  const [state, setState] = useState<SpotlightState>({ targetFound: false });
 
   useLayoutEffect(() => {
     if (!targetId) {
-      setRect(undefined);
+      setState({ targetFound: false });
       return undefined;
     }
 
     function updateRect() {
       const element = document.querySelector<HTMLElement>(`[data-tutorial-target="${targetId}"]`);
       if (!element) {
-        setRect(undefined);
+        setState({ targetFound: false });
         return;
       }
 
       const bounds = element.getBoundingClientRect();
       const margin = 10;
-      setRect({
-        top: Math.max(0, bounds.top - margin),
-        left: Math.max(0, bounds.left - margin),
-        width: bounds.width + margin * 2,
-        height: bounds.height + margin * 2,
+      setState({
+        targetFound: true,
+        rect: {
+          top: Math.max(0, bounds.top - margin),
+          left: Math.max(0, bounds.left - margin),
+          width: bounds.width + margin * 2,
+          height: bounds.height + margin * 2,
+        },
       });
     }
 
@@ -60,7 +69,7 @@ function useSpotlightRect(targetId?: TutorialTargetId): RectState | undefined {
     };
   }, [targetId]);
 
-  return rect;
+  return state;
 }
 
 function TutorialMenu(props: Pick<TutorialOverlayProps, "onSkip" | "onStartPath">) {
@@ -88,7 +97,7 @@ function TutorialMenu(props: Pick<TutorialOverlayProps, "onSkip" | "onStartPath"
   );
 
   return (
-    <div className="tutorial-overlay tutorial-overlay--menu" aria-live="polite">
+    <div className="tutorial-overlay tutorial-overlay--menu" aria-live="polite" data-testid="tutorial-menu">
       <div className="tutorial-overlay__backdrop" />
       <section className="tutorial-panel tutorial-panel--menu" aria-label="Tutorial launcher">
         <div className="tutorial-panel__header">
@@ -112,7 +121,7 @@ function TutorialMenu(props: Pick<TutorialOverlayProps, "onSkip" | "onStartPath"
                 <strong>{card.title}</strong>
               </div>
               <p>{card.body}</p>
-              <button type="button" onClick={() => onStartPath(card.id)}>
+              <button type="button" aria-label={`Start ${card.title}`} onClick={() => onStartPath(card.id)}>
                 Start
               </button>
             </article>
@@ -131,9 +140,24 @@ function TutorialMenu(props: Pick<TutorialOverlayProps, "onSkip" | "onStartPath"
 }
 
 export function TutorialOverlay(props: TutorialOverlayProps) {
-  const { mode, flow, step, stepIndex, targetId, canAdvance, isTaskComplete, onBack, onNext, onSkip, onStartPath, onPanelAction } =
+  const {
+    mode,
+    flow,
+    step,
+    stepIndex,
+    targetId,
+    canAdvance,
+    isTaskComplete,
+    lockedActionCount = 0,
+    onBack,
+    onNext,
+    onSkip,
+    onStartPath,
+    onPanelAction,
+  } =
     props;
-  const spotlightRect = useSpotlightRect(targetId);
+  const spotlightState = useSpotlightRect(targetId);
+  const spotlightRect = spotlightState.rect;
 
   useEffect(() => {
     if (!targetId) {
@@ -141,7 +165,30 @@ export function TutorialOverlay(props: TutorialOverlayProps) {
     }
 
     const element = document.querySelector<HTMLElement>(`[data-tutorial-target="${targetId}"]`);
-    element?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    if (!element) {
+      return;
+    }
+
+    const reduceMotion =
+      typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    element.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+
+    const hadTabIndex = element.hasAttribute("tabindex");
+    if (!hadTabIndex) {
+      element.setAttribute("tabindex", "-1");
+    }
+
+    element.focus({ preventScroll: true });
+
+    return () => {
+      if (!hadTabIndex) {
+        element.removeAttribute("tabindex");
+      }
+    };
   }, [targetId]);
 
   if (mode === "menu") {
@@ -177,6 +224,7 @@ export function TutorialOverlay(props: TutorialOverlayProps) {
           />
           <div
             className="tutorial-spotlight"
+            data-testid="tutorial-spotlight"
             style={{
               top: spotlightRect.top,
               left: spotlightRect.left,
@@ -195,16 +243,30 @@ export function TutorialOverlay(props: TutorialOverlayProps) {
             <p className="eyebrow">{flow.label}</p>
             <h2>{step.title}</h2>
           </div>
-          <StatusPill tone={step.taskPrompt ? (isTaskComplete ? "ok" : "neutral") : "neutral"}>
-            Step {stepIndex + 1} of {flow.steps.length}
-          </StatusPill>
+          <div className="tutorial-panel__status-row">
+            <StatusPill tone={step.taskPrompt ? (isTaskComplete ? "ok" : "neutral") : "neutral"}>
+              Step {stepIndex + 1} of {flow.steps.length}
+            </StatusPill>
+            {lockedActionCount > 0 ? (
+              <StatusPill tone={isTaskComplete ? "ok" : "neutral"}>
+                {isTaskComplete ? "Action gate cleared" : "Guided action gate active"}
+              </StatusPill>
+            ) : null}
+          </div>
         </div>
 
-        <div className="tutorial-progress" aria-hidden="true">
-          <div className="tutorial-progress__fill" style={{ width: `${progressPct}%` }} />
+        <div className="tutorial-progress" aria-hidden="true" data-testid="tutorial-progress">
+          <div className="tutorial-progress__fill" data-testid="tutorial-progress-fill" style={{ width: `${progressPct}%` }} />
         </div>
 
         <p className="tutorial-panel__summary">{step.summary}</p>
+
+        {targetId && !spotlightState.targetFound ? (
+          <div className="tutorial-target-note">
+            <strong>Spotlight note</strong>
+            <p>The highlighted region is not currently available, so the tutorial is guiding you with text for this step.</p>
+          </div>
+        ) : null}
 
         <div className="tutorial-copy-grid">
           <article className="tutorial-copy-card">
@@ -241,6 +303,11 @@ export function TutorialOverlay(props: TutorialOverlayProps) {
             </div>
             <p>{step.taskPrompt}</p>
             {!isTaskComplete && step.completionLabel ? <p className="tutorial-task__hint">{step.completionLabel}</p> : null}
+            {lockedActionCount > 0 && !isTaskComplete ? (
+              <p className="tutorial-task__lock-note" data-testid="tutorial-lock-note">
+                Other controls stay temporarily locked so this step can teach one action at a time.
+              </p>
+            ) : null}
             {step.panelActionId && step.panelActionLabel ? (
               <button type="button" onClick={onPanelAction}>
                 {step.panelActionLabel}
