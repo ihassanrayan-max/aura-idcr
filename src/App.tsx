@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import type { ScenarioControlRangeSchema, SessionMode } from "./contracts/aura";
 import { buildPresentationPolicy, orderPresentedLaneItems } from "./runtime/presentationPolicy";
 import { buildComparisonReportArtifact, buildSessionAfterActionReport } from "./runtime/reportArtifacts";
@@ -11,6 +11,14 @@ import { formatClock, riskBadgeTone } from "./ui/format";
 import { OperateWorkspace } from "./ui/OperateWorkspace";
 import { MetricStrip, StatusPill } from "./ui/primitives";
 import { ReviewWorkspace } from "./ui/ReviewWorkspace";
+import { TutorialOverlay } from "./ui/TutorialOverlay";
+import {
+  getTutorialFlow,
+  type RunPace,
+  type TutorialActionId,
+  type TutorialPathId,
+  type TutorialSignal,
+} from "./ui/tutorial";
 import { buildOperateWorkspaceModel, buildReviewWorkspaceModel, type WorkspaceId } from "./ui/viewModel";
 
 type AppProps = {
@@ -18,17 +26,116 @@ type AppProps = {
   autoRun?: boolean;
 };
 
-const defaultStore = createDefaultSessionStore();
+type TutorialState =
+  | {
+      mode: "closed";
+    }
+  | {
+      mode: "menu";
+    }
+  | {
+      mode: "running";
+      pathId: TutorialPathId;
+      stepIndex: number;
+      signals: Set<TutorialSignal>;
+    };
 
-export default function App({ store = defaultStore, autoRun = true }: AppProps) {
+const defaultStore = createDefaultSessionStore();
+const tutorialDismissKey = "aura-idcr.tutorial.v1.dismissed";
+const introScenarioId = "scn_alarm_cascade_root_cause";
+
+function readTutorialDismissed(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  try {
+    return window.localStorage.getItem(tutorialDismissKey) === "true";
+  } catch {
+    return true;
+  }
+}
+
+function writeTutorialDismissed(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(tutorialDismissKey, "true");
+  } catch {
+    // Ignore storage failures and keep the tutorial usable.
+  }
+}
+
+function checkpointPauseReason(
+  previousSnapshot: ReturnType<AuraSessionStore["getSnapshot"]>,
+  nextSnapshot: ReturnType<AuraSessionStore["getSnapshot"]>,
+): string | undefined {
+  if (previousSnapshot.session_id !== nextSnapshot.session_id) {
+    return undefined;
+  }
+
+  if (!previousSnapshot.outcome && nextSnapshot.outcome) {
+    return "Checkpoint pause: the scenario reached a terminal outcome and review evidence is now ready.";
+  }
+
+  if (previousSnapshot.current_phase.phase_id !== nextSnapshot.current_phase.phase_id) {
+    return `Checkpoint pause: the scenario entered ${nextSnapshot.current_phase.label}.`;
+  }
+
+  if (previousSnapshot.alarm_set.active_alarm_count === 0 && nextSnapshot.alarm_set.active_alarm_count > 0) {
+    return "Checkpoint pause: the first abnormal alarms entered the picture.";
+  }
+
+  if (
+    previousSnapshot.support_mode !== nextSnapshot.support_mode &&
+    nextSnapshot.session_mode === "adaptive"
+  ) {
+    return `Checkpoint pause: support mode changed to ${formatSupportModeLabel(nextSnapshot.support_mode)}.`;
+  }
+
+  if (!previousSnapshot.pending_action_confirmation && nextSnapshot.pending_action_confirmation) {
+    return "Checkpoint pause: a soft warning is waiting for explicit confirmation.";
+  }
+
+  if (
+    previousSnapshot.last_validation_result?.outcome !== "hard_prevent" &&
+    nextSnapshot.last_validation_result?.outcome === "hard_prevent"
+  ) {
+    return "Checkpoint pause: the validator blocked a high-risk action.";
+  }
+
+  if (
+    previousSnapshot.pending_supervisor_override?.request_status !== "requested" &&
+    nextSnapshot.pending_supervisor_override?.request_status === "requested"
+  ) {
+    return "Checkpoint pause: a supervisor decision is pending in Review.";
+  }
+
+  return undefined;
+}
+
+export default function App({ store = defaultStore, autoRun = false }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
   const [workspace, setWorkspace] = useState<WorkspaceId>("operate");
-  const [isRunning, setIsRunning] = useState(true);
+  const [isRunning, setIsRunning] = useState(autoRun);
+  const [runPace, setRunPace] = useState<RunPace>("guided");
+  const [checkpointPauseEnabled, setCheckpointPauseEnabled] = useState(true);
+  const [runtimePauseReason, setRuntimePauseReason] = useState(
+    "Simulation paused. Use guided pace, live pace, or one-tick stepping to begin.",
+  );
   const [controlValues, setControlValues] = useState<Record<string, number>>({});
   const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
   const [selectedSessionMode, setSelectedSessionMode] = useState<SessionMode>("adaptive");
   const [selectedScenarioId, setSelectedScenarioId] = useState(snapshot.scenario.scenario_id);
   const [supervisorOverrideNote, setSupervisorOverrideNote] = useState("");
+  const [tutorialState, setTutorialState] = useState<TutorialState>(() =>
+    store === defaultStore && !readTutorialDismissed() ? { mode: "menu" } : { mode: "closed" },
+  );
+
+  const previousSnapshotRef = useRef(snapshot);
+  const tutorialAutoAdvanceStepRef = useRef<string>();
 
   useEffect(() => {
     setSelectedSessionMode(snapshot.session_mode);
@@ -41,20 +148,35 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   }, [snapshot.manual_control_schema.controls, snapshot.scenario.scenario_id, snapshot.session_mode]);
 
   useEffect(() => {
-    if (!autoRun || !isRunning || snapshot.outcome) {
+    if (!isRunning || snapshot.outcome) {
       return undefined;
     }
 
+    const intervalMs = runPace === "guided" ? 1200 : 450;
     const timer = window.setInterval(() => {
       store.advanceTick();
-    }, 450);
+    }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [autoRun, isRunning, snapshot.outcome, store]);
+  }, [isRunning, runPace, snapshot.outcome, store]);
+
+  useEffect(() => {
+    const previousSnapshot = previousSnapshotRef.current;
+    if (checkpointPauseEnabled && isRunning) {
+      const reason = checkpointPauseReason(previousSnapshot, snapshot);
+      if (reason) {
+        setIsRunning(false);
+        setRuntimePauseReason(reason);
+      }
+    }
+
+    previousSnapshotRef.current = snapshot;
+  }, [checkpointPauseEnabled, isRunning, snapshot]);
 
   useEffect(() => {
     if (snapshot.outcome) {
       setIsRunning(false);
+      setRuntimePauseReason("Scenario complete. Review evidence is now ready.");
     }
   }, [snapshot.outcome, snapshot.session_id]);
 
@@ -65,6 +187,9 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   useEffect(() => {
     setExpandedClusterIds([]);
     setWorkspace("operate");
+    setRunPace("guided");
+    setIsRunning(false);
+    setRuntimePauseReason("Session reset. Use guided pace, live pace, or one-tick stepping to begin.");
   }, [snapshot.session_id]);
 
   const actionLabels = useMemo(
@@ -166,11 +291,39 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     [comparisonCaptureHint, sessionRunComparison, snapshot],
   );
 
+  const tutorialFlow = tutorialState.mode === "running" ? getTutorialFlow(tutorialState.pathId) : undefined;
+  const tutorialStep = tutorialState.mode === "running" ? tutorialFlow.steps[tutorialState.stepIndex] : undefined;
+  const tutorialSignals = tutorialState.mode === "running" ? tutorialState.signals : new Set<TutorialSignal>();
+
+  const tutorialContext = useMemo(
+    () => ({
+      snapshot,
+      workspace,
+      isRunning,
+      runPace,
+      checkpointPauseEnabled,
+      expandedClusterIds,
+      signals: tutorialSignals,
+    }),
+    [checkpointPauseEnabled, expandedClusterIds, isRunning, runPace, snapshot, tutorialSignals, workspace],
+  );
+
+  const tutorialStepComplete = tutorialStep
+    ? tutorialStep.completion.kind === "manual" || tutorialStep.completion.isComplete(tutorialContext)
+    : true;
+
+  const tutorialCanAdvance = tutorialStep ? tutorialStep.completion.kind === "manual" || tutorialStepComplete : false;
+  const lockedTutorialActions = tutorialStep?.lockedActionIds;
+
   const commandMetrics = useMemo(
     () => [
       {
         label: "Simulation clock",
         value: formatClock(snapshot.sim_time_sec),
+      },
+      {
+        label: "Runtime state",
+        value: isRunning ? `${runPace === "guided" ? "Guided" : "Live"} pace` : "Paused",
       },
       {
         label: "Support mode",
@@ -180,12 +333,8 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         label: "Alarm compression",
         value: `${snapshot.alarm_intelligence.compression_ratio.toFixed(2)}x`,
       },
-      {
-        label: "Review status",
-        value: snapshot.completed_review || pendingSupervisorOverride ? "Ready" : "Standby",
-      },
     ],
-    [pendingSupervisorOverride, snapshot.alarm_intelligence.compression_ratio, snapshot.completed_review, snapshot.sim_time_sec, snapshot.support_mode],
+    [isRunning, runPace, snapshot.alarm_intelligence.compression_ratio, snapshot.sim_time_sec, snapshot.support_mode],
   );
 
   const pendingSupervisorOverrideCard = pendingSupervisorOverride
@@ -198,17 +347,67 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
       }
     : undefined;
 
+  function recordTutorialSignal(signal: TutorialSignal): void {
+    setTutorialState((current) => {
+      if (current.mode !== "running") {
+        return current;
+      }
+
+      const signals = new Set(current.signals);
+      signals.add(signal);
+      return {
+        ...current,
+        signals,
+      };
+    });
+  }
+
+  function isTutorialActionAllowed(actionId: TutorialActionId): boolean {
+    if (tutorialState.mode !== "running" || !lockedTutorialActions || lockedTutorialActions.length === 0) {
+      return true;
+    }
+
+    return lockedTutorialActions.includes(actionId);
+  }
+
   function openWorkspace(nextWorkspace: WorkspaceId): void {
+    if (!isTutorialActionAllowed(nextWorkspace === "review" ? "workspace:review" : "workspace:operate")) {
+      return;
+    }
+
+    if (nextWorkspace === "review") {
+      recordTutorialSignal("workspace-review-opened");
+    } else {
+      recordTutorialSignal("workspace-operate-opened");
+    }
+
     startTransition(() => setWorkspace(nextWorkspace));
   }
 
   function toggleCluster(clusterId: string): void {
-    setExpandedClusterIds((current) =>
-      current.includes(clusterId) ? current.filter((entry) => entry !== clusterId) : [...current, clusterId],
-    );
+    if (!isTutorialActionAllowed("alarm:inspect-cluster")) {
+      return;
+    }
+
+    setExpandedClusterIds((current) => {
+      const nextExpanded = current.includes(clusterId)
+        ? current.filter((entry) => entry !== clusterId)
+        : [...current, clusterId];
+
+      if (nextExpanded.includes(clusterId)) {
+        recordTutorialSignal("alarm-cluster-opened");
+      }
+
+      return nextExpanded;
+    });
   }
 
   function requestLaneAction(actionId: string, recommendedValue?: number): void {
+    if (!isTutorialActionAllowed("actions:lane-primary")) {
+      return;
+    }
+
+    recordTutorialSignal("lane-action-requested");
     store.requestAction({
       action_id: actionId,
       requested_value: recommendedValue,
@@ -221,6 +420,10 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   }
 
   function applyControlAction(control: ScenarioControlRangeSchema, requestedValue: number): void {
+    if (!isTutorialActionAllowed("actions:manual-apply")) {
+      return;
+    }
+
     store.requestAction({
       action_id: control.action_id,
       requested_value: requestedValue,
@@ -230,6 +433,11 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   }
 
   function triggerValidationDemoPreset(control: ScenarioControlRangeSchema, requestedValue: number, label: string): void {
+    if (!isTutorialActionAllowed("actions:demo-preset")) {
+      return;
+    }
+
+    recordTutorialSignal("validator-demo-requested");
     setControlValues((current) => ({
       ...current,
       [control.control_id]: requestedValue,
@@ -243,6 +451,10 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   }
 
   function acknowledgeTopAlarm(): void {
+    if (!isTutorialActionAllowed("actions:ack-top-alarm")) {
+      return;
+    }
+
     store.requestAction({
       action_id: "act_ack_alarm",
       ui_region: "alarm_area",
@@ -250,34 +462,209 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     });
   }
 
-  function resetSession(): void {
+  function beginRun(nextRunPace: RunPace): void {
+    if (!isTutorialActionAllowed(nextRunPace === "guided" ? "runtime:run-guided" : "runtime:run-live") || snapshot.outcome) {
+      return;
+    }
+
+    setRunPace(nextRunPace);
     setIsRunning(true);
+    setRuntimePauseReason(
+      nextRunPace === "guided"
+        ? "Guided pace running. Checkpoint pauses will stop the scenario at teachable moments."
+        : "Live pace running. Pause or step whenever you want to inspect the system more closely.",
+    );
+    recordTutorialSignal(nextRunPace === "guided" ? "runtime-guided-started" : "runtime-live-started");
+  }
+
+  function pauseRun(): void {
+    if (!isTutorialActionAllowed("runtime:pause")) {
+      return;
+    }
+
+    setIsRunning(false);
+    setRuntimePauseReason("Runtime paused by the operator.");
+  }
+
+  function advanceOneTick(): void {
+    if (!isTutorialActionAllowed("runtime:advance") || snapshot.outcome) {
+      return;
+    }
+
+    recordTutorialSignal("runtime-advanced");
+    store.advanceTick();
+    setRuntimePauseReason("Advanced one deterministic simulation tick.");
+  }
+
+  function resetSession(): void {
+    if (!isTutorialActionAllowed("runtime:reset")) {
+      return;
+    }
+
+    setIsRunning(false);
+    setRunPace("guided");
+    setRuntimePauseReason("Session reset. Use guided pace, live pace, or one-tick stepping to begin.");
     store.reset({
       session_mode: selectedSessionMode,
       scenario_id: selectedScenarioId,
     });
   }
 
+  function closeTutorial(): void {
+    writeTutorialDismissed();
+    tutorialAutoAdvanceStepRef.current = undefined;
+    setTutorialState({ mode: "closed" });
+  }
+
+  function openTutorialMenu(): void {
+    setIsRunning(false);
+    setRuntimePauseReason("Runtime paused while the tutorial menu is open.");
+    setTutorialState({ mode: "menu" });
+  }
+
+  function startTutorial(pathId: TutorialPathId): void {
+    const flow = getTutorialFlow(pathId);
+
+    setIsRunning(false);
+    setCheckpointPauseEnabled(true);
+    setRunPace("guided");
+    tutorialAutoAdvanceStepRef.current = undefined;
+
+    if (flow.restartMode === "reset_intro_session") {
+      setSelectedSessionMode("adaptive");
+      setSelectedScenarioId(introScenarioId);
+      setWorkspace("operate");
+      setExpandedClusterIds([]);
+      setRuntimePauseReason("Tutorial loaded the introductory feedwater scenario and paused the runtime.");
+      store.reset({
+        session_mode: "adaptive",
+        scenario_id: introScenarioId,
+      });
+    } else {
+      setRuntimePauseReason("Runtime paused while the Review tutorial is active.");
+    }
+
+    setTutorialState({
+      mode: "running",
+      pathId,
+      stepIndex: 0,
+      signals: new Set<TutorialSignal>(),
+    });
+  }
+
+  function goToNextTutorialStep(): void {
+    setTutorialState((current) => {
+      if (current.mode !== "running") {
+        return current;
+      }
+
+      const flow = getTutorialFlow(current.pathId);
+      if (current.stepIndex >= flow.steps.length - 1) {
+        writeTutorialDismissed();
+        tutorialAutoAdvanceStepRef.current = undefined;
+        return { mode: "closed" };
+      }
+
+      tutorialAutoAdvanceStepRef.current = undefined;
+      return {
+        ...current,
+        stepIndex: current.stepIndex + 1,
+      };
+    });
+  }
+
+  function goToPreviousTutorialStep(): void {
+    setTutorialState((current) => {
+      if (current.mode !== "running") {
+        return current;
+      }
+
+      tutorialAutoAdvanceStepRef.current = undefined;
+      return {
+        ...current,
+        stepIndex: Math.max(0, current.stepIndex - 1),
+      };
+    });
+  }
+
+  function completeRunForTutorial(): void {
+    if (!isTutorialActionAllowed("tutorial:complete-run")) {
+      return;
+    }
+
+    setIsRunning(false);
+    recordTutorialSignal("tutorial-run-completed");
+    store.runUntilComplete(120);
+    setRuntimePauseReason("Tutorial checkpoint reached: the run was carried forward so Review can inspect real evidence.");
+  }
+
+  useEffect(() => {
+    if (tutorialState.mode !== "running" || !tutorialStep) {
+      return;
+    }
+
+    if (
+      tutorialStep.workspace &&
+      !tutorialStep.requiresManualWorkspaceSwitch &&
+      tutorialStep.workspace !== workspace
+    ) {
+      startTransition(() => setWorkspace(tutorialStep.workspace));
+    }
+  }, [tutorialState, tutorialStep, workspace]);
+
+  useEffect(() => {
+    if (
+      tutorialState.mode !== "running" ||
+      !tutorialStep ||
+      tutorialStep.completion.kind === "manual" ||
+      !tutorialStep.completion.autoAdvance ||
+      !tutorialStepComplete
+    ) {
+      return;
+    }
+
+    if (tutorialAutoAdvanceStepRef.current === tutorialStep.id) {
+      return;
+    }
+
+    tutorialAutoAdvanceStepRef.current = tutorialStep.id;
+    const timer = window.setTimeout(() => {
+      goToNextTutorialStep();
+    }, 220);
+
+    return () => window.clearTimeout(timer);
+  }, [tutorialState, tutorialStep, tutorialStepComplete]);
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#app-workspace">
         Skip to workspace
       </a>
-      <header className="command-bar">
+      <header className="command-bar" data-tutorial-target="command-bar">
         <div className="command-bar__identity">
           <p className="eyebrow">AURA-IDCR operator-first shell</p>
           <h1>{snapshot.scenario.title}</h1>
           <p className="command-bar__phase">{snapshot.current_phase.label}</p>
           <p className="command-bar__summary">{presentationPolicy.shell_mode_summary}</p>
+          <div className="pill-row">
+            <StatusPill tone="neutral">Runtime {isRunning ? "active" : "paused"}</StatusPill>
+            <StatusPill tone={checkpointPauseEnabled ? "ok" : "neutral"}>
+              Checkpoint pauses {checkpointPauseEnabled ? "on" : "off"}
+            </StatusPill>
+            <button type="button" className="ghost-button" onClick={openTutorialMenu}>
+              Tutorial guide
+            </button>
+          </div>
         </div>
 
         <div className="command-bar__controls">
-          <div className="workspace-switch" role="tablist" aria-label="Workspace switch">
+          <div className="workspace-switch" role="tablist" aria-label="Workspace switch" data-tutorial-target="workspace-switch">
             <button
               type="button"
               role="tab"
               aria-selected={workspace === "operate"}
               className={workspace === "operate" ? "workspace-switch__button is-active" : "workspace-switch__button"}
+              disabled={!isTutorialActionAllowed("workspace:operate")}
               onClick={() => openWorkspace("operate")}
             >
               Operate
@@ -287,16 +674,22 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               role="tab"
               aria-selected={workspace === "review"}
               className={workspace === "review" ? "workspace-switch__button is-active" : "workspace-switch__button"}
+              disabled={!isTutorialActionAllowed("workspace:review")}
               onClick={() => openWorkspace("review")}
             >
               Review
             </button>
           </div>
 
-          <div className="command-control-grid">
+          <div className="command-control-grid" data-tutorial-target="runtime-controls">
             <label className="command-field">
               <span>Next scenario</span>
-              <select name="scenario_id" value={selectedScenarioId} onChange={(event) => setSelectedScenarioId(event.target.value)}>
+              <select
+                name="scenario_id"
+                value={selectedScenarioId}
+                disabled={!isTutorialActionAllowed("runtime:change-scenario")}
+                onChange={(event) => setSelectedScenarioId(event.target.value)}
+              >
                 {snapshot.scenario_catalog.map((scenario) => (
                   <option key={scenario.scenario_id} value={scenario.scenario_id}>
                     {scenario.title}
@@ -309,6 +702,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               <select
                 name="session_mode"
                 value={selectedSessionMode}
+                disabled={!isTutorialActionAllowed("runtime:change-mode")}
                 onChange={(event) => setSelectedSessionMode(event.target.value as SessionMode)}
               >
                 <option value="adaptive">adaptive</option>
@@ -316,14 +710,45 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               </select>
             </label>
             <div className="command-actions">
-              <button type="button" className="ghost-button" onClick={() => setIsRunning((value) => !value)} disabled={Boolean(snapshot.outcome)}>
-                {isRunning ? "Hold runtime loop" : "Resume runtime loop"}
+              <button type="button" disabled={Boolean(snapshot.outcome) || !isTutorialActionAllowed("runtime:run-guided")} onClick={() => beginRun("guided")}>
+                Run guided pace
               </button>
-              <button type="button" className="ghost-button" onClick={() => store.advanceTick()} disabled={Boolean(snapshot.outcome)}>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={Boolean(snapshot.outcome) || !isTutorialActionAllowed("runtime:run-live")}
+                onClick={() => beginRun("live")}
+              >
+                Run live pace
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!isRunning || !isTutorialActionAllowed("runtime:pause")}
+                onClick={pauseRun}
+              >
+                Pause
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={Boolean(snapshot.outcome) || !isTutorialActionAllowed("runtime:advance")}
+                onClick={advanceOneTick}
+              >
                 Advance one tick
               </button>
-              <button type="button" onClick={resetSession}>
+              <button type="button" disabled={!isTutorialActionAllowed("runtime:reset")} onClick={resetSession}>
                 Reset session
+              </button>
+            </div>
+            <div className="command-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!isTutorialActionAllowed("runtime:toggle-checkpoint")}
+                onClick={() => setCheckpointPauseEnabled((value) => !value)}
+              >
+                {checkpointPauseEnabled ? "Turn checkpoint pauses off" : "Turn checkpoint pauses on"}
               </button>
             </div>
           </div>
@@ -337,10 +762,11 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
               {snapshot.validation_status_available ? presentationPolicy.validation_status_label : "Validation offline"}
             </StatusPill>
             <StatusPill tone={snapshot.outcome ? "alert" : riskBadgeTone(snapshot.combined_risk.combined_risk_band)}>
-              {snapshot.outcome ? `Outcome ${snapshot.outcome.outcome}` : "Scenario running"}
+              {snapshot.outcome ? `Outcome ${snapshot.outcome.outcome}` : "Scenario active"}
             </StatusPill>
             {snapshot.completed_review ? <StatusPill tone="neutral">Review evidence ready</StatusPill> : null}
           </div>
+          <p className="command-bar__summary">{runtimePauseReason}</p>
           <p className="command-bar__summary">{presentationPolicy.validation_status_summary}</p>
         </div>
       </header>
@@ -354,6 +780,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
           pendingConfirmation={pendingConfirmation}
           pendingSupervisorOverride={pendingSupervisorOverride}
           presentationPolicy={presentationPolicy}
+          isTutorialActionAllowed={isTutorialActionAllowed}
           onToggleCluster={toggleCluster}
           onRequestLaneAction={requestLaneAction}
           onChangeControlValue={(controlId, value) =>
@@ -395,6 +822,23 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
           }}
         />
       )}
+
+      {tutorialState.mode !== "closed" ? (
+        <TutorialOverlay
+          mode={tutorialState.mode}
+          flow={tutorialFlow}
+          step={tutorialStep}
+          stepIndex={tutorialState.mode === "running" ? tutorialState.stepIndex : undefined}
+          targetId={tutorialStep?.targetId}
+          canAdvance={tutorialCanAdvance}
+          isTaskComplete={tutorialStepComplete}
+          onBack={goToPreviousTutorialStep}
+          onNext={goToNextTutorialStep}
+          onSkip={closeTutorial}
+          onStartPath={startTutorial}
+          onPanelAction={tutorialStep?.panelActionId === "complete-run" ? completeRunForTutorial : undefined}
+        />
+      ) : null}
     </div>
   );
 }

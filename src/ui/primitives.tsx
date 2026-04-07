@@ -21,6 +21,7 @@ type SectionShellProps = {
   className?: string;
   children: ReactNode;
   "data-testid"?: string;
+  "data-tutorial-target"?: string;
 };
 
 export function cx(...values: Array<string | false | null | undefined>): string {
@@ -31,7 +32,11 @@ export function SectionShell(props: SectionShellProps) {
   const { title, subtitle, eyebrow, actions, className, children } = props;
 
   return (
-    <section className={cx("section-shell", className)} data-testid={props["data-testid"]}>
+    <section
+      className={cx("section-shell", className)}
+      data-testid={props["data-testid"]}
+      data-tutorial-target={props["data-tutorial-target"]}
+    >
       <header className="section-shell__header">
         <div>
           {eyebrow ? <p className="section-shell__eyebrow">{eyebrow}</p> : null}

@@ -9,6 +9,7 @@ import { buildPresentationPolicy } from "../runtime/presentationPolicy";
 import { validationBadgeTone } from "./format";
 import { MetricStrip, SectionShell, StatusPill, cx } from "./primitives";
 import type { OperateWorkspaceModel } from "./viewModel";
+import type { TutorialActionId } from "./tutorial";
 
 type OperateWorkspaceProps = {
   snapshot: SessionSnapshot;
@@ -28,6 +29,7 @@ type OperateWorkspaceProps = {
   onDismissPendingActionConfirmation: () => void;
   onRequestSupervisorOverrideReview: () => void;
   onOpenReview: () => void;
+  isTutorialActionAllowed: (actionId: TutorialActionId) => boolean;
 };
 
 function EidMassBalanceOverlay(props: {
@@ -107,6 +109,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
     onDismissPendingActionConfirmation,
     onRequestSupervisorOverrideReview,
     onOpenReview,
+    isTutorialActionAllowed,
   } = props;
 
   const lastValidation = snapshot.last_validation_result;
@@ -119,6 +122,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           title="Operator Orientation"
           subtitle="The first screen should answer what is happening, what matters, and what to do next before anything else."
           data-testid="orientation-board"
+          data-tutorial-target="orientation-board"
         >
           <div className="summary-triad">
             {model.orientationCards.map((card) => (
@@ -136,6 +140,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           className="operate-situation"
           title="Situation Board"
           subtitle="Plant mimic, critical variables, and state ribbon stay continuously visible."
+          data-tutorial-target="situation-board"
         >
           <div className="mimic-row">
             <div className="mimic-node">
@@ -187,6 +192,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           className="operate-alarm"
           title="Alarm Board"
           subtitle="Pinned critical alarms stay in view. Grouped clusters keep raw flood detail behind expansion."
+          data-tutorial-target="alarm-board"
         >
           <MetricStrip items={model.alarmMetrics} className="metric-strip--compact" />
 
@@ -231,7 +237,12 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                       </StatusPill>
                     ))}
                   </div>
-                  <button type="button" className="ghost-button" onClick={() => onToggleCluster(cluster.id)}>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!isTutorialActionAllowed("alarm:inspect-cluster")}
+                    onClick={() => onToggleCluster(cluster.id)}
+                  >
                     {cluster.expanded ? "Hide raw alarms" : "Inspect raw alarms"}
                   </button>
                   {cluster.expanded ? (
@@ -259,8 +270,14 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           className="operate-actions"
           title="Next Actions"
           subtitle="The first-response lane is the primary action surface. Manual intervention is intentionally secondary."
+          data-tutorial-target="next-actions"
           actions={
-            <button type="button" className="ghost-button" onClick={onOpenReview}>
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={!isTutorialActionAllowed("workspace:review")}
+              onClick={onOpenReview}
+            >
               Open Review workspace
             </button>
           }
@@ -304,7 +321,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                   <button
                     type="button"
                     className="lane-action-button"
-                    disabled={actionConfirmationPending}
+                    disabled={actionConfirmationPending || !isTutorialActionAllowed("actions:lane-primary")}
                     onClick={() => onRequestLaneAction(item.actionId!, item.actionValue)}
                   >
                     {item.actionLabel}
@@ -319,6 +336,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
             <div
               className={cx("validation-banner", presentationPolicy.validation_mode_class)}
               data-testid="pending-validation-banner"
+              data-tutorial-target="validation-banner"
               aria-live="polite"
             >
               <div className="section-divider">
@@ -335,10 +353,15 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                 </p>
               ) : null}
               <div className="utility-action-row">
-                <button type="button" onClick={onConfirmPendingAction}>
+                <button type="button" disabled={!isTutorialActionAllowed("actions:confirm-pending")} onClick={onConfirmPendingAction}>
                   Confirm and apply action
                 </button>
-                <button type="button" className="ghost-button" onClick={onDismissPendingActionConfirmation}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={!isTutorialActionAllowed("actions:dismiss-pending")}
+                  onClick={onDismissPendingActionConfirmation}
+                >
                   Cancel warning
                 </button>
               </div>
@@ -346,7 +369,11 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           ) : null}
 
           {lastValidation && presentationPolicy.validator_should_surface ? (
-            <div className={cx("validation-banner", presentationPolicy.validation_mode_class)} aria-live="polite">
+            <div
+              className={cx("validation-banner", presentationPolicy.validation_mode_class)}
+              data-tutorial-target="validation-banner"
+              aria-live="polite"
+            >
               <div className="section-divider">
                 <strong>Last action validation</strong>
                 <StatusPill tone={validationBadgeTone(lastValidation.outcome)}>{lastValidation.outcome}</StatusPill>
@@ -377,7 +404,12 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                       Request Demo/Research Supervisor Override
                     </button>
                   )}
-                  <button type="button" className="ghost-button" onClick={onOpenReview}>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={!isTutorialActionAllowed("workspace:review")}
+                    onClick={onOpenReview}
+                  >
                     Open Review workspace
                   </button>
                 </div>
@@ -385,7 +417,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
             </div>
           ) : null}
 
-          <div className="manual-utility">
+          <div className="manual-utility" data-tutorial-target="manual-utility">
             <div className="section-divider">
               <div>
                 <strong>Manual intervention</strong>
@@ -409,6 +441,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                     max={control.max}
                     step={control.step}
                     value={controlValue}
+                    disabled={!isTutorialActionAllowed("actions:manual-apply") && !isTutorialActionAllowed("actions:demo-preset")}
                     onChange={(event) => onChangeControlValue(control.control_id, Number(event.target.value))}
                   />
                   <div className="utility-action-row">
@@ -418,7 +451,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                     </strong>
                     <button
                       type="button"
-                      disabled={actionConfirmationPending}
+                      disabled={actionConfirmationPending || !isTutorialActionAllowed("actions:manual-apply")}
                       onClick={() => onApplyControlAction(control, controlValue)}
                     >
                       {control.apply_button_label}
@@ -433,7 +466,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                             key={preset.preset_id}
                             type="button"
                             className="ghost-button"
-                            disabled={actionConfirmationPending}
+                            disabled={actionConfirmationPending || !isTutorialActionAllowed("actions:demo-preset")}
                             onClick={() => onTriggerValidationDemoPreset(control, preset.requested_value, preset.label)}
                           >
                             {preset.label}
@@ -447,10 +480,19 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
             })}
 
             <div className="utility-action-row">
-              <button type="button" disabled={actionConfirmationPending} onClick={onAcknowledgeTopAlarm}>
+              <button
+                type="button"
+                disabled={actionConfirmationPending || !isTutorialActionAllowed("actions:ack-top-alarm")}
+                onClick={onAcknowledgeTopAlarm}
+              >
                 Acknowledge top alarm
               </button>
-              <button type="button" className="ghost-button" onClick={onOpenReview}>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!isTutorialActionAllowed("workspace:review")}
+                onClick={onOpenReview}
+              >
                 Need deeper oversight? Review
               </button>
             </div>
@@ -461,6 +503,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           className="operate-support"
           title="Support Posture"
           subtitle="Combined risk, workload, confidence, top factors, and current mode effect stay compact."
+          data-tutorial-target="support-posture"
         >
           <MetricStrip items={model.supportMetrics} className="metric-strip--compact" />
 
@@ -505,6 +548,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           className="operate-storyline"
           title="Storyline Board"
           subtitle="One dominant explanation sits up front. Secondary hypotheses stay compressed until needed."
+          data-tutorial-target="storyline-board"
         >
           <article className="storyline-primary">
             <div className="section-divider">

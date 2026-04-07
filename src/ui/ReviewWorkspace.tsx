@@ -301,7 +301,12 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
   return (
     <main className="workspace-canvas" data-testid="review-workspace" id="app-workspace">
       <div className="review-stack">
-        <SectionShell title="Live Oversight" subtitle={model.oversightSummary} className="review-section">
+        <SectionShell
+          title="Live Oversight"
+          subtitle={model.oversightSummary}
+          className="review-section"
+          data-tutorial-target="review-oversight"
+        >
           <div className="oversight-grid">
             <article className="review-card">
               <h3>Validator demo checklist</h3>
@@ -375,7 +380,12 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
           </div>
         </SectionShell>
 
-        <SectionShell title="Completed Run" subtitle={model.completedRunSummary} className="review-section">
+        <SectionShell
+          title="Completed Run"
+          subtitle={model.completedRunSummary}
+          className="review-section"
+          data-tutorial-target="review-completed"
+        >
           {completedReview ? (
             <CompletedSessionReviewPanel review={completedReview} canonicalEvents={canonicalEvents} />
           ) : (
@@ -386,7 +396,12 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
           )}
         </SectionShell>
 
-        <SectionShell title="Comparison & Export" subtitle={model.comparisonSummary} className="review-section">
+        <SectionShell
+          title="Comparison & Export"
+          subtitle={model.comparisonSummary}
+          className="review-section"
+          data-tutorial-target="review-comparison"
+        >
           <div className="comparison-run-grid" data-testid="evaluation-action-bar">
             <article className="review-card">
               <span className="utility-card__label">Session report</span>
