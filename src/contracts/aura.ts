@@ -106,7 +106,10 @@ export type ScenarioDefinition = {
   timeout_condition: ScenarioCondition;
 };
 
-export type ScenarioRuntimeProfileId = "feedwater_degradation" | "loss_of_offsite_power_sbo";
+export type ScenarioRuntimeProfileId =
+  | "feedwater_degradation"
+  | "loss_of_offsite_power_sbo"
+  | "main_steam_isolation_upset";
 
 export type ScenarioControlRangeSchema = {
   control_id: string;

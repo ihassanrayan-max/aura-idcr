@@ -1064,6 +1064,24 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Hold Phase 4 scope unless the human explicitly opens either a narrow override-workflow slice or later-phase evaluation/replay work
 
+- Date: 2026-04-06
+- Agent/session: Cluster Pack 2 Scenario C implementation session
+- Task worked on: Scenario C `Main Steam Isolation Upset`, multi-scenario evaluation capture proof, and bounded Scenario C validator/recovery flow
+- Status: Done
+- What changed:
+  - Added `src/scenarios/scn_main_steam_isolation_upset.ts` and registered it in `src/scenarios/registry.ts` as the third live scenario with its own `main_steam_isolation_upset` runtime profile and bounded IC control schema.
+  - Extended `src/contracts/aura.ts`, `src/runtime/plantTwin.ts`, `src/runtime/alarmIntelligence.ts`, `src/runtime/reasoningEngine.ts`, `src/runtime/procedureLane.ts`, `src/runtime/actionValidator.ts`, and `src/state/sessionStore.ts` so Scenario C has deterministic plant progression, alarm grouping, dominant-cause reasoning, first-response guidance, validator behavior, and terminal outcome messaging without changing generic replay/comparison builders.
+  - Kept Scenario C non-electrical by preserving `offsite_power_available = true` while driving a trip plus steam-path collapse, normal sink loss, IC-recovery window, and pressure/consequence escalation path.
+  - Added automated proof in `src/runtime/actionValidator.test.ts` and `src/state/sessionStore.test.tsx` for Scenario C success/failure, HMI rendering, LoOP-storyline separation, and A/B/C evaluation-capture bucket isolation.
+  - Verified the slice with `npx tsc --noEmit`, `npm test`, and `npm run build`.
+- What remains:
+  - Optional supervisor override workflow from earlier Phase 4 notes remains unimplemented.
+  - Later-phase export/reporting polish and any further scenario-family expansion remain intentionally untouched.
+- Blockers:
+  - None in repo after verification; Vite-based commands required running outside the sandbox to avoid the local `spawn EPERM` environment restriction.
+- Next recommended step:
+  - Hold scope unless the human explicitly wants the next bounded cluster, likely judge-facing/report/export polish or a narrow supervisor-override slice.
+
 ---
 
 ## 26) Final reminder to all future agents

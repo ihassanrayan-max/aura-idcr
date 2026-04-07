@@ -295,6 +295,112 @@ function buildBlackoutProgressionLane(plant_state: PlantStateSnapshot, alarm_set
   ];
 }
 
+function buildSteamIsolationDiagnosisLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet): FirstResponseItem[] {
+  return [
+    makeItem({
+      item_id: "msi_check_isolation_picture",
+      label: "Confirm trip, steam collapse, and normal electrical availability together",
+      item_kind: "check",
+      why: "The bounded task is to confirm a steam-isolation upset rather than misclassifying it as a LoOP or generic turbine issue.",
+      completion_hint: "Use offsite power, trip state, steam flow, and turbine output together before narrowing the recovery path.",
+      source_alarm_ids: ["ALM_REACTOR_TRIP_ACTIVE", "ALM_MAIN_STEAM_FLOW_MISMATCH", "ALM_TURBINE_OUTPUT_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["offsite_power_available", "reactor_trip_active", "main_steam_flow_pct", "turbine_output_mwe"],
+    }),
+    makeItem({
+      item_id: "msi_watch_sink_loss",
+      label: "Watch the lost normal sink while alternate cooling is still forming",
+      item_kind: "watch",
+      why: `Condenser sink is unavailable and vessel pressure is ${Number(plant_state.vessel_pressure_mpa).toFixed(2)} MPa.`,
+      completion_hint: "If IC flow does not establish quickly, the event will shift from diagnosis into pressure-facing recovery.",
+      source_alarm_ids: ["ALM_CONDENSER_HEAT_SINK_LOST"].filter((alarm_id) => alarm_set.active_alarm_ids.includes(alarm_id)),
+      source_variable_ids: ["condenser_heat_sink_available", "vessel_pressure_mpa", "isolation_condenser_flow_pct"],
+    }),
+  ];
+}
+
+function buildSteamIsolationRecoveryLane(
+  plant_state: PlantStateSnapshot,
+  alarm_set: AlarmSet,
+  allowed_action_ids: Set<string>,
+): FirstResponseItem[] {
+  const items: FirstResponseItem[] = [
+    makeItem({
+      item_id: "msi_check_ic_recovery",
+      label: "Confirm IC flow is taking over the post-trip cooling path",
+      item_kind: "check",
+      why: `Isolation condenser flow is ${Number(plant_state.isolation_condenser_flow_pct).toFixed(1)}% rated while the normal sink remains unavailable.`,
+      completion_hint: "The bounded recovery path is to establish IC flow before pressure and containment continue climbing.",
+      source_alarm_ids: ["ALM_CONDENSER_HEAT_SINK_LOST", "ALM_ISOLATION_CONDENSER_FLOW_LOW"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["condenser_heat_sink_available", "isolation_condenser_flow_pct", "vessel_pressure_mpa"],
+    }),
+  ];
+
+  if (allowed_action_ids.has("act_adjust_isolation_condenser")) {
+    items.push(
+      makeItem({
+        item_id: "msi_action_ic_align",
+        label: "Align isolation condenser demand toward 72% rated",
+        item_kind: "action",
+        why: "The current first-response path is to establish bounded alternate heat-sink recovery before pressure consequences take over.",
+        completion_hint: "Use the bounded IC-demand alignment first, then re-check pressure and containment flattening.",
+        source_alarm_ids: ["ALM_ISOLATION_CONDENSER_FLOW_LOW", "ALM_RPV_PRESSURE_HIGH"].filter((alarm_id) =>
+          alarm_set.active_alarm_ids.includes(alarm_id),
+        ),
+        source_variable_ids: ["isolation_condenser_flow_pct", "vessel_pressure_mpa", "containment_pressure_kpa"],
+        recommended_action_id: "act_adjust_isolation_condenser",
+        recommended_value: 72,
+      }),
+    );
+  }
+
+  items.push(
+    makeItem({
+      item_id: "msi_watch_pressure_flatten",
+      label: "Watch pressure and containment for a flattening recovery trend",
+      item_kind: "watch",
+      why: "A successful response should flatten pressure and stop containment from climbing while IC flow comes up.",
+      completion_hint: "Pressure should trend back toward the bounded band and containment should stop rising.",
+      source_alarm_ids: ["ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["vessel_pressure_mpa", "containment_pressure_kpa"],
+    }),
+  );
+
+  return items;
+}
+
+function buildSteamIsolationPressureLane(plant_state: PlantStateSnapshot, alarm_set: AlarmSet): FirstResponseItem[] {
+  return [
+    makeItem({
+      item_id: "msi_check_pressure_consequences",
+      label: "Check pressure, SRV state, and containment together",
+      item_kind: "check",
+      why: `Pressure is ${Number(plant_state.vessel_pressure_mpa).toFixed(2)} MPa and containment is ${Number(plant_state.containment_pressure_kpa).toFixed(1)} kPa.`,
+      completion_hint: "Do not treat the pressure indication in isolation; confirm whether SRV relief and containment are worsening too.",
+      source_alarm_ids: ["ALM_RPV_PRESSURE_HIGH", "ALM_SRV_STUCK_OPEN", "ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["vessel_pressure_mpa", "safety_relief_valve_open", "containment_pressure_kpa"],
+    }),
+    makeItem({
+      item_id: "msi_watch_unsuccessful_recovery",
+      label: "Watch for an unsuccessful alternate heat-sink response",
+      item_kind: "watch",
+      why: "This branch means the steam-isolation event is no longer just a diagnosis problem; it is now a consequence-control problem.",
+      completion_hint: "If pressure remains high or containment keeps rising, the bounded recovery path has not stabilized.",
+      source_alarm_ids: ["ALM_CONTAINMENT_PRESSURE_HIGH", "ALM_SRV_STUCK_OPEN"].filter((alarm_id) =>
+        alarm_set.active_alarm_ids.includes(alarm_id),
+      ),
+      source_variable_ids: ["containment_pressure_kpa", "safety_relief_valve_open", "isolation_condenser_flow_pct"],
+    }),
+  ];
+}
+
 export function buildFirstResponseLane(params: {
   sim_time_sec: number;
   plant_state: PlantStateSnapshot;
@@ -306,6 +412,35 @@ export function buildFirstResponseLane(params: {
   const allowed_action_ids = new Set(params.allowed_action_ids);
   let items: FirstResponseItem[];
   const runtime_profile_id = params.runtime_profile_id ?? "feedwater_degradation";
+
+  if (runtime_profile_id === "main_steam_isolation_upset") {
+    const pressureEscalating =
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_pressure_consequence_escalation" ||
+      Number(params.plant_state.vessel_pressure_mpa) >= 7.45 ||
+      params.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH");
+    const recoveryGapActive =
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_alternate_heat_sink_gap" ||
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_isolation_recovery_lag" ||
+      params.alarm_set.active_alarm_ids.includes("ALM_ISOLATION_CONDENSER_FLOW_LOW") ||
+      Number(params.plant_state.isolation_condenser_flow_pct) < 56;
+
+    if (pressureEscalating) {
+      items = buildSteamIsolationPressureLane(params.plant_state, params.alarm_set);
+    } else if (recoveryGapActive) {
+      items = buildSteamIsolationRecoveryLane(params.plant_state, params.alarm_set, allowed_action_ids);
+    } else {
+      items = buildSteamIsolationDiagnosisLane(params.plant_state, params.alarm_set);
+    }
+
+    return {
+      lane_id: `lane_${params.reasoning_snapshot.dominant_hypothesis_id ?? "monitor"}_${params.sim_time_sec}`,
+      dominant_hypothesis_id: params.reasoning_snapshot.dominant_hypothesis_id,
+      updated_at_sec: params.sim_time_sec,
+      prototype_notice:
+        "Prototype guidance only. This lane narrows likely first checks and actions for the current bounded steam-isolation scenario; it is not an official procedure.",
+      items,
+    };
+  }
 
   if (runtime_profile_id === "loss_of_offsite_power_sbo") {
     switch (params.reasoning_snapshot.dominant_hypothesis_id) {

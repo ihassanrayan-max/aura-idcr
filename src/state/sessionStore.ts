@@ -566,6 +566,60 @@ export class AuraSessionStore {
       elapsed_time_sec: params.sim_time_sec,
     };
 
+    if (this.runtime_profile_id === "main_steam_isolation_upset") {
+      const diagnosis_ready =
+        ["hyp_main_steam_isolation_upset", "hyp_alternate_heat_sink_gap"].includes(
+          params.reasoning_snapshot.dominant_hypothesis_id ?? "",
+        ) && params.reasoning_snapshot.stable_for_ticks >= 2;
+      const stabilizedRecoveryPicture =
+        Number(params.plant_state.isolation_condenser_flow_pct) >= 60 &&
+        Number(params.plant_state.vessel_pressure_mpa) <= 7.24 &&
+        Number(params.plant_state.containment_pressure_kpa) <= 106 &&
+        Boolean(params.plant_state.offsite_power_available);
+
+      if (evaluateCondition(this.scenario.failure_condition, outcome_context)) {
+        return {
+          diagnosis_ready,
+          outcome: {
+            outcome: "failure",
+            stabilized: false,
+            message:
+              "The main-steam isolation upset crossed a bounded pressure or containment consequence marker before alternate heat-sink recovery stabilized.",
+            sim_time_sec: params.sim_time_sec,
+          },
+        };
+      }
+
+      if (evaluateCondition(this.scenario.success_condition, outcome_context) && diagnosis_ready && stabilizedRecoveryPicture) {
+        return {
+          diagnosis_ready,
+          outcome: {
+            outcome: "success",
+            stabilized: true,
+            message:
+              "The steam-isolation picture stabilized with normal electrical availability preserved, IC recovery established, and pressure consequences flattened.",
+            sim_time_sec: params.sim_time_sec,
+          },
+        };
+      }
+
+      if (evaluateCondition(this.scenario.timeout_condition, outcome_context)) {
+        return {
+          diagnosis_ready,
+          outcome: {
+            outcome: "timeout",
+            stabilized: false,
+            message: diagnosis_ready
+              ? "The response window expired before the bounded alternate heat-sink recovery path fully flattened pressure and containment."
+              : "The response window expired before the main-steam isolation picture stabilized into a successful recovery path.",
+            sim_time_sec: params.sim_time_sec,
+          },
+        };
+      }
+
+      return { diagnosis_ready };
+    }
+
     if (this.runtime_profile_id === "loss_of_offsite_power_sbo") {
       const diagnosis_ready =
         ["hyp_loss_of_offsite_power", "hyp_decay_heat_removal_gap"].includes(

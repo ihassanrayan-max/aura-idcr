@@ -56,8 +56,31 @@ const lossOfOffsitePowerClusterRules: ClusterRule[] = [
   },
 ];
 
+const mainSteamIsolationClusterRules: ClusterRule[] = [
+  {
+    cluster_id: "cluster_steam_isolation_trip",
+    title: "Steam Isolation / Trip Picture",
+    summary: "Trip plus steam-path collapse define a non-electrical isolation upset rather than a LoOP.",
+    group_hints: ["steam_path_anomaly", "generation_mismatch", "post_trip_recovery"],
+  },
+  {
+    cluster_id: "cluster_alternate_heat_sink_recovery",
+    title: "Alternate Heat-Sink Recovery Gap",
+    summary: "Normal sink loss and weak IC recovery leave the post-trip cooling path incomplete.",
+    group_hints: ["decay_heat_removal_unavailable", "heat_sink_loss"],
+  },
+  {
+    cluster_id: "cluster_pressure_consequence_escalation",
+    title: "Pressure / Consequence Escalation",
+    summary: "Pressure and containment alarms indicate the isolation upset is no longer staying bounded.",
+    group_hints: ["pressure_transient", "containment_challenge"],
+  },
+];
+
 function clusterRulesForProfile(runtime_profile_id: ScenarioRuntimeProfileId): ClusterRule[] {
   switch (runtime_profile_id) {
+    case "main_steam_isolation_upset":
+      return mainSteamIsolationClusterRules;
     case "loss_of_offsite_power_sbo":
       return lossOfOffsitePowerClusterRules;
     case "feedwater_degradation":

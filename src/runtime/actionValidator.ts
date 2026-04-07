@@ -115,6 +115,10 @@ export function validateAction(params: ValidateActionParams): ActionValidationRe
 
   const runtime_profile_id = params.runtime_profile_id ?? "feedwater_degradation";
 
+  if (runtime_profile_id === "main_steam_isolation_upset") {
+    return validateMainSteamIsolationAction(params);
+  }
+
   if (runtime_profile_id === "loss_of_offsite_power_sbo") {
     return validateLossOfOffsitePowerAction(params);
   }
@@ -462,6 +466,191 @@ function validateLossOfOffsitePowerAction(params: ValidateActionParams): ActionV
     override_allowed: false,
     reason_code: "bounded_ic_confirmation_required",
     explanation: "This isolation-condenser action is not clearly unsafe, but it sits outside the clean pass band and needs explicit confirmation.",
+    risk_context,
+    confidence_note: current_confidence_note,
+    affected_variable_ids: params.allowed_action.target_variable_ids,
+    prevented_harm: false,
+    nuisance_flag: false,
+    recommended_safe_alternative: `Use the bounded IC recovery target near ${bounded_recovery_target}% rated if you want the lowest-friction recovery path.`,
+  };
+}
+
+function laneRecommendedMainSteamIcTarget(first_response_lane: FirstResponseLane): number {
+  const recommended_item = first_response_lane.items.find(
+    (item) => item.recommended_action_id === "act_adjust_isolation_condenser" && typeof item.recommended_value === "number",
+  );
+  return typeof recommended_item?.recommended_value === "number" ? Number(recommended_item.recommended_value) : 72;
+}
+
+function validateMainSteamIsolationAction(params: ValidateActionParams): ActionValidationResult {
+  if (params.action_request.action_id !== "act_adjust_isolation_condenser") {
+    return passResult(
+      params,
+      "bounded_action_pass",
+      "This bounded action does not currently require additional interception logic in this slice.",
+    );
+  }
+
+  const requested_setpoint = clamp(Number(params.action_request.requested_value ?? params.plant_state.isolation_condenser_flow_pct), 0, 100);
+  const bounded_recovery_target = laneRecommendedMainSteamIcTarget(params.first_response_lane);
+  const lane_relevant = laneSupportsAction(params.first_response_lane, params.action_request.action_id);
+  const pressure = Number(params.plant_state.vessel_pressure_mpa);
+  const containment = Number(params.plant_state.containment_pressure_kpa);
+  const escalation_active =
+    pressure >= 7.42 ||
+    containment >= 108 ||
+    params.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+    params.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN");
+  const risk_context = `${formatSupportModeLabel(params.support_mode)} is active, combined risk is ${params.combined_risk.combined_risk_band} (${params.combined_risk.combined_risk_score.toFixed(
+    1,
+  )}/100), the dominant hypothesis is ${dominantHypothesisLabel(params.reasoning_snapshot)}, IC target is near ${bounded_recovery_target}% rated, pressure is ${pressure.toFixed(
+    2,
+  )} MPa, containment is ${containment.toFixed(1)} kPa, and offsite power remains available.`;
+  const current_confidence_note = confidenceNote(params.operator_state);
+  const alignedWithRecoveryLane =
+    (lane_relevant ||
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_main_steam_isolation_upset" ||
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_alternate_heat_sink_gap" ||
+      params.reasoning_snapshot.dominant_hypothesis_id === "hyp_isolation_recovery_lag") &&
+    requested_setpoint >= 64 &&
+    requested_setpoint <= 78;
+
+  if (requested_setpoint < 20) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "hard_prevent",
+      requires_confirmation: false,
+      override_allowed: false,
+      reason_code: "msi_ic_below_safe_floor",
+      explanation: "Requested isolation-condenser demand is below the bounded safe floor for this steam-isolation recovery path, so the action is blocked.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: true,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Move isolation-condenser demand toward the bounded recovery band near ${bounded_recovery_target}% rated.`,
+    };
+  }
+
+  if (escalation_active && requested_setpoint < 50) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "hard_prevent",
+      requires_confirmation: false,
+      override_allowed: false,
+      reason_code: "msi_reduced_ic_during_pressure_escalation",
+      explanation: "Pressure-consequence markers are active, and reducing IC demand conflicts with the bounded recovery path, so the action is blocked.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: true,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Hold or increase IC demand near ${bounded_recovery_target}% rated while pressure and containment remain stressed.`,
+    };
+  }
+
+  if (requested_setpoint < 64) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "msi_ic_below_guided_recovery_band",
+      explanation: "Requested isolation-condenser demand is below the guided recovery band for this steam-isolation slice, so explicit confirmation is required.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: `A safer direction is the bounded IC recovery target near ${bounded_recovery_target}% rated.`,
+    };
+  }
+
+  if (requested_setpoint > 82) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "msi_ic_above_guided_recovery_band",
+      explanation: "Requested isolation-condenser demand is above the bounded guided band for this steam-isolation slice, so explicit confirmation is required.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Stay near ${bounded_recovery_target}% rated unless the pressure picture clearly demands otherwise.`,
+    };
+  }
+
+  if (
+    !lane_relevant &&
+    params.reasoning_snapshot.dominant_hypothesis_id !== "hyp_main_steam_isolation_upset" &&
+    params.reasoning_snapshot.dominant_hypothesis_id !== "hyp_alternate_heat_sink_gap" &&
+    params.reasoning_snapshot.dominant_hypothesis_id !== "hyp_isolation_recovery_lag"
+  ) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "msi_ic_not_current_recovery_lane",
+      explanation: "The requested IC action is not strongly supported by the current steam-isolation first-response picture, so explicit confirmation is required.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: "Re-check the current storyline and first-response lane before changing the IC path.",
+    };
+  }
+
+  if (params.support_mode === "protected_response" && escalation_active && requested_setpoint !== bounded_recovery_target) {
+    return {
+      validation_result_id: buildValidationId(params.validation_sequence),
+      action_request_id: params.action_request.action_request_id,
+      sim_time_sec: params.action_request.sim_time_sec,
+      outcome: "soft_warning",
+      requires_confirmation: true,
+      override_allowed: false,
+      reason_code: "msi_protected_response_ic_precision_check",
+      explanation: "Protected response is active, so moving IC demand away from the bounded steam-isolation target requires explicit confirmation.",
+      risk_context,
+      confidence_note: current_confidence_note,
+      affected_variable_ids: params.allowed_action.target_variable_ids,
+      prevented_harm: false,
+      nuisance_flag: false,
+      recommended_safe_alternative: `Stay with the bounded IC recovery target near ${bounded_recovery_target}% rated while the escalation picture is active.`,
+    };
+  }
+
+  if (alignedWithRecoveryLane) {
+    return passResult(
+      params,
+      "bounded_msi_ic_recovery_pass",
+      "Requested isolation-condenser demand matches the current bounded recovery path for this deterministic steam-isolation scenario.",
+    );
+  }
+
+  return {
+    validation_result_id: buildValidationId(params.validation_sequence),
+    action_request_id: params.action_request.action_request_id,
+    sim_time_sec: params.action_request.sim_time_sec,
+    outcome: "soft_warning",
+    requires_confirmation: true,
+    override_allowed: false,
+    reason_code: "bounded_msi_ic_confirmation_required",
+    explanation: "This isolation-condenser action is not clearly unsafe, but it sits outside the clean steam-isolation pass band and needs explicit confirmation.",
     risk_context,
     confidence_note: current_confidence_note,
     affected_variable_ids: params.allowed_action.target_variable_ids,

@@ -37,6 +37,26 @@ function runSuccessfulLoopSession(): AuraSessionStore {
   return store;
 }
 
+function runSuccessfulMainSteamIsolationSession(): AuraSessionStore {
+  const store = new AuraSessionStore({
+    session_index: 211,
+    tick_duration_sec: 5,
+    scenario_id: "scn_main_steam_isolation_upset",
+  });
+  store.advanceTick();
+  store.advanceTick();
+  store.advanceTick();
+  store.advanceTick();
+  store.requestAction({
+    action_id: "act_adjust_isolation_condenser",
+    requested_value: 72,
+    ui_region: "plant_mimic",
+    reason_note: "Deterministic steam isolation recovery test correction",
+  });
+  store.runUntilComplete(80);
+  return store;
+}
+
 function summarizeStore(store: AuraSessionStore) {
   const snapshot = store.getSnapshot();
   return {
@@ -575,6 +595,49 @@ describe("AuraSessionStore", () => {
     expect(first.outcome?.outcome).toBe("success");
   });
 
+  it("runs Scenario C deterministically on the bounded successful recovery path", () => {
+    const first = summarizeStore(runSuccessfulMainSteamIsolationSession());
+    const second = summarizeStore(runSuccessfulMainSteamIsolationSession());
+
+    expect(first).toEqual(second);
+    expect(first.outcome?.outcome).toBe("success");
+  });
+
+  it("reaches a non-success terminal state in Scenario C without corrective IC action", () => {
+    const store = new AuraSessionStore({
+      session_index: 212,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+    const finalSnapshot = store.runUntilComplete(90);
+
+    expect(finalSnapshot.outcome).toBeDefined();
+    expect(finalSnapshot.outcome?.outcome).not.toBe("success");
+    expect(finalSnapshot.completed_review).toBeDefined();
+    expect(finalSnapshot.reasoning_snapshot.dominant_hypothesis_id).toBeDefined();
+  });
+
+  it("keeps Scenario C free of LoOP storyline drift and surfaces the IC recovery lane after onset", () => {
+    const store = new AuraSessionStore({
+      session_index: 213,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    for (let tick = 0; tick < 6; tick += 1) {
+      store.advanceTick();
+    }
+
+    const snapshot = store.getSnapshot();
+    const itemIds = snapshot.first_response_lane.items.map((item) => item.item_id);
+
+    expect(snapshot.alarm_set.active_alarm_ids).not.toContain("ALM_OFFSITE_POWER_LOSS");
+    expect(snapshot.reasoning_snapshot.dominant_hypothesis_id).not.toBe("hyp_loss_of_offsite_power");
+    expect(snapshot.reasoning_snapshot.dominant_hypothesis_id).toBe("hyp_main_steam_isolation_upset");
+    expect(itemIds).toContain("msi_action_ic_align");
+    expect(snapshot.first_response_lane.prototype_notice).toMatch(/steam-isolation scenario/i);
+  });
+
   it("keeps scenario comparison buckets separate between Scenario A and Scenario B", () => {
     const store = new AuraSessionStore({ session_index: 46, tick_duration_sec: 5, session_mode: "baseline" });
     store.runUntilComplete(100);
@@ -593,6 +656,31 @@ describe("AuraSessionStore", () => {
     expect(capture["scn_loss_of_offsite_power_sbo@1.0.0"]?.adaptive_completed).toBeDefined();
   });
 
+  it("keeps scenario comparison buckets separate across Scenario A, B, and C", () => {
+    const store = new AuraSessionStore({ session_index: 146, tick_duration_sec: 5, session_mode: "baseline" });
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive" });
+    store.runUntilComplete(100);
+
+    store.reset({ session_mode: "baseline", scenario_id: "scn_loss_of_offsite_power_sbo" });
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive", scenario_id: "scn_loss_of_offsite_power_sbo" });
+    store.runUntilComplete(100);
+
+    store.reset({ session_mode: "baseline", scenario_id: "scn_main_steam_isolation_upset" });
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive", scenario_id: "scn_main_steam_isolation_upset" });
+    store.runUntilComplete(100);
+
+    const capture = store.getSnapshot().evaluation_capture ?? {};
+    expect(capture["scn_alarm_cascade_root_cause@1.0.0"]?.baseline_completed).toBeDefined();
+    expect(capture["scn_alarm_cascade_root_cause@1.0.0"]?.adaptive_completed).toBeDefined();
+    expect(capture["scn_loss_of_offsite_power_sbo@1.0.0"]?.baseline_completed).toBeDefined();
+    expect(capture["scn_loss_of_offsite_power_sbo@1.0.0"]?.adaptive_completed).toBeDefined();
+    expect(capture["scn_main_steam_isolation_upset@1.0.0"]?.baseline_completed).toBeDefined();
+    expect(capture["scn_main_steam_isolation_upset@1.0.0"]?.adaptive_completed).toBeDefined();
+  });
+
   it("renders scenario selection and the Scenario B IC control in the HMI", () => {
     const store = new AuraSessionStore({
       session_index: 47,
@@ -607,5 +695,20 @@ describe("AuraSessionStore", () => {
     expect(screen.getByLabelText(/Isolation Condenser Demand Target/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Apply IC alignment/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/Feedwater Demand Target/i)).not.toBeInTheDocument();
+  });
+
+  it("renders Scenario C selection state and the steam-isolation IC control in the HMI", () => {
+    const store = new AuraSessionStore({
+      session_index: 147,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByRole("heading", { name: /Main Steam Isolation Upset/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Next scenario/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Isolation Condenser Demand Target/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Apply IC recovery alignment/i })).toBeInTheDocument();
   });
 });

@@ -77,6 +77,33 @@ const lossOfOffsitePowerHypothesisCatalog: HypothesisConfig[] = [
   },
 ];
 
+const mainSteamIsolationHypothesisCatalog: HypothesisConfig[] = [
+  {
+    hypothesis_id: "hyp_main_steam_isolation_upset",
+    label: "Main Steam Isolation Upset",
+    summary: "Trip plus steam-path collapse with normal electrical availability indicate a non-electrical main-steam isolation upset.",
+    watch_items: ["offsite_power_available", "reactor_trip_active", "main_steam_flow_pct", "turbine_output_mwe"],
+  },
+  {
+    hypothesis_id: "hyp_alternate_heat_sink_gap",
+    label: "Alternate Heat-Sink Gap",
+    summary: "The normal condenser sink is unavailable and alternate IC cooling has not yet fully taken over the post-trip heat load.",
+    watch_items: ["condenser_heat_sink_available", "isolation_condenser_flow_pct", "vessel_pressure_mpa"],
+  },
+  {
+    hypothesis_id: "hyp_isolation_recovery_lag",
+    label: "Isolation Recovery Lag",
+    summary: "IC recovery is lagging the pressure picture, so the event is drifting deeper into a missed-recovery branch.",
+    watch_items: ["isolation_condenser_flow_pct", "vessel_pressure_mpa", "containment_pressure_kpa"],
+  },
+  {
+    hypothesis_id: "hyp_pressure_consequence_escalation",
+    label: "Pressure / Consequence Escalation",
+    summary: "The isolation upset is no longer staying bounded and has become a pressure plus containment consequence-management problem.",
+    watch_items: ["vessel_pressure_mpa", "safety_relief_valve_open", "containment_pressure_kpa"],
+  },
+];
+
 type ScoredHypothesis = {
   hypothesis_id: string;
   raw_score: number;
@@ -501,8 +528,203 @@ function scorePressureConsequenceManagement(
   return { score, evidence };
 }
 
+function scoreMainSteamIsolationUpset(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+
+  if (Boolean(plant_state.offsite_power_available)) {
+    score += 0.45;
+    pushEvidence(
+      evidence,
+      "power_available",
+      "Offsite power remains available",
+      "The upset is not presenting like a LoOP because electrical availability remains normal.",
+      "moderate",
+      [],
+      ["offsite_power_available"],
+    );
+  }
+
+  if (Boolean(plant_state.reactor_trip_active)) {
+    score += 1.05;
+    pushEvidence(
+      evidence,
+      "trip_active",
+      "Trip is active",
+      "Protection has actuated as part of the steam-isolation picture.",
+      "strong",
+      ["ALM_REACTOR_TRIP_ACTIVE"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["reactor_trip_active"],
+    );
+  }
+
+  if (alarm_ids.has("ALM_MAIN_STEAM_FLOW_MISMATCH")) {
+    score += 1.1;
+    pushEvidence(
+      evidence,
+      "steam_mismatch",
+      "Steam-path mismatch alarm active",
+      "Main steam behavior no longer matches the expected power picture.",
+      "strong",
+      ["ALM_MAIN_STEAM_FLOW_MISMATCH"],
+      ["main_steam_flow_pct", "reactor_power_pct"],
+    );
+  }
+
+  if (alarm_ids.has("ALM_TURBINE_OUTPUT_LOW")) {
+    score += 0.8;
+    pushEvidence(
+      evidence,
+      "turbine_collapse",
+      "Turbine output collapsed",
+      "Generation collapse supports the steam-path isolation picture without pointing to an electrical initiating event.",
+      "moderate",
+      ["ALM_TURBINE_OUTPUT_LOW"],
+      ["turbine_output_mwe"],
+    );
+  }
+
+  return { score, evidence };
+}
+
+function scoreAlternateHeatSinkGap(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+
+  if (alarm_ids.has("ALM_CONDENSER_HEAT_SINK_LOST")) {
+    score += 1.25;
+    pushEvidence(
+      evidence,
+      "sink_lost",
+      "Normal condenser sink lost",
+      "The normal post-trip heat sink is unavailable, so alternate cooling must be established quickly.",
+      "strong",
+      ["ALM_CONDENSER_HEAT_SINK_LOST"],
+      ["condenser_heat_sink_available"],
+    );
+  }
+
+  if (alarm_ids.has("ALM_ISOLATION_CONDENSER_FLOW_LOW")) {
+    score += 1.35;
+    pushEvidence(
+      evidence,
+      "ic_low",
+      "IC flow remains low",
+      "The alternate cooling path is not yet carrying enough of the bounded recovery burden.",
+      "strong",
+      ["ALM_ISOLATION_CONDENSER_FLOW_LOW"],
+      ["isolation_condenser_flow_pct"],
+    );
+  }
+
+  if (Number(plant_state.vessel_pressure_mpa) > 7.24) {
+    score += 0.55;
+  }
+
+  return { score, evidence };
+}
+
+function scoreIsolationRecoveryLag(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+  const icFlow = Number(plant_state.isolation_condenser_flow_pct);
+
+  if (icFlow < 56) {
+    score += Math.min((56 - icFlow) / 18, 0.9);
+    pushEvidence(
+      evidence,
+      "ic_recovery_lag",
+      "IC recovery is still lagging",
+      `Isolation condenser flow is ${icFlow.toFixed(1)}% rated while pressure consequences are still forming.`,
+      icFlow < 35 ? "strong" : "moderate",
+      ["ALM_ISOLATION_CONDENSER_FLOW_LOW"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["isolation_condenser_flow_pct"],
+    );
+  }
+
+  if (Number(plant_state.vessel_pressure_mpa) > 7.38) {
+    score += 0.75;
+    pushEvidence(
+      evidence,
+      "pressure_support",
+      "Pressure is still elevated",
+      "The recovery branch is lagging the current pressure picture.",
+      "moderate",
+      ["ALM_RPV_PRESSURE_HIGH"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["vessel_pressure_mpa"],
+    );
+  }
+
+  if (Number(plant_state.containment_pressure_kpa) > 105) {
+    score += 0.45;
+  }
+
+  return { score, evidence };
+}
+
+function scorePressureConsequenceEscalation(
+  plant_state: PlantStateSnapshot,
+  alarm_ids: Set<string>,
+): { score: number; evidence: HypothesisEvidence[] } {
+  const evidence: HypothesisEvidence[] = [];
+  let score = 0;
+  const containment = Number(plant_state.containment_pressure_kpa);
+
+  if (alarm_ids.has("ALM_RPV_PRESSURE_HIGH")) {
+    score += 1.1;
+    pushEvidence(
+      evidence,
+      "pressure_high",
+      "Pressure high alarm active",
+      "The isolation upset has moved into a direct pressure-management problem.",
+      "strong",
+      ["ALM_RPV_PRESSURE_HIGH"],
+      ["vessel_pressure_mpa"],
+    );
+  }
+
+  if (Boolean(plant_state.safety_relief_valve_open)) {
+    score += 0.95;
+    pushEvidence(
+      evidence,
+      "srv_open",
+      "SRV relief is active",
+      "Relief is opening, which means the event is no longer staying inside the clean recovery band.",
+      "strong",
+      ["ALM_SRV_STUCK_OPEN"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["safety_relief_valve_open"],
+    );
+  }
+
+  if (containment > 106) {
+    score += 0.8;
+    pushEvidence(
+      evidence,
+      "containment_rise",
+      "Containment pressure is rising",
+      `Containment pressure is ${containment.toFixed(1)} kPa, which signals a pressure-consequence branch is developing.`,
+      containment > 110 ? "strong" : "moderate",
+      ["ALM_CONTAINMENT_PRESSURE_HIGH"].filter((alarm_id) => alarm_ids.has(alarm_id)),
+      ["containment_pressure_kpa"],
+    );
+  }
+
+  return { score, evidence };
+}
+
 function getHypothesisCatalog(runtime_profile_id: ScenarioRuntimeProfileId): HypothesisConfig[] {
   switch (runtime_profile_id) {
+    case "main_steam_isolation_upset":
+      return mainSteamIsolationHypothesisCatalog;
     case "loss_of_offsite_power_sbo":
       return lossOfOffsitePowerHypothesisCatalog;
     case "feedwater_degradation":
@@ -520,7 +742,12 @@ function buildScoredHypotheses(
   const alarm_ids = new Set(alarm_set.active_alarm_ids);
   const raw_scores = new Map<string, { score: number; evidence: HypothesisEvidence[] }>();
 
-  if (runtime_profile_id === "loss_of_offsite_power_sbo") {
+  if (runtime_profile_id === "main_steam_isolation_upset") {
+    raw_scores.set("hyp_main_steam_isolation_upset", scoreMainSteamIsolationUpset(plant_state, alarm_ids));
+    raw_scores.set("hyp_alternate_heat_sink_gap", scoreAlternateHeatSinkGap(plant_state, alarm_ids));
+    raw_scores.set("hyp_isolation_recovery_lag", scoreIsolationRecoveryLag(plant_state, alarm_ids));
+    raw_scores.set("hyp_pressure_consequence_escalation", scorePressureConsequenceEscalation(plant_state, alarm_ids));
+  } else if (runtime_profile_id === "loss_of_offsite_power_sbo") {
     raw_scores.set("hyp_loss_of_offsite_power", scoreLossOfOffsitePower(plant_state, alarm_ids));
     raw_scores.set("hyp_decay_heat_removal_gap", scoreDecayHeatRemovalGap(plant_state, alarm_ids));
     raw_scores.set("hyp_station_blackout_progression", scoreStationBlackoutProgression(plant_state, alarm_ids));

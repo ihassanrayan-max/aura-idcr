@@ -158,6 +158,10 @@ export function stepPlantTwin(
   delta_time_sec: number,
   runtime_profile_id: ScenarioRuntimeProfileId = "feedwater_degradation",
 ): { plant_state: PlantStateSnapshot; internal_state: PlantTwinInternalState } {
+  if (runtime_profile_id === "main_steam_isolation_upset") {
+    return stepMainSteamIsolationTwin(current_state, internal_state, delta_time_sec);
+  }
+
   if (runtime_profile_id === "loss_of_offsite_power_sbo") {
     return stepLossOfOffsitePowerTwin(current_state, internal_state, delta_time_sec);
   }
@@ -275,6 +279,101 @@ export function stepPlantTwin(
       condenser_backpressure_kpa: Number(condenser_backpressure_kpa.toFixed(2)),
       containment_pressure_kpa: Number(containment_pressure_kpa.toFixed(2)),
       dc_bus_soc_pct: Number(dc_bus_soc_pct.toFixed(2)),
+      reactor_trip_active,
+      safety_relief_valve_open,
+    },
+    internal_state: next_internal,
+  };
+}
+
+function stepMainSteamIsolationTwin(
+  current_state: PlantStateSnapshot,
+  internal_state: PlantTwinInternalState,
+  delta_time_sec: number,
+): { plant_state: PlantStateSnapshot; internal_state: PlantTwinInternalState } {
+  const previous = { ...createEmptyPlantState(), ...current_state };
+  const next_internal = { ...internal_state };
+  const dt = delta_time_sec;
+  const offsite_power_available = Boolean(previous.offsite_power_available);
+  const condenser_heat_sink_available = Boolean(previous.condenser_heat_sink_available);
+  const reactor_trip_active = Boolean(previous.reactor_trip_active) || !condenser_heat_sink_available;
+  const ic_target =
+    Boolean(previous.isolation_condenser_available) && reactor_trip_active
+      ? next_internal.isolation_condenser_manual_setpoint_pct
+      : 0;
+  const isolation_condenser_flow_pct = clamp(
+    numericValue(previous.isolation_condenser_flow_pct) + (ic_target - numericValue(previous.isolation_condenser_flow_pct)) * 0.38,
+    0,
+    100,
+  );
+  const reactor_power_pct = reactor_trip_active
+    ? clamp(numericValue(previous.reactor_power_pct) - (0.62 + isolation_condenser_flow_pct * 0.0038) * dt, 8, 100)
+    : clamp(numericValue(previous.reactor_power_pct) + (70 - numericValue(previous.reactor_power_pct)) * 0.05, 8, 100);
+  const steam_target = reactor_trip_active
+    ? clamp(reactor_power_pct - 26 - isolation_condenser_flow_pct * 0.12, 10, 60)
+    : clamp(reactor_power_pct, 10, 100);
+  const main_steam_flow_pct = clamp(
+    numericValue(previous.main_steam_flow_pct) + (steam_target - numericValue(previous.main_steam_flow_pct)) * 0.34,
+    8,
+    100,
+  );
+  const pressure_drive =
+    (condenser_heat_sink_available ? -0.025 : 0.075) +
+    (main_steam_flow_pct < 28 ? 0.012 : 0.003) -
+    isolation_condenser_flow_pct * 0.00155 -
+    (reactor_trip_active ? 0.01 : 0);
+  const projected_pressure = clamp(numericValue(previous.vessel_pressure_mpa) + pressure_drive * dt, 6.25, 8.5);
+  const safety_relief_valve_open =
+    projected_pressure > 7.58 ||
+    (Boolean(previous.safety_relief_valve_open) && projected_pressure > 7.32);
+  const vessel_pressure_mpa = clamp(projected_pressure - (safety_relief_valve_open ? 0.065 * dt : 0), 6.25, 8.2);
+  const feedwater_flow_pct = clamp(
+    numericValue(previous.feedwater_flow_pct) + (68 - numericValue(previous.feedwater_flow_pct)) * 0.08,
+    58,
+    78,
+  );
+  const vessel_water_level_m = clamp(
+    numericValue(previous.vessel_water_level_m) +
+      ((feedwater_flow_pct - main_steam_flow_pct) * 0.00045 - (safety_relief_valve_open ? 0.009 : 0.003)) * dt,
+    6.6,
+    8.0,
+  );
+  const condenser_backpressure_kpa = clamp(
+    condenser_heat_sink_available
+      ? numericValue(previous.condenser_backpressure_kpa) + (12 - numericValue(previous.condenser_backpressure_kpa)) * 0.28
+      : numericValue(previous.condenser_backpressure_kpa) + 0.24 * dt,
+    10,
+    24,
+  );
+  const turbine_output_mwe = clamp(
+    numericValue(previous.turbine_output_mwe) + (12 - numericValue(previous.turbine_output_mwe)) * 0.52,
+    0,
+    240,
+  );
+  const containment_pressure_kpa = clamp(
+    numericValue(previous.containment_pressure_kpa) +
+      ((safety_relief_valve_open ? 0.28 : -0.02) + (vessel_pressure_mpa > 7.42 ? 0.03 : 0.01) - isolation_condenser_flow_pct * 0.0008) *
+        dt,
+    98,
+    118,
+  );
+  const dc_bus_soc_pct = clamp(numericValue(previous.dc_bus_soc_pct), 0, 100);
+
+  return {
+    plant_state: {
+      ...previous,
+      reactor_power_pct: Number(reactor_power_pct.toFixed(2)),
+      vessel_water_level_m: Number(vessel_water_level_m.toFixed(3)),
+      vessel_pressure_mpa: Number(vessel_pressure_mpa.toFixed(3)),
+      main_steam_flow_pct: Number(main_steam_flow_pct.toFixed(2)),
+      feedwater_flow_pct: Number(feedwater_flow_pct.toFixed(2)),
+      turbine_output_mwe: Number(turbine_output_mwe.toFixed(2)),
+      condenser_heat_sink_available,
+      condenser_backpressure_kpa: Number(condenser_backpressure_kpa.toFixed(2)),
+      isolation_condenser_flow_pct: Number(isolation_condenser_flow_pct.toFixed(2)),
+      containment_pressure_kpa: Number(containment_pressure_kpa.toFixed(2)),
+      dc_bus_soc_pct: Number(dc_bus_soc_pct.toFixed(2)),
+      offsite_power_available,
       reactor_trip_active,
       safety_relief_valve_open,
     },

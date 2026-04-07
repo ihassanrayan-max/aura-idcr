@@ -6,6 +6,7 @@ import type {
 } from "../contracts/aura";
 import { scnAlarmCascadeRootCause } from "./scn_alarm_cascade_root_cause";
 import { scnLossOfOffsitePowerSbo } from "./scn_loss_of_offsite_power_sbo";
+import { scnMainSteamIsolationUpset } from "./scn_main_steam_isolation_upset";
 
 export type ScenarioCatalogEntry = {
   definition: ScenarioDefinition;
@@ -54,6 +55,29 @@ const scenarioCatalogEntries: ScenarioCatalogEntry[] = [
           unit_label: "% rated",
           apply_button_label: "Apply IC alignment",
           reason_note: "Manual isolation-condenser alignment request from the bounded HMI.",
+        },
+      ],
+    },
+  },
+  {
+    definition: scnMainSteamIsolationUpset,
+    runtime_profile_id: "main_steam_isolation_upset",
+    ui_control_schema: {
+      title: "Manual Control Input",
+      helper_text:
+        "The bounded operator action for this scenario is alternate heat-sink establishment through isolation-condenser demand alignment.",
+      controls: [
+        {
+          control_id: "main-steam-isolation-ic-demand",
+          label: "Isolation Condenser Demand Target",
+          action_id: "act_adjust_isolation_condenser",
+          min: 0,
+          max: 100,
+          step: 1,
+          default_value: 72,
+          unit_label: "% rated",
+          apply_button_label: "Apply IC recovery alignment",
+          reason_note: "Manual isolation-condenser recovery request for the bounded steam-isolation scenario.",
         },
       ],
     },
