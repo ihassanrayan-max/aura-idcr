@@ -34,10 +34,16 @@ describe("computeKpiSummary", () => {
         requires_confirmation: false,
         override_allowed: false,
       }),
+      evt("validation_demo_marker_recorded", 26, { marker_kind: "hard_prevent_demonstrated" }),
       evt("alarm_set_updated", 30, { active_alarm_count: 8, active_alarm_cluster_count: 2 }),
       evt("reasoning_snapshot_published", 35, { top_hypothesis_id: "hyp_a" }),
       evt("reasoning_snapshot_published", 40, { top_hypothesis_id: "hyp_a" }),
       evt("reasoning_snapshot_published", 45, { top_hypothesis_id: "hyp_a" }),
+      evt("supervisor_override_action_applied", 48, {
+        action_request_id: "a1",
+        demo_research_only: true,
+      }),
+      evt("validation_demo_marker_recorded", 49, { marker_kind: "supervisor_override_demonstrated" }),
       evt("operator_action_applied", 50, {
         action_id: "act_adjust_feedwater",
         action_class: "critical",
@@ -71,6 +77,8 @@ describe("computeKpiSummary", () => {
     expect(summary.metrics.find((m) => m.kpi_id === "workload_peak_index")?.value).toBe(72);
     expect(summary.metrics.find((m) => m.kpi_id === "harmful_actions_prevented_count")?.value).toBe(1);
     expect(summary.metrics.find((m) => m.kpi_id === "critical_action_error_rate")?.value).toBe(0.5);
+    expect(summary.metrics.find((m) => m.kpi_id === "supervisor_override_approved_count")?.value).toBe(1);
+    expect(summary.metrics.find((m) => m.kpi_id === "validator_demo_checkpoints_completed")?.value).toBe(2);
   });
 
   it("marks completeness partial without terminal outcome", () => {

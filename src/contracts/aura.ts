@@ -242,6 +242,31 @@ export type PendingActionConfirmation = {
   validation_result: ActionValidationResult;
 };
 
+export type PendingSupervisorOverrideStatus = "available" | "requested";
+
+export type PendingSupervisorOverride = {
+  action_request: ActionRequest;
+  validation_result: ActionValidationResult;
+  request_status: PendingSupervisorOverrideStatus;
+  blocked_at_sim_time_sec: number;
+  requested_at_sim_time_sec?: number;
+  request_note?: string;
+  demo_research_only: true;
+};
+
+export type ValidationDemoMarkerKind =
+  | "soft_warning_demonstrated"
+  | "hard_prevent_demonstrated"
+  | "supervisor_override_demonstrated";
+
+export type ValidationDemoMarkerState = {
+  marker_kind: ValidationDemoMarkerKind;
+  demonstrated: boolean;
+  first_demonstrated_at_sim_time_sec?: number;
+};
+
+export type ValidationDemoState = Record<ValidationDemoMarkerKind, ValidationDemoMarkerState>;
+
 export type HypothesisEvidence = {
   evidence_id: string;
   label: string;
@@ -376,6 +401,10 @@ export type SessionLogEventType =
   | "action_requested"
   | "action_validated"
   | "action_confirmation_recorded"
+  | "supervisor_override_requested"
+  | "supervisor_override_decided"
+  | "supervisor_override_action_applied"
+  | "validation_demo_marker_recorded"
   | "operator_action_applied"
   | "diagnosis_committed"
   | "scenario_outcome_recorded"
@@ -455,6 +484,7 @@ export type CompletedSessionReviewMilestoneKind =
   | "diagnosis"
   | "support_escalation"
   | "validator_intervention"
+  | "supervisor_override"
   | "operator_action"
   | "terminal_outcome";
 
@@ -662,6 +692,8 @@ export type SessionSnapshot = {
   executed_actions: ExecutedAction[];
   last_validation_result?: ActionValidationResult;
   pending_action_confirmation?: PendingActionConfirmation;
+  pending_supervisor_override?: PendingSupervisorOverride;
+  validation_demo_state: ValidationDemoState;
   outcome?: ScenarioOutcome;
   kpi_summary?: KpiSummary;
   /** Present only after a terminal outcome; derived deterministically from canonical logs + KPI. */

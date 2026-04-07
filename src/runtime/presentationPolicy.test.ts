@@ -2,6 +2,7 @@ import type {
   ActionRequest,
   ActionValidationResult,
   PendingActionConfirmation,
+  PendingSupervisorOverride,
   SupportMode,
   SupportPolicySnapshot,
   SupportRefinementSnapshot,
@@ -75,6 +76,27 @@ function makePendingConfirmation(): PendingActionConfirmation {
   };
 }
 
+function makePendingSupervisorOverride(): PendingSupervisorOverride {
+  const pending = makePendingConfirmation();
+  return {
+    action_request: {
+      ...pending.action_request,
+      action_request_id: "actreq_0003",
+      requested_value: 70,
+    },
+    validation_result: {
+      ...makeValidationResult("hard_prevent"),
+      override_allowed: true,
+      reason_code: "reduced_feedwater_during_escalation",
+    },
+    request_status: "requested",
+    blocked_at_sim_time_sec: 25,
+    requested_at_sim_time_sec: 25,
+    request_note: "Bounded demo request",
+    demo_research_only: true,
+  };
+}
+
 function buildPolicy(mode: SupportMode, overrides?: Partial<Parameters<typeof buildPresentationPolicy>[0]>) {
   return buildPresentationPolicy({
     session_mode: "adaptive",
@@ -118,6 +140,22 @@ describe("buildPresentationPolicy", () => {
     expect(policy.status_tone).toBe("alert");
     expect(policy.validator_priority).toBe("critical");
     expect(policy.support_section_order.slice(0, 3)).toEqual(["mode", "guardrails", "watch"]);
+  });
+
+  it("surfaces pending supervisor review as the top validator state", () => {
+    const policy = buildPolicy("protected_response", {
+      last_validation_result: {
+        ...makeValidationResult("hard_prevent"),
+        override_allowed: true,
+      },
+      pending_supervisor_override: makePendingSupervisorOverride(),
+    });
+
+    expect(policy.validation_status_label).toBe("Supervisor override review pending");
+    expect(policy.validator_should_surface).toBe(true);
+    expect(policy.validator_priority).toBe("critical");
+    expect(policy.supervisor_override_summary).toMatch(/waiting for a supervisor decision/i);
+    expect(policy.validator_mode_summary).toMatch(/review is pending/i);
   });
 });
 

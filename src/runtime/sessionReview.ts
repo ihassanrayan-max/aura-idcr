@@ -27,6 +27,10 @@ const KEY_EVENT_TYPES: ReadonlySet<SessionLogEventType> = new Set([
   "action_requested",
   "action_validated",
   "action_confirmation_recorded",
+  "supervisor_override_requested",
+  "supervisor_override_decided",
+  "supervisor_override_action_applied",
+  "validation_demo_marker_recorded",
   "operator_action_applied",
   "scenario_outcome_recorded",
   "session_ended",
@@ -76,9 +80,7 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
       const aligned = p.matches_expected_root_cause === true;
       return {
         title: "Diagnosis committed",
-        summary: id
-          ? `${id}${aligned ? " (aligned with scenario driver)" : ""}.`
-          : "Dominant hypothesis committed to the log.",
+        summary: id ? `${id}${aligned ? " (aligned with scenario driver)" : ""}.` : "Dominant hypothesis committed to the log.",
       };
     }
     case "support_mode_changed": {
@@ -87,7 +89,7 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
       const reason = typeof p.trigger_reason === "string" ? p.trigger_reason : "";
       return {
         title: "Assistance mode changed",
-        summary: [from && to ? `${from} → ${to}` : to || from || "Support mode updated", reason && `— ${reason}`]
+        summary: [from && to ? `${from} -> ${to}` : to || from || "Support mode updated", reason && `- ${reason}`]
           .filter(Boolean)
           .join(" "),
       };
@@ -115,12 +117,41 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
         summary: "Operator confirmed proceeding past a soft warning.",
       };
     }
+    case "supervisor_override_requested": {
+      return {
+        title: "Supervisor override requested",
+        summary: "Operator requested bounded demo/research supervisor review for one blocked action.",
+      };
+    }
+    case "supervisor_override_decided": {
+      const decision = typeof p.decision === "string" ? p.decision : "";
+      return {
+        title: "Supervisor override decided",
+        summary: decision ? `Supervisor decision: ${decision}.` : "Supervisor review decision recorded.",
+      };
+    }
+    case "supervisor_override_action_applied": {
+      return {
+        title: "Supervisor override applied",
+        summary: "One blocked action was released through the bounded demo/research supervisor path.",
+      };
+    }
+    case "validation_demo_marker_recorded": {
+      const marker_kind = typeof p.marker_kind === "string" ? p.marker_kind : "";
+      return {
+        title: "Validator demo checkpoint recorded",
+        summary: marker_kind ? `Checkpoint: ${marker_kind}.` : "A validator demo checkpoint was recorded.",
+      };
+    }
     case "operator_action_applied": {
       const actionId = typeof p.action_id === "string" ? p.action_id : "";
       const correctness = typeof p.correctness_label === "string" ? p.correctness_label : "";
+      const overrideApplied = p.override_applied === true ? " · override applied" : "";
       return {
         title: "Operator action applied to plant",
-        summary: [actionId && `Action: ${actionId}`, correctness && `label: ${correctness}`].filter(Boolean).join(" · ") || "Action applied.",
+        summary:
+          ([actionId && `Action: ${actionId}`, correctness && `label: ${correctness}`].filter(Boolean).join(" · ") || "Action applied.") +
+          overrideApplied,
       };
     }
     case "scenario_outcome_recorded": {
@@ -206,10 +237,7 @@ function buildMilestones(events: SessionLogEvent[]): CompletedSessionReviewMiles
   }
 
   const escalation = events.find(
-    (e) =>
-      e.event_type === "support_mode_changed" &&
-      typeof e.payload.to_mode === "string" &&
-      e.payload.to_mode === "protected_response",
+    (e) => e.event_type === "support_mode_changed" && typeof e.payload.to_mode === "string" && e.payload.to_mode === "protected_response",
   );
   const anySupport = events.find((e) => e.event_type === "support_mode_changed");
   const supportMilestone = escalation ?? anySupport;
@@ -241,6 +269,18 @@ function buildMilestones(events: SessionLogEvent[]): CompletedSessionReviewMiles
       label: "Validator intervention",
       detail: `Validation result: ${o}.`,
       source_event_id: intervention.event_id,
+    });
+  }
+
+  const overrideApplied = events.find((e) => e.event_type === "supervisor_override_action_applied");
+  if (overrideApplied) {
+    milestones.push({
+      milestone_id: `ms_${overrideApplied.event_id}`,
+      kind: "supervisor_override",
+      sim_time_sec: overrideApplied.sim_time_sec,
+      label: "Supervisor override applied",
+      detail: "A bounded demo/research supervisor override released one blocked action.",
+      source_event_id: overrideApplied.event_id,
     });
   }
 
@@ -310,17 +350,16 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
     });
   }
 
-  const prevents = events.filter((e) => {
-    if (e.event_type !== "action_validated") return false;
-    return e.payload.outcome === "hard_prevent" && e.payload.prevented_harm === true;
-  });
+  const prevents = events.filter((e) => e.event_type === "action_validated" && e.payload.outcome === "hard_prevent" && e.payload.prevented_harm === true);
   const soft = events.filter((e) => e.event_type === "action_validated" && e.payload.outcome === "soft_warning");
-  if (prevents.length > 0 || soft.length > 0) {
+  const overrides = events.filter((e) => e.event_type === "supervisor_override_action_applied");
+  const demoMarkers = events.filter((e) => e.event_type === "validation_demo_marker_recorded");
+  if (prevents.length > 0 || soft.length > 0 || overrides.length > 0) {
     highlights.push({
       highlight_id: "hl_intervention",
       kind: "intervention",
       label: "Interceptor activity",
-      detail: `Hard prevents (harm-marked): ${prevents.length}. Soft warnings: ${soft.length}.`,
+      detail: `Hard prevents (harm-marked): ${prevents.length}. Soft warnings: ${soft.length}. Supervisor overrides applied: ${overrides.length}. Demo checkpoints completed: ${demoMarkers.length}/3.`,
     });
   }
 
@@ -343,7 +382,7 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
     highlight_id: "hl_outcome",
     kind: "outcome",
     label: "Run result",
-    detail: `${outcome.outcome.toUpperCase()} at t+${outcome.sim_time_sec}s — ${outcome.message}`,
+    detail: `${outcome.outcome.toUpperCase()} at t+${outcome.sim_time_sec}s - ${outcome.message}`,
   });
 
   return highlights;

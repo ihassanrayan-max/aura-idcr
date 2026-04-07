@@ -79,6 +79,12 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
     return payload.outcome === "hard_prevent" && payload.prevented_harm === true;
   });
   const harmful_actions_prevented_count = harmful_prevented.length;
+  const supervisor_override_approved_count = events.filter(
+    (event) => event.event_type === "supervisor_override_action_applied",
+  ).length;
+  const validator_demo_checkpoints_completed = events.filter(
+    (event) => event.event_type === "validation_demo_marker_recorded",
+  ).length;
 
   const operator_snapshots = events.filter((event) => event.event_type === "operator_state_snapshot_recorded");
   const workload_values = operator_snapshots.map((event) => {
@@ -205,6 +211,24 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "ratio",
       "internal_only",
       ["action_validated"],
+    ),
+    metric(
+      "supervisor_override_approved_count",
+      "Supervisor overrides applied",
+      supervisor_override_approved_count,
+      "measured",
+      "count",
+      "internal_only",
+      ["supervisor_override_action_applied"],
+    ),
+    metric(
+      "validator_demo_checkpoints_completed",
+      "Validator demo checkpoints completed",
+      validator_demo_checkpoints_completed,
+      "measured",
+      "count",
+      "internal_only",
+      ["validation_demo_marker_recorded"],
     ),
   ];
 

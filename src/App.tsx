@@ -14,6 +14,7 @@ import { buildSessionRunComparison } from "./runtime/sessionComparison";
 import { buildComparisonReportArtifact, buildSessionAfterActionReport } from "./runtime/reportArtifacts";
 import { downloadReportArtifact } from "./runtime/reportExport";
 import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
+import { getValidatorDemoPresets } from "./runtime/actionValidator";
 import { formatSupportModeLabel } from "./runtime/supportModePolicy";
 import {
   buildPresentationPolicy,
@@ -488,6 +489,7 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   const [expandedClusterIds, setExpandedClusterIds] = useState<string[]>([]);
   const [selectedSessionMode, setSelectedSessionMode] = useState<SessionMode>("adaptive");
   const [selectedScenarioId, setSelectedScenarioId] = useState(snapshot.scenario.scenario_id);
+  const [supervisorOverrideNote, setSupervisorOverrideNote] = useState("");
 
   useEffect(() => {
     setSelectedSessionMode(snapshot.session_mode);
@@ -517,6 +519,10 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     }
   }, [snapshot.outcome, snapshot.session_id]);
 
+  useEffect(() => {
+    setSupervisorOverrideNote("");
+  }, [snapshot.pending_supervisor_override?.action_request.action_request_id, snapshot.pending_supervisor_override?.request_status]);
+
   const activeAlarmIds = useMemo(
     () => new Set(snapshot.alarm_set.active_alarm_ids),
     [snapshot.alarm_set.active_alarm_ids],
@@ -533,7 +539,9 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
   const pinnedCriticalAlarmIds = new Set(snapshot.support_policy.critical_visibility.pinned_alarm_ids);
   const pinnedCriticalAlarms = snapshot.alarm_set.active_alarms.filter((alarm) => pinnedCriticalAlarmIds.has(alarm.alarm_id));
   const pendingConfirmation = snapshot.pending_action_confirmation;
-  const actionConfirmationPending = Boolean(pendingConfirmation);
+  const pendingSupervisorOverride = snapshot.pending_supervisor_override;
+  const actionConfirmationPending =
+    Boolean(pendingConfirmation) || pendingSupervisorOverride?.request_status === "requested";
   const lastValidation = snapshot.last_validation_result;
   const presentationPolicy = useMemo(
     () =>
@@ -544,11 +552,13 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
         support_refinement: snapshot.support_refinement,
         last_validation_result: snapshot.last_validation_result,
         pending_action_confirmation: snapshot.pending_action_confirmation,
+        pending_supervisor_override: snapshot.pending_supervisor_override,
       }),
     [
       snapshot.session_mode,
       snapshot.last_validation_result,
       snapshot.pending_action_confirmation,
+      snapshot.pending_supervisor_override,
       snapshot.support_mode,
       snapshot.support_policy,
       snapshot.support_refinement,
@@ -658,8 +668,22 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     });
   }
 
+  function triggerValidationDemoPreset(control: ScenarioControlRangeSchema, requestedValue: number, label: string): void {
+    setControlValues((current) => ({
+      ...current,
+      [control.control_id]: requestedValue,
+    }));
+    store.requestAction({
+      action_id: control.action_id,
+      requested_value: requestedValue,
+      ui_region: "plant_mimic",
+      reason_note: `${label} demo preset for ${snapshot.runtime_profile_id}`,
+    });
+  }
+
   function renderManualControl(control: ScenarioControlRangeSchema) {
     const controlValue = controlValues[control.control_id] ?? control.default_value;
+    const validatorDemoPresets = getValidatorDemoPresets(snapshot.runtime_profile_id, control.action_id);
 
     return (
       <div key={control.control_id} className="control-block">
@@ -702,6 +726,32 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             {control.apply_button_label}
           </button>
         </div>
+        {validatorDemoPresets.length > 0 ? (
+          <div className="demo-preset-group">
+            <span className="metric-label">Validator demo presets</span>
+            <div className="demo-preset-row">
+              {validatorDemoPresets.map((preset) => (
+                <button
+                  key={preset.preset_id}
+                  type="button"
+                  className="ghost-button"
+                  disabled={actionConfirmationPending}
+                  onClick={() => triggerValidationDemoPreset(control, preset.requested_value, preset.label)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <ul className="demo-preset-list">
+              {validatorDemoPresets.map((preset) => (
+                <li key={`${control.control_id}-${preset.preset_id}`}>
+                  <strong>{preset.label}</strong>: {preset.requested_value}
+                  {control.unit_label ? ` ${control.unit_label}` : ""} · {preset.description}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1214,7 +1264,19 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
                 <span className={`badge ${lastValidation.prevented_harm ? "alert" : "neutral"}`}>
                   {lastValidation.prevented_harm ? "Prevented-harm signal: yes" : "Prevented-harm signal: no"}
                 </span>
+                {lastValidation.override_allowed ? <span className="badge neutral">Supervisor review eligible</span> : null}
               </div>
+              {lastValidation.outcome === "hard_prevent" && lastValidation.override_allowed ? (
+                <div className="control-row">
+                  {pendingSupervisorOverride?.request_status === "requested" ? (
+                    <p className="muted">{presentationPolicy.supervisor_override_summary}</p>
+                  ) : (
+                    <button type="button" className="ghost-button" onClick={() => store.requestSupervisorOverrideReview()}>
+                      Request Demo/Research Supervisor Override
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div className="support-explanation-grid">
@@ -1254,6 +1316,53 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
                 : "Structured runtime event stream for replay-ready verification."}
             </p>
           </div>
+          <div className="evaluation-status-card demo-marker-card">
+            <span className="metric-label">Validator demo checklist</span>
+            <ul className="review-highlight-list compact-list">
+              {Object.values(snapshot.validation_demo_state).map((marker) => (
+                <li key={marker.marker_kind}>
+                  <strong>{marker.marker_kind}</strong>: {marker.demonstrated ? "done" : "pending"}
+                </li>
+              ))}
+            </ul>
+          </div>
+          {pendingSupervisorOverride ? (
+            <div className="evaluation-status-card supervisor-override-card" data-testid="supervisor-override-card">
+              <span className="metric-label">Demo/Research Supervisor Override</span>
+              <strong>
+                {pendingSupervisorOverride.request_status === "requested" ? "Decision required" : "Available if requested"}
+              </strong>
+              <p className="muted">
+                Action {actionLabels[pendingSupervisorOverride.action_request.action_id] ?? pendingSupervisorOverride.action_request.action_id}
+                {" · "}reason code {pendingSupervisorOverride.validation_result.reason_code}
+              </p>
+              <p className="muted">{pendingSupervisorOverride.validation_result.explanation}</p>
+              <p className="lane-caution">Demo/Research only. Approval releases one blocked action and does not weaken future validation.</p>
+              {pendingSupervisorOverride.request_status === "requested" ? (
+                <>
+                  <label className="muted" htmlFor="supervisor-override-note">
+                    Supervisor note
+                  </label>
+                  <input
+                    id="supervisor-override-note"
+                    value={supervisorOverrideNote}
+                    onChange={(event) => setSupervisorOverrideNote(event.target.value)}
+                    placeholder="Bounded demo note"
+                  />
+                  <div className="control-row">
+                    <button type="button" onClick={() => store.approvePendingSupervisorOverride(supervisorOverrideNote)}>
+                      Approve one-shot override
+                    </button>
+                    <button type="button" className="ghost-button" onClick={() => store.denyPendingSupervisorOverride(supervisorOverrideNote)}>
+                      Deny override
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="muted">Operator can request review from the hard-prevent validation banner when the demo needs to show bounded human authority.</p>
+              )}
+            </div>
+          ) : null}
           <div className="evaluation-action-bar" data-testid="evaluation-action-bar">
             <div className="evaluation-status-card">
               <span className="metric-label">Session report</span>

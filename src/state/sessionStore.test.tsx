@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import App from "../App";
 import { AuraSessionStore } from "./sessionStore";
 
@@ -55,6 +55,18 @@ function runSuccessfulMainSteamIsolationSession(): AuraSessionStore {
   });
   store.runUntilComplete(80);
   return store;
+}
+
+function advanceUntil(
+  store: AuraSessionStore,
+  predicate: (snapshot: ReturnType<AuraSessionStore["getSnapshot"]>) => boolean,
+  maxTicks = 40,
+): void {
+  let guard = 0;
+  while (!predicate(store.getSnapshot()) && guard < maxTicks) {
+    store.advanceTick();
+    guard += 1;
+  }
 }
 
 function summarizeStore(store: AuraSessionStore) {
@@ -318,6 +330,115 @@ describe("AuraSessionStore", () => {
     expect(snapshot.events.some((event) => event.event_type === "operator_action_applied")).toBe(false);
   });
 
+  it("only exposes supervisor override review for override-eligible hard prevents", () => {
+    const store = new AuraSessionStore({ session_index: 121, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    store.requestAction({
+      action_id: "act_adjust_feedwater",
+      requested_value: 55,
+      ui_region: "plant_mimic",
+      reason_note: "Non-overrideable hard prevent test",
+    });
+
+    const snapshot = store.getSnapshot();
+
+    expect(snapshot.last_validation_result?.outcome).toBe("hard_prevent");
+    expect(snapshot.last_validation_result?.override_allowed).toBe(false);
+    expect(snapshot.pending_supervisor_override).toBeUndefined();
+    expect(store.requestSupervisorOverrideReview("should not be allowed")).toBe(false);
+  });
+
+  it("supports a bounded one-shot supervisor override for eligible hard prevents", () => {
+    const store = new AuraSessionStore({
+      session_index: 122,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    advanceUntil(
+      store,
+      (snapshot) =>
+        Number(snapshot.plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+        Number(snapshot.plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN"),
+      40,
+    );
+
+    const blocked = store.requestAction({
+      action_id: "act_adjust_isolation_condenser",
+      requested_value: 48,
+      ui_region: "plant_mimic",
+      reason_note: "Override-eligible hard prevent test",
+    });
+
+    expect(blocked).toBe(false);
+    expect(store.getSnapshot().pending_supervisor_override?.request_status).toBe("available");
+    expect(store.getSnapshot().validation_demo_state.hard_prevent_demonstrated.demonstrated).toBe(true);
+
+    const requested = store.requestSupervisorOverrideReview("Bounded demo request");
+    expect(requested).toBe(true);
+    expect(store.getSnapshot().pending_supervisor_override?.request_status).toBe("requested");
+
+    const approved = store.approvePendingSupervisorOverride("Supervisor approved bounded demo");
+    const snapshot = store.getSnapshot();
+    const appliedEvents = snapshot.events.filter((event) => event.event_type === "operator_action_applied");
+    const lastAppliedPayload = appliedEvents[appliedEvents.length - 1]?.payload as Record<string, unknown>;
+
+    expect(approved).toBe(true);
+    expect(snapshot.pending_supervisor_override).toBeUndefined();
+    expect(snapshot.executed_actions).toHaveLength(1);
+    expect(snapshot.validation_demo_state.supervisor_override_demonstrated.demonstrated).toBe(true);
+    expect(snapshot.events.some((event) => event.event_type === "supervisor_override_requested")).toBe(true);
+    expect(snapshot.events.some((event) => event.event_type === "supervisor_override_decided")).toBe(true);
+    expect(snapshot.events.some((event) => event.event_type === "supervisor_override_action_applied")).toBe(true);
+    expect(lastAppliedPayload.override_applied).toBe(true);
+  });
+
+  it("supports supervisor override denial without applying the blocked action", () => {
+    const store = new AuraSessionStore({
+      session_index: 123,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    advanceUntil(
+      store,
+      (snapshot) =>
+        Number(snapshot.plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+        Number(snapshot.plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN"),
+      40,
+    );
+
+    store.requestAction({
+      action_id: "act_adjust_isolation_condenser",
+      requested_value: 48,
+      ui_region: "plant_mimic",
+      reason_note: "Override denial test",
+    });
+
+    expect(store.getSnapshot().pending_supervisor_override?.request_status).toBe("available");
+    expect(store.requestSupervisorOverrideReview("Please review")).toBe(true);
+
+    const denied = store.denyPendingSupervisorOverride("Denied for demo");
+    const snapshot = store.getSnapshot();
+    const decisionEvents = snapshot.events.filter((event) => event.event_type === "supervisor_override_decided");
+    const decisionEvent = decisionEvents[decisionEvents.length - 1];
+    const decisionPayload = decisionEvent?.payload as Record<string, unknown>;
+
+    expect(denied).toBe(true);
+    expect(snapshot.pending_supervisor_override).toBeUndefined();
+    expect(snapshot.executed_actions).toHaveLength(0);
+    expect(snapshot.validation_demo_state.supervisor_override_demonstrated.demonstrated).toBe(false);
+    expect(decisionPayload.decision).toBe("denied");
+  });
+
   it("keeps low-concern acknowledgement actions quiet and pass-through", () => {
     const store = new AuraSessionStore({ session_index: 22, tick_duration_sec: 5 });
     const applied = store.requestAction({
@@ -437,6 +558,86 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Validation pending confirmation/i)).toBeInTheDocument();
     expect(screen.getByText(/asking for explicit confirmation before this action proceeds/i)).toBeInTheDocument();
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
+  });
+
+  it("renders validator demo presets beside the bounded manual control", () => {
+    const store = new AuraSessionStore({ session_index: 223, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByText(/Validator demo presets/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Show pass/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Show soft warning/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Show hard prevent/i })).toBeInTheDocument();
+  });
+
+  it("renders the operator-side supervisor override request affordance for eligible hard prevents", () => {
+    const store = new AuraSessionStore({
+      session_index: 224,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    advanceUntil(
+      store,
+      (snapshot) =>
+        Number(snapshot.plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+        Number(snapshot.plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN"),
+      40,
+    );
+
+    store.requestAction({
+      action_id: "act_adjust_isolation_condenser",
+      requested_value: 48,
+      ui_region: "plant_mimic",
+      reason_note: "HMI override affordance test",
+    });
+
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByText(/Supervisor review eligible/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Request Demo\/Research Supervisor Override/i })).toBeInTheDocument();
+    expect(screen.getByText(/Validator demo checklist/i)).toBeInTheDocument();
+  });
+
+  it("renders supervisor decision controls after review has been requested", () => {
+    const store = new AuraSessionStore({
+      session_index: 225,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+    });
+
+    advanceUntil(
+      store,
+      (snapshot) =>
+        Number(snapshot.plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+        Number(snapshot.plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN"),
+      40,
+    );
+
+    store.requestAction({
+      action_id: "act_adjust_isolation_condenser",
+      requested_value: 48,
+      ui_region: "plant_mimic",
+      reason_note: "Supervisor decision controls render test",
+    });
+    store.requestSupervisorOverrideReview("Need bounded demo approval");
+
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByTestId("supervisor-override-card")).toBeInTheDocument();
+    expect(screen.getByText(/Decision required/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Supervisor note/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Approve one-shot override/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Deny override/i })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Supervisor note/i), {
+      target: { value: "Bounded approval note" },
+    });
+    expect(screen.getByDisplayValue("Bounded approval note")).toBeInTheDocument();
   });
 
   it("keeps pass validation quiet while preserving the bounded operator regions", () => {

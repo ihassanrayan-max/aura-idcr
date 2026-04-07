@@ -2,6 +2,7 @@ import type {
   ActionValidationResult,
   FirstResponseItem,
   PendingActionConfirmation,
+  PendingSupervisorOverride,
   SessionMode,
   SupportMode,
   SupportPolicySnapshot,
@@ -34,6 +35,7 @@ export type PresentationPolicy = {
   validator_should_surface: boolean;
   validator_mode_summary: string;
   pending_confirmation_intro: string;
+  supervisor_override_summary: string;
   support_section_order: SupportSectionId[];
   procedure_item_order: "original" | "emphasized_first";
   support_panel_mode_class: string;
@@ -47,6 +49,7 @@ type BuildPresentationPolicyParams = {
   support_refinement: SupportRefinementSnapshot;
   last_validation_result?: ActionValidationResult;
   pending_action_confirmation?: PendingActionConfirmation;
+  pending_supervisor_override?: PendingSupervisorOverride;
 };
 
 function toneForMode(mode: SupportMode): PresentationTone {
@@ -92,10 +95,20 @@ function validationStatus(params: BuildPresentationPolicyParams): {
     };
   }
 
+  if (params.pending_supervisor_override?.request_status === "requested") {
+    return {
+      label: "Supervisor override review pending",
+      summary: "A demo/research supervisor review is pending for one blocked action.",
+      tone: "alert",
+    };
+  }
+
   if (params.last_validation_result?.outcome === "hard_prevent") {
     return {
       label: params.support_mode === "protected_response" ? "Protected validation active" : "Validation block active",
-      summary: "The current action result is blocked and surfaced for immediate operator review.",
+      summary: params.last_validation_result.override_allowed
+        ? "The current action result is blocked and surfaced with a bounded demo/research supervisor-review path."
+        : "The current action result is blocked and surfaced for immediate operator review.",
       tone: "alert",
     };
   }
@@ -131,7 +144,7 @@ function validationStatus(params: BuildPresentationPolicyParams): {
 }
 
 function validatorPriority(params: BuildPresentationPolicyParams): PresentationPriority {
-  if (params.pending_action_confirmation) {
+  if (params.pending_action_confirmation || params.pending_supervisor_override?.request_status === "requested") {
     return params.support_mode === "protected_response" ? "critical" : "priority";
   }
 
@@ -147,7 +160,11 @@ function validatorPriority(params: BuildPresentationPolicyParams): PresentationP
 }
 
 function cautionPriority(params: BuildPresentationPolicyParams): PresentationPriority {
-  if (params.pending_action_confirmation || params.last_validation_result?.outcome === "hard_prevent") {
+  if (
+    params.pending_action_confirmation ||
+    params.pending_supervisor_override?.request_status === "requested" ||
+    params.last_validation_result?.outcome === "hard_prevent"
+  ) {
     return params.support_mode === "protected_response" ? "critical" : "priority";
   }
 
@@ -177,6 +194,10 @@ function validatorModeSummary(params: BuildPresentationPolicyParams): string {
     return `${formatSupportModeLabel(params.support_mode)} is keeping this confirmation visible while preserving access to the storyline, alarms, and procedure lane.`;
   }
 
+  if (params.pending_supervisor_override?.request_status === "requested") {
+    return `${formatSupportModeLabel(params.support_mode)} is keeping the blocked action visible while a demo/research supervisor review is pending.`;
+  }
+
   if (!params.last_validation_result || params.last_validation_result.outcome === "pass") {
     switch (params.support_mode) {
       case "monitoring_support":
@@ -202,6 +223,7 @@ export function buildPresentationPolicy(params: BuildPresentationPolicyParams): 
   const status = validationStatus(params);
   const validator_should_surface =
     Boolean(params.pending_action_confirmation) ||
+    Boolean(params.pending_supervisor_override) ||
     Boolean(params.last_validation_result && params.last_validation_result.outcome !== "pass");
 
   const session_mode_label =
@@ -219,6 +241,12 @@ export function buildPresentationPolicy(params: BuildPresentationPolicyParams): 
     validator_should_surface,
     validator_mode_summary: validatorModeSummary(params),
     pending_confirmation_intro: `${formatSupportModeLabel(params.support_mode)} is asking for explicit confirmation before this action proceeds.`,
+    supervisor_override_summary:
+      params.pending_supervisor_override?.request_status === "requested"
+        ? "Demo/Research Supervisor Override is waiting for a supervisor decision on one blocked action."
+        : params.last_validation_result?.override_allowed
+          ? "A bounded demo/research supervisor-review path is available for this blocked action."
+          : "No supervisor override path is active.",
     support_section_order: supportSectionOrder(params.support_mode),
     procedure_item_order: params.support_mode === "monitoring_support" ? "original" : "emphasized_first",
     support_panel_mode_class: `support-mode-${params.support_mode}`,

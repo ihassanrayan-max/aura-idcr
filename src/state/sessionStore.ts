@@ -6,6 +6,7 @@ import type {
   CombinedRiskSnapshot,
   CompletedSessionReview,
   PendingActionConfirmation,
+  PendingSupervisorOverride,
   ExecutedAction,
   FirstResponseLane,
   LoggedAlarmState,
@@ -24,6 +25,8 @@ import type {
   SupportMode,
   SupportPolicySnapshot,
   SupportRefinementSnapshot,
+  ValidationDemoMarkerKind,
+  ValidationDemoState,
 } from "../contracts/aura";
 import {
   getDefaultScenarioCatalogEntry,
@@ -158,6 +161,23 @@ function criticalEscalationActive(active_alarm_ids: string[]): boolean {
   return ["ALM_RPV_LEVEL_LOW_LOW", "ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].some((alarm_id) =>
     active_alarm_ids.includes(alarm_id),
   );
+}
+
+function createInitialValidationDemoState(): ValidationDemoState {
+  return {
+    soft_warning_demonstrated: {
+      marker_kind: "soft_warning_demonstrated",
+      demonstrated: false,
+    },
+    hard_prevent_demonstrated: {
+      marker_kind: "hard_prevent_demonstrated",
+      demonstrated: false,
+    },
+    supervisor_override_demonstrated: {
+      marker_kind: "supervisor_override_demonstrated",
+      demonstrated: false,
+    },
+  };
 }
 
 export class AuraSessionStore {
@@ -545,6 +565,8 @@ export class AuraSessionStore {
       executed_actions: [],
       last_validation_result: undefined,
       pending_action_confirmation: undefined,
+      pending_supervisor_override: undefined,
+      validation_demo_state: createInitialValidationDemoState(),
       kpi_summary: undefined,
       completed_review: undefined,
       evaluation_capture: { ...this.evaluation_capture },
@@ -804,10 +826,49 @@ export class AuraSessionStore {
     this.emit();
   }
 
+  private markValidationDemoState(
+    marker_kind: ValidationDemoMarkerKind,
+    action_request_id?: string,
+  ): ValidationDemoState {
+    const current_marker = this.snapshot.validation_demo_state[marker_kind];
+    if (current_marker.demonstrated) {
+      return this.snapshot.validation_demo_state;
+    }
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "validation_demo_marker_recorded",
+      source_module: "action_validator",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        marker_kind,
+        demonstrated: true,
+        demo_research_only: true,
+      },
+      trace_refs: [
+        ...(action_request_id ? [{ ref_type: "action_id" as const, ref_value: action_request_id }] : []),
+        { ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id },
+      ],
+    });
+
+    return {
+      ...this.snapshot.validation_demo_state,
+      [marker_kind]: {
+        ...current_marker,
+        demonstrated: true,
+        first_demonstrated_at_sim_time_sec: this.snapshot.sim_time_sec,
+      },
+    };
+  }
+
   private applyAcceptedAction(
     action_request: ActionRequest,
     validation_result: ActionValidationResult,
-    pending_action_confirmation?: PendingActionConfirmation,
+    options?: {
+      pending_action_confirmation?: PendingActionConfirmation;
+      override_applied?: boolean;
+      validation_demo_state?: ValidationDemoState;
+    },
   ): boolean {
     const action_result = applyOperatorAction(this.snapshot.plant_tick.plant_state, this.plant_internal_state, action_request);
     this.plant_internal_state = action_result.internal_state;
@@ -822,6 +883,7 @@ export class AuraSessionStore {
         action_class: action_result.action_class,
         correctness_label: action_result.correctness_label,
         resulting_state_change: action_result.resulting_state_change,
+        ...(options?.override_applied ? { override_applied: true } : {}),
       },
       trace_refs: [{ ref_type: "action_id", ref_value: action_request.action_request_id }],
     });
@@ -835,7 +897,9 @@ export class AuraSessionStore {
       ...this.snapshot,
       executed_actions: [...this.snapshot.executed_actions, executed_action],
       last_validation_result: validation_result,
-      pending_action_confirmation,
+      pending_action_confirmation: options?.pending_action_confirmation,
+      pending_supervisor_override: undefined,
+      validation_demo_state: options?.validation_demo_state ?? this.snapshot.validation_demo_state,
       events: this.logger.list(),
     };
     this.emit();
@@ -883,7 +947,9 @@ export class AuraSessionStore {
     return this.applyAcceptedAction(
       pending_confirmation.action_request,
       pending_confirmation.validation_result,
-      undefined,
+      {
+        pending_action_confirmation: undefined,
+      },
     );
   }
 
@@ -899,8 +965,153 @@ export class AuraSessionStore {
     this.emit();
   }
 
+  requestSupervisorOverrideReview(request_note?: string): boolean {
+    if (
+      this.snapshot.outcome ||
+      this.snapshot.session_mode !== "adaptive" ||
+      this.snapshot.pending_action_confirmation ||
+      !this.snapshot.pending_supervisor_override ||
+      this.snapshot.pending_supervisor_override.request_status !== "available" ||
+      !this.snapshot.pending_supervisor_override.validation_result.override_allowed
+    ) {
+      return false;
+    }
+
+    const trimmed_note = request_note?.trim() || undefined;
+    const next_pending: PendingSupervisorOverride = {
+      ...this.snapshot.pending_supervisor_override,
+      request_status: "requested",
+      requested_at_sim_time_sec: this.snapshot.sim_time_sec,
+      request_note: trimmed_note,
+    };
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "supervisor_override_requested",
+      source_module: "hmi",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_request_id: next_pending.action_request.action_request_id,
+        action_id: next_pending.action_request.action_id,
+        actor_role: "operator",
+        request_status: next_pending.request_status,
+        request_note: trimmed_note,
+        reason_code: next_pending.validation_result.reason_code,
+        demo_research_only: true,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: next_pending.action_request.action_request_id }],
+    });
+
+    this.snapshot = {
+      ...this.snapshot,
+      pending_supervisor_override: next_pending,
+      events: this.logger.list(),
+    };
+    this.emit();
+    return true;
+  }
+
+  approvePendingSupervisorOverride(supervisor_note?: string): boolean {
+    if (
+      this.snapshot.outcome ||
+      this.snapshot.session_mode !== "adaptive" ||
+      this.snapshot.pending_action_confirmation ||
+      !this.snapshot.pending_supervisor_override ||
+      this.snapshot.pending_supervisor_override.request_status !== "requested"
+    ) {
+      return false;
+    }
+
+    const pending_override = this.snapshot.pending_supervisor_override;
+    const trimmed_note = supervisor_note?.trim() || undefined;
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "supervisor_override_decided",
+      source_module: "action_validator",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_request_id: pending_override.action_request.action_request_id,
+        action_id: pending_override.action_request.action_id,
+        actor_role: "shift_supervisor",
+        decision: "approved",
+        supervisor_note: trimmed_note,
+        reason_code: pending_override.validation_result.reason_code,
+        demo_research_only: true,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: pending_override.action_request.action_request_id }],
+    });
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "supervisor_override_action_applied",
+      source_module: "action_validator",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_request_id: pending_override.action_request.action_request_id,
+        action_id: pending_override.action_request.action_id,
+        actor_role: "shift_supervisor",
+        supervisor_note: trimmed_note,
+        reason_code: pending_override.validation_result.reason_code,
+        demo_research_only: true,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: pending_override.action_request.action_request_id }],
+    });
+
+    const validation_demo_state = this.markValidationDemoState(
+      "supervisor_override_demonstrated",
+      pending_override.action_request.action_request_id,
+    );
+
+    return this.applyAcceptedAction(pending_override.action_request, pending_override.validation_result, {
+      override_applied: true,
+      validation_demo_state,
+    });
+  }
+
+  denyPendingSupervisorOverride(supervisor_note?: string): boolean {
+    if (
+      this.snapshot.outcome ||
+      !this.snapshot.pending_supervisor_override ||
+      this.snapshot.pending_supervisor_override.request_status !== "requested"
+    ) {
+      return false;
+    }
+
+    const pending_override = this.snapshot.pending_supervisor_override;
+    const trimmed_note = supervisor_note?.trim() || undefined;
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "supervisor_override_decided",
+      source_module: "action_validator",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        action_request_id: pending_override.action_request.action_request_id,
+        action_id: pending_override.action_request.action_id,
+        actor_role: "shift_supervisor",
+        decision: "denied",
+        supervisor_note: trimmed_note,
+        reason_code: pending_override.validation_result.reason_code,
+        demo_research_only: true,
+      },
+      trace_refs: [{ ref_type: "action_id", ref_value: pending_override.action_request.action_request_id }],
+    });
+
+    this.snapshot = {
+      ...this.snapshot,
+      pending_supervisor_override: undefined,
+      events: this.logger.list(),
+    };
+    this.emit();
+    return true;
+  }
+
   requestAction(params: ActionRequestParams): boolean {
-    if (this.snapshot.outcome || this.snapshot.pending_action_confirmation) {
+    if (
+      this.snapshot.outcome ||
+      this.snapshot.pending_action_confirmation ||
+      this.snapshot.pending_supervisor_override?.request_status === "requested"
+    ) {
       return false;
     }
 
@@ -955,10 +1166,21 @@ export class AuraSessionStore {
     this.publishValidationResult(action_request, validation_result);
 
     if (validation_result.outcome === "hard_prevent") {
+      const validation_demo_state = this.markValidationDemoState("hard_prevent_demonstrated", action_request.action_request_id);
       this.snapshot = {
         ...this.snapshot,
         last_validation_result: validation_result,
         pending_action_confirmation: undefined,
+        pending_supervisor_override: validation_result.override_allowed
+          ? {
+              action_request,
+              validation_result,
+              request_status: "available",
+              blocked_at_sim_time_sec: this.snapshot.sim_time_sec,
+              demo_research_only: true,
+            }
+          : undefined,
+        validation_demo_state,
         events: this.logger.list(),
       };
       this.emit();
@@ -966,6 +1188,7 @@ export class AuraSessionStore {
     }
 
     if (validation_result.outcome === "soft_warning") {
+      const validation_demo_state = this.markValidationDemoState("soft_warning_demonstrated", action_request.action_request_id);
       this.snapshot = {
         ...this.snapshot,
         last_validation_result: validation_result,
@@ -973,13 +1196,17 @@ export class AuraSessionStore {
           action_request,
           validation_result,
         },
+        pending_supervisor_override: undefined,
+        validation_demo_state,
         events: this.logger.list(),
       };
       this.emit();
       return false;
     }
 
-    return this.applyAcceptedAction(action_request, validation_result, undefined);
+    return this.applyAcceptedAction(action_request, validation_result, {
+      pending_action_confirmation: undefined,
+    });
   }
 
   advanceTick(): SessionSnapshot {

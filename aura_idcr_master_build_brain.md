@@ -1104,6 +1104,27 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-06
+- Agent/session: Cluster 3B implementation session
+- Task worked on: Bounded supervisor override workflow, broader validator demonstrability, and additive validator/report visibility across the existing three-scenario runtime
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` with additive pending supervisor-override state, validator demo-marker state, new canonical log event types, and completed-review milestone support while preserving the existing closed-loop contracts.
+  - Refactored `src/runtime/actionValidator.ts` into a bounded scenario/action rule-table pattern for the three already-exposed risky controls, adding clearer pass / soft warning / hard prevent branches plus selected override-eligible contextual hard prevents while keeping absolute-floor hard prevents non-overrideable.
+  - Updated `src/state/sessionStore.ts` so adaptive runs now support a one-shot demo/research supervisor override path for eligible hard prevents, log request / decision / apply events canonically, and record validator demo checkpoints without disturbing the existing soft-warning confirmation flow.
+  - Updated `src/App.tsx`, `src/runtime/presentationPolicy.ts`, and `src/styles.css` so the existing shell now exposes validator demo presets, operator-side supervisor-review affordances, a compact supervisor approval card, and a live validator demo checklist without redesigning the HMI.
+  - Extended `src/runtime/sessionReview.ts`, `src/runtime/sessionComparison.ts`, `src/runtime/reportArtifacts.ts`, and `src/runtime/kpiSummary.ts` so completed review, comparison, report export, and internal KPI views all surface supervisor override usage and validator demo progress as additive audit evidence.
+  - Added and updated focused verification in `src/runtime/actionValidator.test.ts`, `src/runtime/presentationPolicy.test.ts`, `src/runtime/kpiSummary.test.ts`, `src/runtime/sessionComparison.test.ts`, `src/runtime/reportArtifacts.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx`.
+- What remains:
+  - Later Phase 6 stretch items remain intentionally untouched.
+  - No broader action-family expansion, persistent auth, or non-demo override behavior was added.
+- Blockers:
+  - None in repo after verification; `npm test` and `npm run build` still need to run outside the sandbox on this machine because of the local `spawn EPERM` restriction in the Vite toolchain.
+- Next recommended step:
+  - Hold scope unless the human explicitly opens a later bounded cluster beyond Cluster 3B, such as stretch-phase polish or new scenario/control families.
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

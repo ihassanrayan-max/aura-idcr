@@ -17,7 +17,8 @@ const KPI_LOWER_IS_BETTER: Record<string, boolean> = {
   alarm_compression_ratio: true,
   top_cause_stability_pct: false,
   harmful_actions_prevented_count: false,
-};
+  supervisor_override_approved_count: false,
+  };
 
 const MILESTONE_KIND_ORDER: CompletedSessionReviewMilestoneKind[] = [
   "session_start",
@@ -25,6 +26,7 @@ const MILESTONE_KIND_ORDER: CompletedSessionReviewMilestoneKind[] = [
   "diagnosis",
   "support_escalation",
   "validator_intervention",
+  "supervisor_override",
   "operator_action",
   "terminal_outcome",
 ];
@@ -284,11 +286,19 @@ export function buildSessionRunComparison(
   const escA = ac.get("support_escalation") ?? 0;
   const valB = bc.get("validator_intervention") ?? 0;
   const valA = ac.get("validator_intervention") ?? 0;
-  if (escB !== escA || valB !== valA) {
+  const overB = bc.get("supervisor_override") ?? 0;
+  const overA = ac.get("supervisor_override") ?? 0;
+  if (escB !== escA || valB !== valA || overB !== overA) {
     interpretation_lines.push(
-      `Assistance / validation milestones: support_escalation baseline ${escB} vs adaptive ${escA}; validator_intervention baseline ${valB} vs adaptive ${valA}.`,
+      `Assistance / validation milestones: support_escalation baseline ${escB} vs adaptive ${escA}; validator_intervention baseline ${valB} vs adaptive ${valA}; supervisor_override baseline ${overB} vs adaptive ${overA}.`,
     );
   }
+
+  const demoMarkerCount = (review: CompletedSessionReview) =>
+    review.key_events.filter((event) => event.event_type === "validation_demo_marker_recorded").length;
+  interpretation_lines.push(
+    `Validator demo checkpoints: baseline ${demoMarkerCount(baseline)} vs adaptive ${demoMarkerCount(adaptive)}.`,
+  );
 
   interpretation_lines.push(
     `Key events indexed: baseline ${baseline.key_events.length}, adaptive ${adaptive.key_events.length} (bounded replay lists differ if the run paths differ).`,

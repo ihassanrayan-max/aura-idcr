@@ -240,4 +240,65 @@ describe("buildSessionRunComparison", () => {
     expect(stabilization?.favors).toBe("not_comparable");
     expect(Number.isNaN(stabilization?.delta ?? 0)).toBe(true);
   });
+
+  it("carries supervisor override milestones and validator demo counts into interpretation lines", () => {
+    const baseline = makeReview({
+      session_id: "b",
+      session_mode: "baseline",
+      outcome: "success",
+      completion_sim_time_sec: 220,
+    });
+    const adaptive = makeReview({
+      session_id: "a",
+      session_mode: "adaptive",
+      outcome: "success",
+      completion_sim_time_sec: 210,
+    });
+
+    baseline.key_events.push({
+      sequence: 1,
+      source_event_id: "e3",
+      sim_time_sec: 50,
+      event_type: "validation_demo_marker_recorded",
+      title: "Validator demo checkpoint recorded",
+      summary: "Checkpoint: soft_warning_demonstrated.",
+    });
+
+    adaptive.key_events.push(
+      {
+        sequence: 1,
+        source_event_id: "e4",
+        sim_time_sec: 55,
+        event_type: "validation_demo_marker_recorded",
+        title: "Validator demo checkpoint recorded",
+        summary: "Checkpoint: hard_prevent_demonstrated.",
+      },
+      {
+        sequence: 2,
+        source_event_id: "e5",
+        sim_time_sec: 60,
+        event_type: "validation_demo_marker_recorded",
+        title: "Validator demo checkpoint recorded",
+        summary: "Checkpoint: supervisor_override_demonstrated.",
+      },
+    );
+
+    adaptive.milestones.push({
+      milestone_id: "m3",
+      kind: "supervisor_override",
+      sim_time_sec: 60,
+      label: "Supervisor override applied",
+      detail: "A bounded override was used once.",
+      source_event_id: "e6",
+    });
+
+    const comparison = buildSessionRunComparison(baseline, adaptive);
+
+    expect(comparison.milestone_kind_counts.find((row) => row.kind === "supervisor_override")).toMatchObject({
+      baseline_count: 0,
+      adaptive_count: 1,
+    });
+    expect(comparison.interpretation_lines.join(" ")).toMatch(/supervisor_override baseline 0 vs adaptive 1/i);
+    expect(comparison.interpretation_lines.join(" ")).toMatch(/Validator demo checkpoints: baseline 1 vs adaptive 2/i);
+  });
 });

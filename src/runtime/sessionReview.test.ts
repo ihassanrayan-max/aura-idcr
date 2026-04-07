@@ -17,6 +17,39 @@ function runSuccessfulSession(): AuraSessionStore {
   return store;
 }
 
+function runSupervisorOverrideSession(): AuraSessionStore {
+  const store = new AuraSessionStore({
+    session_index: 102,
+    tick_duration_sec: 5,
+    scenario_id: "scn_main_steam_isolation_upset",
+  });
+
+  let guard = 0;
+  while (
+    !(
+      Number(store.getSnapshot().plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+      Number(store.getSnapshot().plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+      store.getSnapshot().alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+      store.getSnapshot().alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN")
+    ) &&
+    guard < 40
+  ) {
+    store.advanceTick();
+    guard += 1;
+  }
+
+  store.requestAction({
+    action_id: "act_adjust_isolation_condenser",
+    requested_value: 48,
+    ui_region: "plant_mimic",
+    reason_note: "Deterministic override review test",
+  });
+  store.requestSupervisorOverrideReview("Bounded demo request");
+  store.approvePendingSupervisorOverride("Bounded supervisor approval");
+  store.runUntilComplete(90);
+  return store;
+}
+
 describe("buildCompletedSessionReview", () => {
   it("is deterministic for the same canonical session data", () => {
     const a = runSuccessfulSession().getSnapshot();
@@ -97,5 +130,30 @@ describe("buildCompletedSessionReview", () => {
       events: s.events,
     });
     expect(review.kpi_summary.kpi_summary_id).toBe(recomputed.kpi_summary_id);
+  });
+
+  it("surfaces supervisor override milestones and demo markers in the completed review", () => {
+    const snapshot = runSupervisorOverrideSession().getSnapshot();
+    const review = buildCompletedSessionReview({
+      session_id: snapshot.session_id,
+      session_mode: snapshot.session_mode,
+      scenario: {
+        scenario_id: snapshot.scenario.scenario_id,
+        version: snapshot.scenario.version,
+        title: snapshot.scenario.title,
+      },
+      outcome: snapshot.outcome!,
+      kpi_summary: snapshot.kpi_summary!,
+      events: snapshot.events,
+    });
+
+    expect(review.key_events.map((event) => event.event_type)).toContain("supervisor_override_requested");
+    expect(review.key_events.map((event) => event.event_type)).toContain("supervisor_override_decided");
+    expect(review.key_events.map((event) => event.event_type)).toContain("supervisor_override_action_applied");
+    expect(review.key_events.map((event) => event.event_type)).toContain("validation_demo_marker_recorded");
+    expect(review.milestones.map((milestone) => milestone.kind)).toContain("supervisor_override");
+    expect(review.highlights.find((highlight) => highlight.kind === "intervention")?.detail).toMatch(
+      /Supervisor overrides applied: 1/i,
+    );
   });
 });

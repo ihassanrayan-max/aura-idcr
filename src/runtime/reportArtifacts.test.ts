@@ -99,6 +99,22 @@ describe("report artifacts", () => {
     adaptive.kpi_summary.metrics = adaptive.kpi_summary.metrics.map((metric) =>
       metric.kpi_id === "diagnosis_time_sec" ? { ...metric, value: 70 } : metric,
     );
+    adaptive.key_events.push({
+      sequence: 1,
+      source_event_id: "evt_override_demo",
+      sim_time_sec: 90,
+      event_type: "validation_demo_marker_recorded",
+      title: "Validator demo checkpoint recorded",
+      summary: "Checkpoint: supervisor_override_demonstrated.",
+    });
+    adaptive.milestones.push({
+      milestone_id: "ms_override",
+      kind: "supervisor_override",
+      sim_time_sec: 90,
+      label: "Supervisor override applied",
+      detail: "One blocked action was released through the bounded demo path.",
+      source_event_id: "evt_override_apply",
+    });
 
     const comparison = buildSessionRunComparison(baseline, adaptive);
     const artifactA = buildComparisonReportArtifact({
@@ -115,6 +131,8 @@ describe("report artifacts", () => {
     expect(artifactA).toEqual(artifactB);
     expect(artifactA.provenance.derived_from).toBe("SessionRunComparison");
     expect(buildReportFilename(artifactA)).toContain("comparison.json");
+    expect(artifactA.interpretation_lines.join(" ")).toMatch(/Validator demo checkpoints/i);
+    expect(artifactA.milestone_kind_counts.find((row) => row.kind === "supervisor_override")).toBeDefined();
   });
 
   it("serializes comparison artifacts with schema and provenance", () => {
