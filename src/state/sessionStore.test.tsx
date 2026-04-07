@@ -519,6 +519,15 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Completed session review/i)).toBeInTheDocument();
   });
 
+  it("renders evaluator export controls after a terminal outcome", () => {
+    const store = runSuccessfulSession();
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByTestId("evaluation-action-bar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download session report/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Download comparison report/i })).toBeDisabled();
+  });
+
   it("keeps critical alarms visibly pinned in the alarm area when they are active", () => {
     const store = new AuraSessionStore({ session_index: 19, tick_duration_sec: 5 });
     for (let tick = 0; tick < 8; tick += 1) {
@@ -551,6 +560,22 @@ describe("AuraSessionStore", () => {
     const s2 = store.getSnapshot();
     expect(s2.evaluation_capture?.[scenarioKey]?.baseline_completed).toBeDefined();
     expect(s2.evaluation_capture?.[scenarioKey]?.adaptive_completed).toBeDefined();
+  });
+
+  it("does not mutate completed review or evaluation capture after terminal advanceTick calls", () => {
+    const store = new AuraSessionStore({ session_index: 143, tick_duration_sec: 5, session_mode: "baseline" });
+    store.runUntilComplete(100);
+
+    const before = store.getSnapshot();
+    const scenarioKey = `${before.scenario.scenario_id}@${before.scenario.version}`;
+    const beforeReview = before.completed_review;
+    const beforeCapture = before.evaluation_capture?.[scenarioKey]?.baseline_completed;
+
+    const after = store.advanceTick();
+
+    expect(after.completed_review).toEqual(beforeReview);
+    expect(after.evaluation_capture?.[scenarioKey]?.baseline_completed).toEqual(beforeCapture);
+    expect(after.events).toEqual(before.events);
   });
 
   it("renders session comparison when both modes have completed captures", () => {

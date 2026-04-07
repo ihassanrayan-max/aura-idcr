@@ -779,7 +779,7 @@ Phase 5 is **complete** for the frozen MVP harness scope: baseline/adaptive sele
 
 ### Phase 6 — Stretch / Polish
 - [x] Richer ecological overlays — **Done**
-- [ ] Supervisor dashboard polish — **Not Started**
+- [x] Supervisor dashboard polish / exportable evaluator reporting — **Done** (Cluster 3A: report artifact builders + browser export helpers + bounded supervisor-panel polish on top of `CompletedSessionReview` / `SessionRunComparison`)
 - [ ] Projected outcome support — **Not Started**
 - [ ] Optional LLM explanation layer — **Not Started**
 - [ ] Optional hardware/environment extras — **Not Started**
@@ -1081,6 +1081,26 @@ Use this section to track meaningful progress across sessions.
   - None in repo after verification; Vite-based commands required running outside the sandbox to avoid the local `spawn EPERM` environment restriction.
 - Next recommended step:
   - Hold scope unless the human explicitly wants the next bounded cluster, likely judge-facing/report/export polish or a narrow supervisor-override slice.
+
+---
+
+- Date: 2026-04-06
+- Agent/session: Cluster 3A implementation session
+- Task worked on: Exportable after-action / comparison report artifact plus bounded supervisor / evaluator dashboard polish
+- Status: Done
+- What changed:
+  - Extended `KpiSummary` / `KpiMetric` in `src/contracts/aura.ts` so KPI bundles now carry explicit value-availability metadata plus canonical sim-clock generation timing; stable-recovery KPI now surfaces as unavailable on failed or non-stabilized runs instead of `0.0 sec`.
+  - Added `SessionAfterActionReport` / `ComparisonReportArtifact` contracts plus pure builders in `src/runtime/reportArtifacts.ts`, and browser-side JSON export helpers in `src/runtime/reportExport.ts` built strictly on top of `CompletedSessionReview` / `SessionRunComparison`.
+  - Updated `src/runtime/sessionComparison.ts` and `src/state/sessionStore.ts` so comparison/export paths preserve unavailable-metric semantics and terminal KPI/report artifacts stay deterministic and safe after terminal outcome.
+  - Polished the existing supervisor column in `src/App.tsx` / `src/styles.css` with evaluator action cards, readiness states, provenance context, session/comparison download controls, and post-terminal runtime-loop hardening without redesigning the shell.
+  - Added verification in `src/runtime/kpiSummary.test.ts`, `src/runtime/sessionComparison.test.ts`, `src/runtime/reportArtifacts.test.ts`, and `src/state/sessionStore.test.tsx`; re-verified with `npx tsc --noEmit`, `npm test`, and `npm run build`.
+- What remains:
+  - Phase 4 supervisor override remains intentionally deferred and unimplemented.
+  - Later Phase 6 stretch items such as projected outcomes, optional explanation layers, and broader visual polish remain untouched.
+- Blockers:
+  - None in repo after verification; Vite-based `npm test` / `npm run build` still require running outside the sandbox on this machine because of the local `spawn EPERM` environment restriction.
+- Next recommended step:
+  - Hold scope unless the human explicitly opens either a narrow supervisor-override slice or a later Phase 6 stretch feature beyond the bounded evaluator/reporting work completed here.
 
 ---
 

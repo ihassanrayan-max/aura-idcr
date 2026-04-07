@@ -314,6 +314,34 @@ pre {
   font-size: 0.86rem;
 }
 
+.evaluation-action-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.evaluation-status-card,
+.evaluation-provenance-card {
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(104, 153, 196, 0.28);
+  background: rgba(14, 31, 46, 0.72);
+}
+
+.evaluation-status-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.evaluation-status-card .ghost-button {
+  justify-self: start;
+}
+
+.evaluation-provenance-card {
+  margin: 0 0 1rem;
+}
+
 .muted {
   color: #9cb3c8;
 }
@@ -804,6 +832,10 @@ pre {
   .support-explanation-grid,
   .support-factor-list,
   .storyline-context {
+    grid-template-columns: 1fr;
+  }
+
+  .evaluation-action-bar {
     grid-template-columns: 1fr;
   }
 }

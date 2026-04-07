@@ -82,7 +82,7 @@ describe("buildCompletedSessionReview", () => {
       session_id: s.session_id,
       scenario_id: s.scenario.scenario_id,
       session_mode: s.session_mode,
-      generated_at_iso: s.kpi_summary!.generated_at_iso,
+      generated_at_sim_time_sec: s.kpi_summary!.generated_at_sim_time_sec,
     });
     const review = buildCompletedSessionReview({
       session_id: s.session_id,

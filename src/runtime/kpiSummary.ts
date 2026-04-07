@@ -4,18 +4,29 @@ type ComputeKpiSummaryParams = {
   session_id: string;
   scenario_id: string;
   session_mode: SessionMode;
-  generated_at_iso: string;
+  generated_at_sim_time_sec: number;
 };
 
 function metric(
   kpi_id: string,
   label: string,
   value: number,
+  value_status: KpiMetric["value_status"],
   unit: string,
   audience: KpiMetric["audience"],
   dependency_event_types: SessionLogEventType[],
+  unavailable_reason?: string,
 ): KpiMetric {
-  return { kpi_id, label, value, unit, audience, dependency_event_types };
+  return {
+    kpi_id,
+    label,
+    value,
+    value_status,
+    ...(unavailable_reason ? { unavailable_reason } : {}),
+    unit,
+    audience,
+    dependency_event_types,
+  };
 }
 
 export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiSummaryParams): KpiSummary {
@@ -34,7 +45,7 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
   const diagnosis_time_sec =
     first_matching_diagnosis && session_started !== undefined
       ? Math.max(0, first_matching_diagnosis.sim_time_sec - session_start_sec)
-      : 0;
+      : Number.NaN;
 
   const outcome_payload = scenario_outcome?.payload as
     | { success?: boolean; stabilized?: boolean }
@@ -44,7 +55,11 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
   const response_stabilization_time_sec =
     stabilization_eligible && session_started !== undefined
       ? Math.max(0, scenario_outcome!.sim_time_sec - session_start_sec)
-      : 0;
+      : Number.NaN;
+  const response_stabilization_status: KpiMetric["value_status"] = stabilization_eligible ? "measured" : "unavailable";
+  const response_stabilization_unavailable_reason = stabilization_eligible
+    ? undefined
+    : "Stable recovery was not achieved in this run.";
 
   const applied = events.filter((event) => event.event_type === "operator_action_applied");
   const critical_applied = applied.filter((event) => {
@@ -121,22 +136,27 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "diagnosis_time_sec",
       "Time to correct diagnosis",
       diagnosis_time_sec,
-      "sec",
+      first_matching_diagnosis ? "measured" : "unavailable",
+      first_matching_diagnosis ? "sec" : "",
       "demo_facing",
       ["session_started", "diagnosis_committed"],
+      first_matching_diagnosis ? undefined : "No correct diagnosis was committed during this run.",
     ),
     metric(
       "response_stabilization_time_sec",
       "Time to stable recovery",
       response_stabilization_time_sec,
-      "sec",
+      response_stabilization_status,
+      stabilization_eligible ? "sec" : "",
       "demo_facing",
       ["session_started", "scenario_outcome_recorded"],
+      response_stabilization_unavailable_reason,
     ),
     metric(
       "critical_action_error_rate",
       "Critical action error rate",
       critical_action_error_rate,
+      "measured",
       "ratio",
       "demo_facing",
       ["operator_action_applied"],
@@ -145,6 +165,7 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "harmful_actions_prevented_count",
       "Harmful actions prevented (hard prevent)",
       harmful_actions_prevented_count,
+      "measured",
       "count",
       "demo_facing",
       ["action_validated"],
@@ -153,6 +174,7 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "workload_peak_index",
       "Peak workload index",
       workload_peak_index,
+      "measured",
       "index",
       "demo_facing",
       ["operator_state_snapshot_recorded"],
@@ -161,6 +183,7 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "alarm_compression_ratio",
       "Alarm compression ratio (avg)",
       Number(alarm_compression_ratio.toFixed(4)),
+      "measured",
       "ratio",
       "internal_only",
       ["alarm_set_updated"],
@@ -169,6 +192,7 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "top_cause_stability_pct",
       "Top-cause stability (post-convergence window)",
       Number(top_cause_stability_pct.toFixed(2)),
+      "measured",
       "percent",
       "internal_only",
       ["reasoning_snapshot_published"],
@@ -177,20 +201,22 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "nuisance_intervention_fraction",
       "Nuisance intervention fraction",
       Number(nuisance_intervention_fraction.toFixed(4)),
+      "measured",
       "ratio",
       "internal_only",
       ["action_validated"],
     ),
   ];
 
-  const kpi_summary_id = `kpi_${params.session_id}_${params.generated_at_iso.replace(/[:.]/g, "-")}`;
+  const kpi_summary_id = `kpi_${params.session_id}_t${String(params.generated_at_sim_time_sec).padStart(4, "0")}`;
 
   return {
     kpi_summary_id,
     session_id: params.session_id,
     scenario_id: params.scenario_id,
     session_mode: params.session_mode,
-    generated_at_iso: params.generated_at_iso,
+    generated_at_iso: `t+${params.generated_at_sim_time_sec}s sim time`,
+    generated_at_sim_time_sec: params.generated_at_sim_time_sec,
     completeness,
     metrics,
   };

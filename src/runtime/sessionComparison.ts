@@ -50,10 +50,15 @@ function countMilestonesByKind(
 }
 
 function favorForMetric(
+  baseline_status: SessionRunComparisonKpiDelta["baseline_value_status"],
+  adaptive_status: SessionRunComparisonKpiDelta["adaptive_value_status"],
   baseline_value: number,
   adaptive_value: number,
   lower_is_better: boolean,
 ): SessionRunComparisonKpiDelta["favors"] {
+  if (baseline_status !== "measured" || adaptive_status !== "measured") {
+    return "not_comparable";
+  }
   if (baseline_value === adaptive_value) {
     return "tie";
   }
@@ -66,6 +71,18 @@ function favorForMetric(
     return "adaptive";
   }
   return "not_comparable";
+}
+
+function metricValueLabel(
+  value: number,
+  unit: string,
+  status: SessionRunComparisonKpiDelta["baseline_value_status"],
+  unavailable_reason?: string,
+): string {
+  if (status !== "measured") {
+    return unavailable_reason ? `N/A (${unavailable_reason})` : "N/A";
+  }
+  return `${value} ${unit}`;
 }
 
 function buildJudgeSummary(params: {
@@ -104,14 +121,20 @@ function buildJudgeSummary(params: {
   } else if (baseline_outcome_rank === 2) {
     const timeRow = kpi_deltas.find((d) => d.kpi_id === "response_stabilization_time_sec");
     const diagRow = kpi_deltas.find((d) => d.kpi_id === "diagnosis_time_sec");
-    const bTime = timeRow?.baseline_value ?? 0;
-    const aTime = timeRow?.adaptive_value ?? 0;
-    const bDiag = diagRow?.baseline_value ?? 0;
-    const aDiag = diagRow?.adaptive_value ?? 0;
+    const bTime = timeRow?.baseline_value_status === "measured" ? timeRow.baseline_value : undefined;
+    const aTime = timeRow?.adaptive_value_status === "measured" ? timeRow.adaptive_value : undefined;
+    const bDiag = diagRow?.baseline_value_status === "measured" ? diagRow.baseline_value : undefined;
+    const aDiag = diagRow?.adaptive_value_status === "measured" ? diagRow.adaptive_value : undefined;
     const adaptiveLeads =
-      (aTime < bTime || aDiag < bDiag) && !(bTime < aTime || bDiag < aDiag);
+      ((aTime !== undefined && bTime !== undefined && aTime < bTime) ||
+        (aDiag !== undefined && bDiag !== undefined && aDiag < bDiag)) &&
+      !((bTime !== undefined && aTime !== undefined && bTime < aTime) ||
+        (bDiag !== undefined && aDiag !== undefined && bDiag < aDiag));
     const baselineLeads =
-      (bTime < aTime || bDiag < aDiag) && !(aTime < bTime || aDiag < bDiag);
+      ((bTime !== undefined && aTime !== undefined && bTime < aTime) ||
+        (bDiag !== undefined && aDiag !== undefined && bDiag < aDiag)) &&
+      !((aTime !== undefined && bTime !== undefined && aTime < bTime) ||
+        (aDiag !== undefined && bDiag !== undefined && aDiag < bDiag));
     if (adaptiveLeads && !baselineLeads) {
       overall = "adaptive";
     } else if (baselineLeads && !adaptiveLeads) {
@@ -125,12 +148,18 @@ function buildJudgeSummary(params: {
 
   const metric_bullets: string[] = [];
   for (const d of demoDeltas) {
-    if (d.favors === "tie") {
-      metric_bullets.push(`${d.label}: same value in both observed runs (${d.baseline_value} ${d.unit}).`);
+    if (d.favors === "not_comparable") {
+      metric_bullets.push(
+        `${d.label}: not comparable in this observed pair (${metricValueLabel(d.baseline_value, d.unit, d.baseline_value_status, d.baseline_unavailable_reason)} vs ${metricValueLabel(d.adaptive_value, d.unit, d.adaptive_value_status, d.adaptive_unavailable_reason)}).`,
+      );
+    } else if (d.favors === "tie") {
+      metric_bullets.push(
+        `${d.label}: same value in both observed runs (${metricValueLabel(d.baseline_value, d.unit, d.baseline_value_status)}).`,
+      );
     } else {
       const winner = d.favors === "baseline" ? "Baseline" : "Adaptive";
       metric_bullets.push(
-        `${d.label}: ${winner} (${d.baseline_value} vs ${d.adaptive_value} ${d.unit}; delta ${d.delta >= 0 ? "+" : ""}${d.delta.toFixed(4)}).`,
+        `${d.label}: ${winner} (${metricValueLabel(d.baseline_value, d.unit, d.baseline_value_status)} vs ${metricValueLabel(d.adaptive_value, d.unit, d.adaptive_value_status)}; delta ${d.delta === null ? "N/A" : `${d.delta >= 0 ? "+" : ""}${d.delta.toFixed(4)}`}).`,
       );
     }
   }
@@ -213,16 +242,20 @@ export function buildSessionRunComparison(
       continue;
     }
     const lower_is_better = KPI_LOWER_IS_BETTER[kpi_id] ?? true;
-    const delta = am.value - bm.value;
+    const delta = bm.value_status === "measured" && am.value_status === "measured" ? am.value - bm.value : Number.NaN;
     kpi_deltas.push({
       kpi_id,
       label: bm.label,
       unit: bm.unit,
       baseline_value: bm.value,
       adaptive_value: am.value,
+      baseline_value_status: bm.value_status,
+      adaptive_value_status: am.value_status,
+      ...(bm.unavailable_reason ? { baseline_unavailable_reason: bm.unavailable_reason } : {}),
+      ...(am.unavailable_reason ? { adaptive_unavailable_reason: am.unavailable_reason } : {}),
       delta,
       lower_is_better,
-      favors: favorForMetric(bm.value, am.value, lower_is_better),
+      favors: favorForMetric(bm.value_status, am.value_status, bm.value, am.value, lower_is_better),
     });
   }
 

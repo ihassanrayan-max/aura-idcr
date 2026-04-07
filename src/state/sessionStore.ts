@@ -1252,12 +1252,12 @@ export class AuraSessionStore {
         },
         trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
       });
-      const generated_at_iso = new Date(outcome.sim_time_sec * 1000).toISOString();
+      const generated_at_sim_time_sec = outcome.sim_time_sec;
       kpi_summary = computeKpiSummary(this.logger.list(), {
         session_id: this.session_id,
         scenario_id: this.scenario.scenario_id,
         session_mode: this.session_mode,
-        generated_at_iso,
+        generated_at_sim_time_sec,
       });
       this.logger.append({
         sim_time_sec,
@@ -1270,6 +1270,7 @@ export class AuraSessionStore {
           scenario_id: kpi_summary.scenario_id,
           session_mode: kpi_summary.session_mode,
           generated_at_iso: kpi_summary.generated_at_iso,
+          generated_at_sim_time_sec: kpi_summary.generated_at_sim_time_sec,
           completeness: kpi_summary.completeness,
           metrics: kpi_summary.metrics,
         },

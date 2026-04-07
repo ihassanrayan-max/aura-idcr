@@ -3,12 +3,16 @@ import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
 import type {
   CompletedSessionReview,
+  KpiMetric,
   ScenarioControlRangeSchema,
   SessionLogEvent,
   SessionMode,
   SessionRunComparison,
+  SessionRunComparisonKpiDelta,
 } from "./contracts/aura";
 import { buildSessionRunComparison } from "./runtime/sessionComparison";
+import { buildComparisonReportArtifact, buildSessionAfterActionReport } from "./runtime/reportArtifacts";
+import { downloadReportArtifact } from "./runtime/reportExport";
 import { criticalVariableIds, variableLabels, variableUnits } from "./data/plantModel";
 import { formatSupportModeLabel } from "./runtime/supportModePolicy";
 import {
@@ -83,6 +87,9 @@ function validationBadgeTone(outcome: "pass" | "soft_warning" | "hard_prevent"):
 }
 
 function formatDemoKpiValue(value: number, unit: string): string {
+  if (Number.isNaN(value)) {
+    return "N/A";
+  }
   if (unit === "count" || unit === "index") {
     return String(Math.round(value));
   }
@@ -93,6 +100,39 @@ function formatDemoKpiValue(value: number, unit: string): string {
     return value.toFixed(1);
   }
   return String(value);
+}
+
+function formatKpiMetric(metric: KpiMetric): string {
+  if (metric.value_status !== "measured") {
+    return metric.unavailable_reason ? `N/A (${metric.unavailable_reason})` : "N/A";
+  }
+
+  return `${formatDemoKpiValue(metric.value, metric.unit)} ${metric.unit}`;
+}
+
+function formatKpiSummaryGeneratedAt(simTimeSec: number): string {
+  return `Generated at t+${formatClock(simTimeSec)} sim time`;
+}
+
+function formatComparisonMetricValue(
+  value: number,
+  unit: string,
+  status: SessionRunComparisonKpiDelta["baseline_value_status"],
+  unavailableReason?: string,
+): string {
+  if (status !== "measured") {
+    return unavailableReason ? `N/A (${unavailableReason})` : "N/A";
+  }
+
+  return `${formatDemoKpiValue(value, unit)} ${unit}`;
+}
+
+function formatComparisonDelta(row: SessionRunComparisonKpiDelta): string {
+  if (Number.isNaN(row.delta)) {
+    return "N/A";
+  }
+
+  return `${row.delta >= 0 ? "+" : ""}${formatDemoKpiValue(row.delta, row.unit)}`;
 }
 
 function CompletedSessionReviewPanel(props: {
@@ -471,6 +511,12 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     return () => window.clearInterval(timer);
   }, [autoRun, isRunning, snapshot.outcome, store]);
 
+  useEffect(() => {
+    if (snapshot.outcome) {
+      setIsRunning(false);
+    }
+  }, [snapshot.outcome, snapshot.session_id]);
+
   const activeAlarmIds = useMemo(
     () => new Set(snapshot.alarm_set.active_alarm_ids),
     [snapshot.alarm_set.active_alarm_ids],
@@ -558,20 +604,41 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
     }));
   }, [presentationPolicy.support_section_order, snapshot.support_policy, snapshot.support_refinement]);
 
-  const sessionRunComparison = useMemo(() => {
+  const comparisonCapture = useMemo(() => {
     const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
-    const cap = snapshot.evaluation_capture?.[captureKey];
-    if (!cap?.baseline_completed || !cap?.adaptive_completed) {
-      return undefined;
-    }
-    return buildSessionRunComparison(cap.baseline_completed, cap.adaptive_completed);
+    return snapshot.evaluation_capture?.[captureKey];
   }, [snapshot.evaluation_capture, snapshot.scenario.scenario_id, snapshot.scenario.version]);
 
+  const sessionRunComparison = useMemo(() => {
+    if (!comparisonCapture?.baseline_completed || !comparisonCapture.adaptive_completed) {
+      return undefined;
+    }
+    return buildSessionRunComparison(comparisonCapture.baseline_completed, comparisonCapture.adaptive_completed);
+  }, [comparisonCapture]);
+
+  const sessionAfterActionReport = useMemo(
+    () => (snapshot.completed_review ? buildSessionAfterActionReport(snapshot.completed_review) : undefined),
+    [snapshot.completed_review],
+  );
+
+  const comparisonReportArtifact = useMemo(() => {
+    if (!sessionRunComparison || !comparisonCapture?.baseline_completed || !comparisonCapture.adaptive_completed) {
+      return undefined;
+    }
+
+    return buildComparisonReportArtifact({
+      comparison: sessionRunComparison,
+      baseline_review: comparisonCapture.baseline_completed,
+      adaptive_review: comparisonCapture.adaptive_completed,
+    });
+  }, [comparisonCapture, sessionRunComparison]);
+
   const comparisonCaptureHint = useMemo(() => {
-    const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
-    const capture = snapshot.evaluation_capture?.[captureKey];
-    return capture && Boolean(capture.baseline_completed) !== Boolean(capture.adaptive_completed);
-  }, [snapshot.evaluation_capture, snapshot.scenario.scenario_id, snapshot.scenario.version]);
+    return (
+      comparisonCapture &&
+      Boolean(comparisonCapture.baseline_completed) !== Boolean(comparisonCapture.adaptive_completed)
+    );
+  }, [comparisonCapture]);
 
   function toggleCluster(clusterId: string): void {
     setExpandedClusterIds((current) =>
@@ -1012,10 +1079,10 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
             >
               Acknowledge top alarm
             </button>
-            <button type="button" onClick={() => setIsRunning((value) => !value)}>
+            <button type="button" onClick={() => setIsRunning((value) => !value)} disabled={Boolean(snapshot.outcome)}>
               {isRunning ? "Hold runtime loop" : "Resume runtime loop"}
             </button>
-            <button type="button" onClick={() => store.advanceTick()}>
+            <button type="button" onClick={() => store.advanceTick()} disabled={Boolean(snapshot.outcome)}>
               Advance one tick
             </button>
             <button
@@ -1187,6 +1254,63 @@ export default function App({ store = defaultStore, autoRun = true }: AppProps) 
                 : "Structured runtime event stream for replay-ready verification."}
             </p>
           </div>
+          <div className="evaluation-action-bar" data-testid="evaluation-action-bar">
+            <div className="evaluation-status-card">
+              <span className="metric-label">Session report</span>
+              <strong>{sessionAfterActionReport ? "Ready" : "Not ready"}</strong>
+              <p className="muted">
+                {snapshot.completed_review
+                  ? `Current run: ${snapshot.completed_review.session_id}`
+                  : "Complete a terminal run to generate an after-action artifact."}
+              </p>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!sessionAfterActionReport}
+                onClick={() => {
+                  if (sessionAfterActionReport) {
+                    downloadReportArtifact(sessionAfterActionReport);
+                  }
+                }}
+              >
+                Download session report
+              </button>
+            </div>
+            <div className="evaluation-status-card">
+              <span className="metric-label">Comparison report</span>
+              <strong>{comparisonReportArtifact ? "Ready" : "Waiting for paired runs"}</strong>
+              <p className="muted">
+                {comparisonCapture?.baseline_completed && comparisonCapture.adaptive_completed
+                  ? `Baseline ${comparisonCapture.baseline_completed.session_id} vs adaptive ${comparisonCapture.adaptive_completed.session_id}.`
+                  : "Capture one baseline and one adaptive terminal run on the same scenario/version."}
+              </p>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!comparisonReportArtifact}
+                onClick={() => {
+                  if (comparisonReportArtifact) {
+                    downloadReportArtifact(comparisonReportArtifact);
+                  }
+                }}
+              >
+                Download comparison report
+              </button>
+            </div>
+          </div>
+          {snapshot.completed_review ? (
+            <div className="evaluation-provenance-card">
+              <h3 className="kpi-summary-title">Current evaluator context</h3>
+              <p className="muted">
+                Scenario {snapshot.completed_review.scenario_id} v{snapshot.completed_review.scenario_version} · Session{" "}
+                <code>{snapshot.completed_review.session_id}</code> · Mode <strong>{snapshot.completed_review.session_mode}</strong>
+              </p>
+              <p className="muted">
+                Outcome {snapshot.completed_review.terminal_outcome.outcome} at t+{formatClock(snapshot.completed_review.completion_sim_time_sec)} sim
+                time.
+              </p>
+            </div>
+          ) : null}
           {sessionRunComparison ? <SessionComparisonPanel comparison={sessionRunComparison} /> : null}
           {comparisonCaptureHint ? (
             <p className="muted comparison-capture-hint">

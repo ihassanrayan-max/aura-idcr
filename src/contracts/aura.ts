@@ -417,6 +417,8 @@ export type KpiMetric = {
   kpi_id: string;
   label: string;
   value: number;
+  value_status: "measured" | "unavailable";
+  unavailable_reason?: string;
   unit: string;
   audience: "internal_only" | "demo_facing";
   dependency_event_types: SessionLogEventType[];
@@ -427,7 +429,9 @@ export type KpiSummary = {
   session_id: string;
   scenario_id: string;
   session_mode: SessionMode;
+  /** Legacy display string preserved for existing UI paths; value must reflect sim-clock semantics. */
   generated_at_iso: string;
+  generated_at_sim_time_sec: number;
   completeness: "partial" | "complete";
   metrics: KpiMetric[];
 };
@@ -503,6 +507,10 @@ export type SessionRunComparisonKpiDelta = {
   unit: string;
   baseline_value: number;
   adaptive_value: number;
+  baseline_value_status: KpiMetric["value_status"];
+  adaptive_value_status: KpiMetric["value_status"];
+  baseline_unavailable_reason?: string;
+  adaptive_unavailable_reason?: string;
   /** adaptive_value minus baseline_value */
   delta: number;
   lower_is_better: boolean;
@@ -550,6 +558,74 @@ export type SessionRunComparison = {
   key_event_count_adaptive: number;
   interpretation_lines: string[];
   judge_summary: SessionRunComparisonJudgeSummary;
+};
+
+export type ReportProvenance = {
+  derived_from: "CompletedSessionReview" | "SessionRunComparison";
+  valid?: boolean;
+  mismatch_reason?: string;
+  comparison_compatible?: boolean;
+};
+
+export type ReportSummaryBlock = {
+  headline: string;
+  outcome_line: string;
+  notable_points: string[];
+};
+
+export type SessionAfterActionReport = {
+  artifact_kind: "session_after_action_report";
+  schema_version: 1;
+  report_id: string;
+  scenario: {
+    scenario_id: string;
+    scenario_version: string;
+    scenario_title: string;
+  };
+  run: {
+    session_id: string;
+    session_mode: SessionMode;
+    terminal_outcome: ScenarioOutcome;
+    completion_sim_time_sec: number;
+  };
+  summary_block: ReportSummaryBlock;
+  kpi_summary: KpiSummary;
+  milestones: CompletedSessionReviewMilestone[];
+  highlights: CompletedSessionReviewHighlight[];
+  timeline: CompletedSessionReviewEvent[];
+  provenance: ReportProvenance;
+};
+
+export type ComparisonReportArtifact = {
+  artifact_kind: "session_comparison_report";
+  schema_version: 1;
+  comparison_id: string;
+  scenario: {
+    scenario_id: string;
+    scenario_version: string;
+    scenario_title: string;
+  };
+  baseline_run: {
+    session_id: string;
+    outcome: OutcomeKind;
+    stabilized: boolean;
+    completion_sim_time_sec: number;
+  };
+  adaptive_run: {
+    session_id: string;
+    outcome: OutcomeKind;
+    stabilized: boolean;
+    completion_sim_time_sec: number;
+  };
+  judge_summary: SessionRunComparisonJudgeSummary;
+  kpi_rows: SessionRunComparisonKpiDelta[];
+  milestone_kind_counts: SessionRunComparisonMilestoneKindCount[];
+  interpretation_lines: string[];
+  source_run_summaries: {
+    baseline_summary_block: ReportSummaryBlock;
+    adaptive_summary_block: ReportSummaryBlock;
+  };
+  provenance: ReportProvenance;
 };
 
 /** Latest captured completed reviews per mode for in-browser baseline vs adaptive comparison (Phase 5 Slice C). */

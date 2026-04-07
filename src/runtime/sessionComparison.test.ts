@@ -7,6 +7,7 @@ function makeKpiSummary(overrides: Partial<KpiSummary> & Pick<KpiSummary, "sessi
       kpi_id: "diagnosis_time_sec",
       label: "Time to correct diagnosis",
       value: 100,
+      value_status: "measured" as const,
       unit: "sec",
       audience: "demo_facing" as const,
       dependency_event_types: ["session_started", "diagnosis_committed"],
@@ -15,6 +16,7 @@ function makeKpiSummary(overrides: Partial<KpiSummary> & Pick<KpiSummary, "sessi
       kpi_id: "response_stabilization_time_sec",
       label: "Time to stable recovery",
       value: 200,
+      value_status: "measured" as const,
       unit: "sec",
       audience: "demo_facing" as const,
       dependency_event_types: ["session_started", "scenario_outcome_recorded"],
@@ -23,6 +25,7 @@ function makeKpiSummary(overrides: Partial<KpiSummary> & Pick<KpiSummary, "sessi
       kpi_id: "critical_action_error_rate",
       label: "Critical action error rate",
       value: 0,
+      value_status: "measured" as const,
       unit: "ratio",
       audience: "demo_facing" as const,
       dependency_event_types: ["operator_action_applied"],
@@ -31,6 +34,7 @@ function makeKpiSummary(overrides: Partial<KpiSummary> & Pick<KpiSummary, "sessi
       kpi_id: "harmful_actions_prevented_count",
       label: "Harmful actions prevented (hard prevent)",
       value: 0,
+      value_status: "measured" as const,
       unit: "count",
       audience: "demo_facing" as const,
       dependency_event_types: ["action_validated"],
@@ -39,6 +43,7 @@ function makeKpiSummary(overrides: Partial<KpiSummary> & Pick<KpiSummary, "sessi
       kpi_id: "workload_peak_index",
       label: "Peak workload index",
       value: 40,
+      value_status: "measured" as const,
       unit: "index",
       audience: "demo_facing" as const,
       dependency_event_types: ["operator_state_snapshot_recorded"],
@@ -49,7 +54,8 @@ function makeKpiSummary(overrides: Partial<KpiSummary> & Pick<KpiSummary, "sessi
     session_id: overrides.session_id,
     scenario_id: overrides.scenario_id ?? "scn_x",
     session_mode: overrides.session_mode,
-    generated_at_iso: overrides.generated_at_iso ?? "1970-01-01T00:00:00.000Z",
+    generated_at_iso: overrides.generated_at_iso ?? "t+200s sim time",
+    generated_at_sim_time_sec: overrides.generated_at_sim_time_sec ?? 200,
     completeness: overrides.completeness ?? "complete",
     metrics,
   };
@@ -73,6 +79,7 @@ function makeReview(params: {
         kpi_id: "diagnosis_time_sec",
         label: "Time to correct diagnosis",
         value: params.diagnosis_sec ?? 100,
+        value_status: "measured",
         unit: "sec",
         audience: "demo_facing",
         dependency_event_types: ["session_started", "diagnosis_committed"],
@@ -81,6 +88,7 @@ function makeReview(params: {
         kpi_id: "response_stabilization_time_sec",
         label: "Time to stable recovery",
         value: params.stabilization_sec ?? params.completion_sim_time_sec,
+        value_status: "measured",
         unit: "sec",
         audience: "demo_facing",
         dependency_event_types: ["session_started", "scenario_outcome_recorded"],
@@ -89,6 +97,7 @@ function makeReview(params: {
         kpi_id: "critical_action_error_rate",
         label: "Critical action error rate",
         value: 0,
+        value_status: "measured",
         unit: "ratio",
         audience: "demo_facing",
         dependency_event_types: ["operator_action_applied"],
@@ -97,6 +106,7 @@ function makeReview(params: {
         kpi_id: "harmful_actions_prevented_count",
         label: "Harmful actions prevented (hard prevent)",
         value: 0,
+        value_status: "measured",
         unit: "count",
         audience: "demo_facing",
         dependency_event_types: ["action_validated"],
@@ -105,6 +115,7 @@ function makeReview(params: {
         kpi_id: "workload_peak_index",
         label: "Peak workload index",
         value: 40,
+        value_status: "measured",
         unit: "index",
         audience: "demo_facing",
         dependency_event_types: ["operator_state_snapshot_recorded"],
@@ -206,5 +217,27 @@ describe("buildSessionRunComparison", () => {
     const c = buildSessionRunComparison(b, a);
     expect(c.valid).toBe(true);
     expect(c.judge_summary.overall_favors).toBe("adaptive");
+  });
+
+  it("marks unavailable KPIs as not comparable", () => {
+    const b = makeReview({ session_id: "b", session_mode: "baseline", outcome: "success", completion_sim_time_sec: 200 });
+    const a = makeReview({ session_id: "a", session_mode: "adaptive", outcome: "failure", completion_sim_time_sec: 240 });
+
+    a.kpi_summary.metrics = a.kpi_summary.metrics.map((metric) =>
+      metric.kpi_id === "response_stabilization_time_sec"
+        ? {
+            ...metric,
+            value: Number.NaN,
+            value_status: "unavailable",
+            unavailable_reason: "Stable recovery was not achieved in this run.",
+            unit: "",
+          }
+        : metric,
+    );
+
+    const c = buildSessionRunComparison(b, a);
+    const stabilization = c.kpi_deltas.find((row) => row.kpi_id === "response_stabilization_time_sec");
+    expect(stabilization?.favors).toBe("not_comparable");
+    expect(Number.isNaN(stabilization?.delta ?? 0)).toBe(true);
   });
 });

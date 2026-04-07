@@ -265,6 +265,7 @@ type KpiSummary = {
   scenario_id: string
   session_mode: SessionMode
   generated_at_iso: string
+  generated_at_sim_time_sec: number
   completeness: "partial" | "complete"
   metrics: KpiMetric[]
 }
@@ -273,11 +274,19 @@ type KpiMetric = {
   kpi_id: string
   label: string
   value: number
+  value_status: "measured" | "unavailable"
+  unavailable_reason?: string
   unit: string
   audience: "internal_only" | "demo_facing"
   dependency_event_types: SessionLogEventType[]
 }
 ```
+
+Required notes:
+
+- `generated_at_sim_time_sec` is the canonical timing field for exports; `generated_at_iso` is preserved only as a legacy display label and must still reflect sim-clock semantics.
+- Event-qualified KPIs that were not actually achieved in a run must use `value_status = "unavailable"` instead of pretending the value was `0`.
+- `response_stabilization_time_sec` must surface as unavailable unless the run ended with stable recovery.
 
 ## `CompletedSessionReview`
 
@@ -286,6 +295,17 @@ Single-session, post-terminal review bundle (Phase 5 Slice B). It is **derived**
 ## `SessionEvaluationCapture` / `SessionRunComparison`
 
 Phase 5 Slice C adds **in-memory** capture of the latest completed baseline review and latest completed adaptive review (`SessionEvaluationCapture` on `SessionSnapshot`), and a pure **comparison artifact** `SessionRunComparison` built by `buildSessionRunComparison` in `src/runtime/sessionComparison.ts` from two `CompletedSessionReview` objects with matching `scenario_id` and `scenario_version`. The artifact includes KPI deltas (adaptive − baseline), milestone kind counts, key event counts, deterministic interpretation lines, and a concise judge-facing summary. It is for presentation and evaluation; it does not replace the append-only log.
+
+Unavailable comparison rows must preserve per-run value-status metadata, resolve to `favors = "not_comparable"`, and render/export as `N/A` rather than `0.0 sec`.
+
+## `SessionAfterActionReport` / `ComparisonReportArtifact`
+
+Cluster 3A adds a thin evaluator-export layer on top of the existing deterministic review/comparison artifacts:
+
+- `SessionAfterActionReport` wraps one `CompletedSessionReview` into a versioned after-action JSON artifact.
+- `ComparisonReportArtifact` wraps one `SessionRunComparison` plus its paired baseline/adaptive source reviews into a versioned comparison JSON artifact.
+
+These artifacts must stay deterministic, browser-exportable, and derived from the existing review/comparison builders rather than recomputed from raw event logs inside the UI.
 
 ## `OperatorStateSnapshot`
 

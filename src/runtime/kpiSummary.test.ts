@@ -62,7 +62,7 @@ describe("computeKpiSummary", () => {
       session_id: "session_001",
       scenario_id: "scn_test",
       session_mode: "adaptive",
-      generated_at_iso: "2026-04-05T00:00:00.000Z",
+      generated_at_sim_time_sec: 120,
     });
 
     expect(summary.completeness).toBe("complete");
@@ -81,8 +81,32 @@ describe("computeKpiSummary", () => {
       session_id: "session_001",
       scenario_id: "scn_test",
       session_mode: "baseline",
-      generated_at_iso: "2026-04-05T00:00:00.000Z",
+      generated_at_sim_time_sec: 0,
     });
     expect(summary.completeness).toBe("partial");
+  });
+
+  it("marks stable recovery unavailable when the run does not stabilize", () => {
+    const events: SessionLogEvent[] = [
+      evt("session_started", 0, { session_mode: "adaptive", scenario_id: "scn_test", expected_outcome_window_sec: 600 }),
+      evt("scenario_outcome_recorded", 75, {
+        outcome: "failure",
+        success: false,
+        failure_reason: "missed recovery",
+        stabilized: false,
+      }),
+    ];
+
+    const summary = computeKpiSummary(events, {
+      session_id: "session_001",
+      scenario_id: "scn_test",
+      session_mode: "adaptive",
+      generated_at_sim_time_sec: 75,
+    });
+
+    expect(summary.metrics.find((m) => m.kpi_id === "response_stabilization_time_sec")).toMatchObject({
+      value_status: "unavailable",
+      unavailable_reason: "Stable recovery was not achieved in this run.",
+    });
   });
 });
