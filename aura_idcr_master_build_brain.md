@@ -1387,6 +1387,25 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 README truth and AI-gap assessment session
+- Task worked on: Audited the in-repo implementation against the current project framing, rewrote `README.md` to match actual shipped behavior, and documented the present AI/ML boundary honestly for final demo/report use
+- Status: Done
+- What changed:
+  - Replaced the older minimal README with a fuller, professional project overview that now reflects the real runtime surfaces, scenario set, operator/review flow, reporting/export path, and actual implemented subsystems in `src/runtime`, `src/state`, and `src/ui`
+  - Added a direct `AI / ML Status` section to `README.md` clarifying that the current repo is primarily a deterministic, rule-based adaptive decision-support prototype and that the only true ML component presently wired in-repo is the optional local webcam/CV path using MediaPipe/BlazeFace assets
+  - Added explicit honesty language in `README.md` distinguishing what is implemented now versus what is not present, including no custom-trained model, no LLM integration, no generative explanation layer, and no autonomous plant-control AI
+- What remains:
+  - The repo still does not contain a stronger AI-native subsystem beyond the bounded local webcam/CV path; if the final deliverable must make a clearer AI claim, that requires an additional implementation slice rather than more documentation
+  - The README now tells the truth, but final demo narration/report wording should also follow that same framing so the project is not overclaimed verbally
+- Blockers:
+  - None for the documentation correction itself
+- Next recommended step:
+  - If time allows, implement one tightly scoped AI addition that fits the existing architecture and can be defended honestly, rather than trying to relabel the existing rule-based logic as something it is not
+  - Keep future README/report/demo wording aligned with the actual codebase unless and until a new AI subsystem is added and verified
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.
