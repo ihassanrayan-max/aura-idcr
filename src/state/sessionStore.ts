@@ -5,6 +5,10 @@ import type {
   AlarmIntelligenceSnapshot,
   CombinedRiskSnapshot,
   CompletedSessionReview,
+  CounterfactualAdvisorState,
+  CounterfactualBranchAction,
+  CounterfactualBranchId,
+  CounterfactualBranchResult,
   PendingActionConfirmation,
   PendingSupervisorOverride,
   ExecutedAction,
@@ -67,6 +71,14 @@ import {
 import { validateAction } from "../runtime/actionValidator";
 import { computeKpiSummary } from "../runtime/kpiSummary";
 import { buildCompletedSessionReview } from "../runtime/sessionReview";
+import {
+  buildBranchOneLineSummary,
+  buildCounterfactualBranchTemplates,
+  decisionScoreForBranch,
+  riskTrendLabel,
+  stabilizationLikelihoodFromBranch,
+  summarizeCounterfactualAdvisor,
+} from "../runtime/counterfactualAdvisor";
 
 type SessionStoreOptions = {
   scenario?: ScenarioDefinition;
@@ -81,6 +93,11 @@ type ActionRequestParams = {
   requested_value?: number;
   ui_region: ActionRequest["ui_region"];
   reason_note?: string;
+};
+
+type CounterfactualAdvisorRequestParams = {
+  requested_control_id?: string;
+  requested_value?: number;
 };
 
 function summarizeAlarmClusters(alarm_intelligence: AlarmIntelligenceSnapshot) {
@@ -157,6 +174,32 @@ function summarizeValidationResult(validation_result: ActionValidationResult) {
   };
 }
 
+function summarizeCounterfactualBranches(branches: CounterfactualBranchResult[]) {
+  return branches.map((branch) => ({
+    branch_id: branch.branch_id,
+    label: branch.label,
+    final_outcome: branch.final_outcome ?? null,
+    projected_risk_trend: branch.projected_risk_trend,
+    final_combined_risk_band: branch.final_combined_risk_band,
+    final_combined_risk_score: Number(branch.final_combined_risk_score.toFixed(1)),
+    validator_risk_exposure: branch.validator_risk_exposure,
+    stabilization_likelihood: branch.stabilization_likelihood,
+    time_to_bad_threshold_sec: branch.time_to_bad_threshold_sec ?? null,
+    expected_alarm_ids_added: branch.expected_alarm_ids_added,
+    expected_alarm_ids_cleared: branch.expected_alarm_ids_cleared,
+    watch_signals: branch.watch_signals,
+    one_line_summary: branch.one_line_summary,
+    decision_score: branch.decision_score,
+    simulated_action: branch.simulated_action
+      ? {
+          action_id: branch.simulated_action.action_id,
+          action_label: branch.simulated_action.action_label,
+          requested_value: branch.simulated_action.requested_value ?? null,
+        }
+      : null,
+  }));
+}
+
 function criticalEscalationActive(active_alarm_ids: string[]): boolean {
   return ["ALM_RPV_LEVEL_LOW_LOW", "ALM_RPV_PRESSURE_HIGH", "ALM_CONTAINMENT_PRESSURE_HIGH"].some((alarm_id) =>
     active_alarm_ids.includes(alarm_id),
@@ -195,6 +238,7 @@ export class AuraSessionStore {
 
   private action_sequence = 0;
   private validation_sequence = 0;
+  private counterfactual_sequence = 0;
   private activation_sequence = 0;
   private scenario_runtime_state: ScenarioRuntimeState;
   private alarm_runtime_state: AlarmRuntimeState;
@@ -563,6 +607,7 @@ export class AuraSessionStore {
       alarm_history,
       events: this.logger.list(),
       executed_actions: [],
+      counterfactual_advisor: undefined,
       last_validation_result: undefined,
       pending_action_confirmation: undefined,
       pending_supervisor_override: undefined,
@@ -816,6 +861,7 @@ export class AuraSessionStore {
     this.logger = new SessionLogger(this.session_id, this.scenario.scenario_id);
     this.action_sequence = 0;
     this.validation_sequence = 0;
+    this.counterfactual_sequence = 0;
     this.activation_sequence = 0;
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
@@ -824,6 +870,323 @@ export class AuraSessionStore {
     this.support_mode_runtime_state = createSupportModeRuntimeState();
     this.snapshot = this.createInitialSnapshot();
     this.emit();
+  }
+
+  private actionLabelForId(action_id: string): string {
+    return this.scenario.allowed_operator_actions.find((action) => action.action_id === action_id)?.label ?? action_id;
+  }
+
+  private branchMatchesAction(branch: CounterfactualBranchResult, action_request: ActionRequest): boolean {
+    if (!branch.simulated_action) {
+      return false;
+    }
+
+    if (branch.simulated_action.action_id !== action_request.action_id) {
+      return false;
+    }
+
+    const branchValue = branch.simulated_action.requested_value;
+    const actionValue = typeof action_request.requested_value === "number" ? Number(action_request.requested_value) : undefined;
+    if (typeof branchValue !== "number" || typeof actionValue !== "number") {
+      return true;
+    }
+
+    return Math.abs(branchValue - actionValue) < 0.001;
+  }
+
+  private maybeRecordCounterfactualFollowUp(action_request: ActionRequest): CounterfactualAdvisorState | undefined {
+    const advisor = this.snapshot.counterfactual_advisor;
+    if (
+      !advisor ||
+      advisor.status !== "ready" ||
+      advisor.operator_followed_recommendation !== undefined ||
+      !advisor.narrative
+    ) {
+      return advisor;
+    }
+
+    const matchedBranch = advisor.branches.find((branch) => this.branchMatchesAction(branch, action_request));
+    const followedRecommended = matchedBranch?.branch_id === advisor.narrative.recommended_branch_id;
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "counterfactual_advisor_followup_recorded",
+      source_module: "ai_advisor",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        advisor_request_id: advisor.request_id,
+        recommended_branch_id: advisor.narrative.recommended_branch_id,
+        matched_branch_id: matchedBranch?.branch_id ?? null,
+        followed_recommendation: matchedBranch ? followedRecommended : false,
+        action_id: action_request.action_id,
+        action_request_id: action_request.action_request_id,
+      },
+      trace_refs: [
+        { ref_type: "action_id", ref_value: action_request.action_request_id },
+        { ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id },
+      ],
+    });
+
+    return {
+      ...advisor,
+      operator_followed_recommendation: matchedBranch ? followedRecommended : false,
+      followed_branch_id: matchedBranch?.branch_id,
+      followed_action_request_id: action_request.action_request_id,
+      followup_recorded_at_sim_time_sec: this.snapshot.sim_time_sec,
+    };
+  }
+
+  private replayCurrentStateForCounterfactual(seed_offset: number): AuraSessionStore {
+    const replayStore = new AuraSessionStore({
+      scenario_id: this.scenario.scenario_id,
+      session_index: this.session_index + 9000 + seed_offset,
+      tick_duration_sec: this.tick_duration_sec,
+      session_mode: this.session_mode,
+    });
+
+    const confirmationIds = new Set(
+      this.snapshot.events
+        .filter((event) => event.event_type === "action_confirmation_recorded")
+        .map((event) => String(event.payload.action_request_id)),
+    );
+    const overrideIds = new Set(
+      this.snapshot.events
+        .filter((event) => event.event_type === "supervisor_override_action_applied")
+        .map((event) => String(event.payload.action_request_id)),
+    );
+    const actionsBySimTime = new Map<number, ExecutedAction[]>();
+    for (const action of this.snapshot.executed_actions) {
+      const bucket = actionsBySimTime.get(action.sim_time_sec) ?? [];
+      bucket.push(action);
+      actionsBySimTime.set(action.sim_time_sec, bucket);
+    }
+
+    const replayActionsAtCurrentTime = (): void => {
+      const currentSim = replayStore.getSnapshot().sim_time_sec;
+      const actions = actionsBySimTime.get(currentSim) ?? [];
+      for (const action of actions) {
+        const applied = replayStore.requestAction({
+          action_id: action.action_id,
+          requested_value: typeof action.requested_value === "number" ? Number(action.requested_value) : undefined,
+          ui_region: action.ui_region,
+          reason_note: action.reason_note,
+        });
+        if (applied) {
+          continue;
+        }
+
+        if (confirmationIds.has(action.action_request_id)) {
+          replayStore.confirmPendingAction();
+          continue;
+        }
+
+        if (overrideIds.has(action.action_request_id)) {
+          replayStore.requestSupervisorOverrideReview("Counterfactual replay");
+          replayStore.approvePendingSupervisorOverride("Counterfactual replay");
+        }
+      }
+    };
+
+    while (replayStore.getSnapshot().sim_time_sec < this.snapshot.sim_time_sec) {
+      replayActionsAtCurrentTime();
+      replayStore.advanceTick();
+    }
+    replayActionsAtCurrentTime();
+
+    return replayStore;
+  }
+
+  private simulateCounterfactualBranch(
+    branch_id: CounterfactualBranchId,
+    label: string,
+    description: string,
+    simulated_action: CounterfactualBranchAction | undefined,
+    replayStore: AuraSessionStore,
+  ): CounterfactualBranchResult {
+    let validatorRiskExposure: CounterfactualBranchResult["validator_risk_exposure"] = "not_applicable";
+
+    if (simulated_action) {
+      const applied = replayStore.requestAction({
+        action_id: simulated_action.action_id,
+        requested_value: simulated_action.requested_value,
+        ui_region: "plant_mimic",
+        reason_note: `Counterfactual branch ${branch_id}`,
+      });
+      const replaySnapshot = replayStore.getSnapshot();
+      validatorRiskExposure = replaySnapshot.last_validation_result?.outcome ?? (applied ? "pass" : "not_applicable");
+
+      if (!applied && replaySnapshot.pending_action_confirmation) {
+        replayStore.confirmPendingAction();
+      } else if (!applied && replaySnapshot.pending_supervisor_override?.validation_result.override_allowed) {
+        replayStore.requestSupervisorOverrideReview("Counterfactual branch projection");
+        replayStore.approvePendingSupervisorOverride("Counterfactual branch projection");
+      }
+    }
+
+    const branchStartSnapshot = replayStore.getSnapshot();
+    const horizonTicks = Math.ceil(75 / this.tick_duration_sec);
+    let badThresholdTime: number | undefined;
+    let finalSnapshot = branchStartSnapshot;
+
+    for (let tick = 0; tick < horizonTicks && !finalSnapshot.outcome; tick += 1) {
+      finalSnapshot = replayStore.advanceTick();
+      const highAlarmActive =
+        finalSnapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        finalSnapshot.alarm_set.active_alarm_ids.includes("ALM_RPV_LEVEL_LOW_LOW") ||
+        finalSnapshot.alarm_set.active_alarm_ids.includes("ALM_RPV_PRESSURE_HIGH");
+      if (
+        badThresholdTime === undefined &&
+        (finalSnapshot.combined_risk.combined_risk_band === "high" || highAlarmActive || finalSnapshot.outcome?.outcome === "failure")
+      ) {
+        badThresholdTime = Math.max(0, finalSnapshot.sim_time_sec - this.snapshot.sim_time_sec);
+      }
+    }
+
+    const currentAlarmIds = new Set(this.snapshot.alarm_set.active_alarm_ids);
+    const finalAlarmIds = new Set(finalSnapshot.alarm_set.active_alarm_ids);
+    const expected_alarm_ids_added = [...finalAlarmIds].filter((alarm_id) => !currentAlarmIds.has(alarm_id));
+    const expected_alarm_ids_cleared = [...currentAlarmIds].filter((alarm_id) => !finalAlarmIds.has(alarm_id));
+    const watch_signals = Array.from(
+      new Set([
+        ...(this.snapshot.reasoning_snapshot.ranked_hypotheses[0]?.watch_items ?? []),
+        ...(finalSnapshot.reasoning_snapshot.ranked_hypotheses[0]?.watch_items ?? []),
+      ]),
+    ).slice(0, 3);
+
+    const branchBase: CounterfactualBranchResult = {
+      branch_id,
+      label,
+      description,
+      ...(simulated_action ? { simulated_action } : {}),
+      final_outcome: finalSnapshot.outcome?.outcome,
+      projected_risk_trend: riskTrendLabel(
+        this.snapshot.combined_risk.combined_risk_score,
+        finalSnapshot.combined_risk.combined_risk_score,
+      ),
+      final_combined_risk_score: finalSnapshot.combined_risk.combined_risk_score,
+      final_combined_risk_band: finalSnapshot.combined_risk.combined_risk_band,
+      expected_alarm_ids_added,
+      expected_alarm_ids_cleared,
+      stabilization_likelihood: "medium",
+      ...(badThresholdTime !== undefined ? { time_to_bad_threshold_sec: badThresholdTime } : {}),
+      validator_risk_exposure: validatorRiskExposure,
+      watch_signals,
+      decision_score: 0,
+      one_line_summary: "",
+    };
+
+    const stabilization_likelihood = stabilizationLikelihoodFromBranch(branchBase);
+    const branchWithLikelihood: CounterfactualBranchResult = {
+      ...branchBase,
+      stabilization_likelihood,
+    };
+    const decision_score = decisionScoreForBranch(branchWithLikelihood);
+    const completedBranch: CounterfactualBranchResult = {
+      ...branchWithLikelihood,
+      decision_score,
+      one_line_summary: buildBranchOneLineSummary({
+        ...branchWithLikelihood,
+        decision_score,
+      }),
+    };
+
+    return completedBranch;
+  }
+
+  async requestCounterfactualAdvisor(
+    params: CounterfactualAdvisorRequestParams = {},
+  ): Promise<CounterfactualAdvisorState | undefined> {
+    if (this.snapshot.outcome) {
+      return this.snapshot.counterfactual_advisor;
+    }
+
+    this.counterfactual_sequence += 1;
+    const request_id = `cfreq_${String(this.counterfactual_sequence).padStart(4, "0")}`;
+    const source_session_id = this.snapshot.session_id;
+    const source_tick_id = this.snapshot.plant_tick.tick_id;
+    const source_sim_time_sec = this.snapshot.sim_time_sec;
+
+    this.snapshot = {
+      ...this.snapshot,
+      counterfactual_advisor: {
+        status: "loading",
+        request_id,
+        source_tick_id,
+        source_sim_time_sec,
+        requested_control_id: params.requested_control_id,
+        requested_value: params.requested_value,
+        branches: [],
+      },
+    };
+    this.emit();
+
+    const templates = buildCounterfactualBranchTemplates({
+      snapshot: this.snapshot,
+      requested_control_id: params.requested_control_id,
+      requested_value: params.requested_value,
+    });
+
+    const branches = templates.map((template, index) =>
+      this.simulateCounterfactualBranch(
+        template.branch_id,
+        template.label,
+        template.description,
+        template.simulated_action,
+        this.replayCurrentStateForCounterfactual(this.counterfactual_sequence * 10 + index + 1),
+      ),
+    );
+    const narrative = await summarizeCounterfactualAdvisor({
+      snapshot: this.snapshot,
+      branches,
+    });
+
+    if (
+      this.snapshot.session_id !== source_session_id ||
+      this.snapshot.plant_tick.tick_id !== source_tick_id ||
+      this.snapshot.counterfactual_advisor?.request_id !== request_id
+    ) {
+      return this.snapshot.counterfactual_advisor;
+    }
+
+    this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "counterfactual_advisor_generated",
+      source_module: "ai_advisor",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        advisor_request_id: request_id,
+        source_tick_id,
+        source_sim_time_sec,
+        requested_control_id: params.requested_control_id ?? null,
+        requested_value: params.requested_value ?? null,
+        recommended_branch_id: narrative.recommended_branch_id,
+        narrative_provider: narrative.provider,
+        narrative_model: narrative.model ?? null,
+        confidence_caveat: narrative.confidence_caveat,
+        top_watch_signals: narrative.top_watch_signals,
+        branches: summarizeCounterfactualBranches(branches),
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id }],
+    });
+
+    const nextAdvisor: CounterfactualAdvisorState = {
+      status: "ready",
+      request_id,
+      source_tick_id,
+      source_sim_time_sec,
+      requested_control_id: params.requested_control_id,
+      requested_value: params.requested_value,
+      branches,
+      narrative,
+    };
+
+    this.snapshot = {
+      ...this.snapshot,
+      counterfactual_advisor: nextAdvisor,
+      events: this.logger.list(),
+    };
+    this.emit();
+    return nextAdvisor;
   }
 
   private markValidationDemoState(
@@ -892,10 +1255,12 @@ export class AuraSessionStore {
       ...action_request,
       applied: true,
     };
+    const counterfactual_advisor = this.maybeRecordCounterfactualFollowUp(action_request);
 
     this.snapshot = {
       ...this.snapshot,
       executed_actions: [...this.snapshot.executed_actions, executed_action],
+      counterfactual_advisor,
       last_validation_result: validation_result,
       pending_action_confirmation: options?.pending_action_confirmation,
       pending_supervisor_override: undefined,
@@ -1557,6 +1922,7 @@ export class AuraSessionStore {
       support_policy: phase3_state.support_policy,
       alarm_history,
       events: this.logger.list(),
+      counterfactual_advisor: this.snapshot.counterfactual_advisor,
       outcome,
       kpi_summary,
       completed_review,

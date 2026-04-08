@@ -1225,6 +1225,41 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Authenticate Vercel MCP or use a normal Vercel login/link flow, then deploy the repo as a Vite static app with `main` already containing the current tutorial fixes
 
+- Date: 2026-04-08
+- Agent/session: Codex GPT-5 implementation session
+- Task worked on: Implemented the AI Counterfactual Twin Advisor across runtime simulation, optional OpenAI summarization, Operate/Review surfaces, and evaluation evidence
+- Status: Done
+- What changed:
+  - Added a bounded counterfactual advisor pipeline that clones the current deterministic session state, replays applied actions into a safe branch simulator, and projects three fixed branches: guided recovery, current manual request, and hold/no-action
+  - Added a browser-configured optional OpenAI Responses API summary layer with structured-output parsing plus deterministic fallback so the advisor stays usable even with no API key or malformed LLM output
+  - Extended session logging, KPI aggregation, completed review highlights, and Review oversight so AI branch previews and follow-through evidence appear in the evaluator story instead of only the live operator surface
+  - Added a new Operate panel and manual-control affordances for "What Happens Next?" branch previews, plus tests covering deterministic scoring, malformed-output fallback, live-session safety, UI rendering, and completed-review evidence
+  - Re-verified the slice with passing `npm test` and `npm run build`
+- What remains:
+  - The initial implementation used a browser-configured OpenAI shortcut, but the current repo state has already replaced it with the safer server-side proxy documented below
+  - Advisor triggering is manual-only in this slice; no escalation-based auto-trigger behavior has been added yet
+- Blockers:
+  - None
+- Next recommended step:
+  - Use the new advisor in one baseline-vs-adaptive demo script and, if time remains, add one narrow auto-trigger on support-mode escalation or validator intervention to make the AI impact even more visible on stage
+
+- Date: 2026-04-08
+- Agent/session: Codex GPT-5 secure integration hardening session
+- Task worked on: Moved the AI Counterfactual Twin Advisor OpenAI path to a server-only proxy with bounded rate limiting for safer local/demo use
+- Status: Done
+- What changed:
+  - Replaced the browser-side `VITE_OPENAI_API_KEY` path with a local `/api/counterfactual-advisor` request so the operator UI no longer sends the OpenAI key to the browser bundle
+  - Added shared server logic in `server/counterfactualAdvisorApi.ts`, a dev proxy in `vite.config.ts`, and a deployable route in `api/counterfactual-advisor.ts` so both local Vite development and hosted serverless deployment use the same bounded handler
+  - Added simple per-IP in-memory throttling with configurable request/window env vars, preserved deterministic fallback behavior when the AI path is unavailable, and updated `.env.example` / `README.md` to document the safe server-side env pattern
+  - Extended verification with API-side rate-limit tests plus updated advisor fallback tests, then re-verified with `npm test` and `npm run build`
+- What remains:
+  - This is still a prototype-grade secret-handling path intended for local demo or simple hosted deployment, not a full production secrets-management or multi-instance distributed rate-limit system
+  - Advisor triggering remains manual-only in the current slice
+- Blockers:
+  - None in repo after verification
+- Next recommended step:
+  - Add one narrow automatic advisor trigger tied to support-mode escalation or validator warning so the AI impact is even more visible during the live demo
+
 ---
 
 ## 26) Final reminder to all future agents

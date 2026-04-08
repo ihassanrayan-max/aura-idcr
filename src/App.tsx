@@ -452,6 +452,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     });
   }
 
+  function requestCounterfactualAdvisor(control?: ScenarioControlRangeSchema, requestedValue?: number): void {
+    void store.requestCounterfactualAdvisor({
+      requested_control_id: control?.control_id,
+      requested_value: requestedValue,
+    });
+  }
+
   function triggerValidationDemoPreset(control: ScenarioControlRangeSchema, requestedValue: number, label: string): void {
     if (!isTutorialActionAllowed("actions:demo-preset")) {
       return;
@@ -822,6 +829,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
             }))
           }
           onApplyControlAction={applyControlAction}
+          onRequestCounterfactualAdvisor={requestCounterfactualAdvisor}
           onTriggerValidationDemoPreset={triggerValidationDemoPreset}
           onAcknowledgeTopAlarm={acknowledgeTopAlarm}
           onConfirmPendingAction={() => store.confirmPendingAction()}
@@ -833,6 +841,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
         <ReviewWorkspace
           model={reviewModel}
           completedReview={snapshot.completed_review}
+          latestCounterfactualAdvisor={snapshot.counterfactual_advisor}
           canonicalEvents={snapshot.events}
           sessionRunComparison={sessionRunComparison}
           sessionReportReady={Boolean(sessionAfterActionReport)}

@@ -29,4 +29,6 @@ npm run build    # production build
 npm test         # verification tests
 ```
 
+The AI Counterfactual Twin Advisor stays usable without any API key by falling back to deterministic branch comparison. To enable the optional server-side LLM summary, set `OPENAI_API_KEY` in a local `.env`; do not expose the key through `VITE_*` browser variables.
+
 For supplementary pointers, see [docs/README.md](./docs/README.md).

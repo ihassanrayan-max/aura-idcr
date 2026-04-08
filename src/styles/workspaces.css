@@ -6,6 +6,7 @@
     "summary summary"
     "situation situation"
     "actions alarm"
+    "advisor alarm"
     "storyline support";
 }
 
@@ -19,6 +20,10 @@
 
 .operate-actions {
   grid-area: actions;
+}
+
+.operate-advisor {
+  grid-area: advisor;
 }
 
 .operate-alarm {
@@ -120,6 +125,7 @@
 
 .alarm-cluster-list,
 .alarm-raw-list,
+.advisor-branch-list,
 .lane-list,
 .support-note-grid,
 .factor-list,
@@ -141,6 +147,20 @@
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.advisor-branch-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.advisor-branch-card--recommended {
+  border-color: rgba(138, 216, 183, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(138, 216, 183, 0.12);
 }
 
 .alarm-cluster--ok {
@@ -343,6 +363,7 @@
       "summary"
       "situation"
       "actions"
+      "advisor"
       "alarm"
       "support"
       "storyline";

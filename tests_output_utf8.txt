@@ -1,0 +1,103 @@
+﻿
+[1m[46m RUN [49m[22m [36mv4.1.2 [39m[90mC:/Users/hassan/Documents/aura-idcr[39m
+
+ [32mΓ£ô[39m src/runtime/kpiSummary.test.ts[2m > [22mcomputeKpiSummary[2m > [22mcomputes demo KPIs from canonical events[32m 5[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/kpiSummary.test.ts[2m > [22mcomputeKpiSummary[2m > [22mmarks completeness partial without terminal outcome[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/kpiSummary.test.ts[2m > [22mcomputeKpiSummary[2m > [22mmarks stable recovery unavailable when the run does not stabilize[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/operatorState.test.ts[2m > [22mbuildOperatorStateSnapshot[2m > [22mdeterministically enters degraded mode when the observation window and interaction evidence are thin[32m 6[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/operatorState.test.ts[2m > [22mbuildOperatorStateSnapshot[2m > [22mrecovers nominal confidence deterministically once history and interaction evidence exist[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/presentationPolicy.test.ts[2m > [22mbuildPresentationPolicy[2m > [22mkeeps pass results quiet in monitoring support[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/presentationPolicy.test.ts[2m > [22mbuildPresentationPolicy[2m > [22melevates pending soft-warning confirmation in guided support[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/presentationPolicy.test.ts[2m > [22mbuildPresentationPolicy[2m > [22mmakes hard prevents most prominent in protected response[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/presentationPolicy.test.ts[2m > [22mbuildPresentationPolicy[2m > [22msurfaces pending supervisor review as the top validator state[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/presentationPolicy.test.ts[2m > [22morderPresentedLaneItems[2m > [22mmoves emphasized and higher-urgency items forward when narrowing is active[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionComparison.test.ts[2m > [22mbuildSessionRunComparison[2m > [22mmarks invalid when scenario_id differs[32m 6[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionComparison.test.ts[2m > [22mbuildSessionRunComparison[2m > [22mcomputes delta as adaptive minus baseline for paired KPIs[32m 18[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionComparison.test.ts[2m > [22mbuildSessionRunComparison[2m > [22mis deterministic for the same inputs[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionComparison.test.ts[2m > [22mbuildSessionRunComparison[2m > [22mprefers higher outcome rank in judge headline path[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionComparison.test.ts[2m > [22mbuildSessionRunComparison[2m > [22mmarks unavailable KPIs as not comparable[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionComparison.test.ts[2m > [22mbuildSessionRunComparison[2m > [22mcarries supervisor override milestones and validator demo counts into interpretation lines[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/supportModePolicy.test.ts[2m > [22mresolveSupportModePolicy[2m > [22mescalates immediately into protected response on critical escalation markers[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/supportModePolicy.test.ts[2m > [22mresolveSupportModePolicy[2m > [22mholds a downshift for one tick before relaxing to monitoring support[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/supportModePolicy.test.ts[2m > [22mresolveSupportModePolicy[2m > [22mpublishes critical visibility guardrails with pinned alarms[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/supportRefinement.test.ts[2m > [22mbuildSupportRefinement[2m > [22mkeeps verification cues ahead when reasoning is unstable and confidence is degraded[32m 7[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/supportRefinement.test.ts[2m > [22mbuildSupportRefinement[2m > [22mkeeps the bounded recovery action prominent when risk is high and the storyline is stable[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/combinedRisk.test.ts[2m > [22mbuildCombinedRiskSnapshot[2m > [22mproduces deterministic transparent factor breakdowns[32m 8[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/combinedRisk.test.ts[2m > [22mbuildCombinedRiskSnapshot[2m > [22mreports what changed when risk rises between snapshots[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/reportArtifacts.test.ts[2m > [22mreport artifacts[2m > [22mbuilds a deterministic session after-action report[32m 5[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/reportArtifacts.test.ts[2m > [22mreport artifacts[2m > [22mbuilds a deterministic comparison report artifact[32m 19[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/reportArtifacts.test.ts[2m > [22mreport artifacts[2m > [22mserializes comparison artifacts with schema and provenance[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mpasses the bounded recovery request for the current feedwater lane[32m 15[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mreturns a soft warning for a below-guidance feedwater recovery request[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mkeeps the absolute feedwater floor non-overrideable[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mmarks escalation-phase feedwater reductions as override-eligible hard prevents[32m 19[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mpasses the bounded IC recovery request for Scenario B[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mkeeps the Scenario B absolute IC floor non-overrideable[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mmarks Scenario B escalation-phase IC reductions as override-eligible hard prevents[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mpasses the bounded IC recovery request for Scenario C[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mreturns a soft warning for a below-guidance IC request during Scenario C[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mkeeps the Scenario C absolute IC floor non-overrideable[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mmarks Scenario C escalation-phase IC reductions as override-eligible hard prevents[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/actionValidator.test.ts[2m > [22mvalidateAction[2m > [22mpublishes scenario-aware validator demo presets from the same rule source[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionReview.test.ts[2m > [22mbuildCompletedSessionReview[2m > [22mis deterministic for the same canonical session data[32m 42[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionReview.test.ts[2m > [22mbuildCompletedSessionReview[2m > [22malways includes terminal key events at the end of the key timeline[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionReview.test.ts[2m > [22mbuildCompletedSessionReview[2m > [22mmatches KPI summary passed in (same as computeKpiSummary output)[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/runtime/sessionReview.test.ts[2m > [22mbuildCompletedSessionReview[2m > [22msurfaces supervisor override milestones and demo markers in the completed review[32m 16[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mruns the same corrected scenario path deterministically[32m 38[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mreaches a non-success terminal state without corrective action[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/ui/TutorialOverlay.test.tsx[2m > [22mTutorialOverlay[2m > [22mrenders the launcher menu with the three guided paths[32m 262[2mms[22m[39m
+ [32mΓ£ô[39m src/ui/TutorialOverlay.test.tsx[2m > [22mTutorialOverlay[2m > [22mplaces the sidecar away from the spotlighted target when there is room[32m 25[2mms[22m[39m
+ [32mΓ£ô[39m src/ui/TutorialOverlay.test.tsx[2m > [22mTutorialOverlay[2m > [22mminimizes into a restore dock and expands back into the full panel[32m 79[2mms[22m[39m
+ [32mΓ£ô[39m src/ui/TutorialOverlay.test.tsx[2m > [22mTutorialOverlay[2m > [22msupports desktop dragging and resetting back to the smart position[32m 43[2mms[22m[39m
+ [32mΓ£ô[39m src/ui/TutorialOverlay.test.tsx[2m > [22mTutorialOverlay[2m > [22mshows a locked-action note for guided task steps until the required action is complete[32m 35[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps the rendered HMI synchronized with the session store[32m 185[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrecords the required baseline log events for the corrected run[32m 5[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mreduces visible overload with grouped alarms and keeps the dominant hypothesis stable[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mupdates the first-response lane as plant state changes[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mlogs session_mode on session_started and uses adaptive as the default store configuration[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps baseline session mode free of support_mode_changed events and monitoring support[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mpasses feedwater actions through in baseline session mode without soft-warning holds[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mholds a soft warning action until the operator explicitly confirms it[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mblocks a hard prevent request and logs a prevented-harm signal[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22monly exposes supervisor override review for override-eligible hard prevents[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22msupports a bounded one-shot supervisor override for eligible hard prevents[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22msupports supervisor override denial without applying the blocked action[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps low-concern acknowledgement actions quiet and pass-through[32m 0[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrecords deterministic degraded mode early and recovers confidence after a successful correction[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mpublishes inspectable combined-risk outputs alongside the Phase 2 reasoning snapshot[32m 4[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mlogs a replay-inspectable support-mode transition when the scenario escalates[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders the compact support-state risk outputs in the HMI[32m 123[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders the bounded soft-warning confirmation flow inside the existing shell[32m 96[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders validator demo presets beside the bounded manual control[32m 262[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders the operator-side supervisor override request affordance for eligible hard prevents[32m 209[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders supervisor decision controls after review has been requested[32m 150[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps pass validation quiet while preserving the bounded operator regions[32m 96[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mmakes protected-response hard prevents more prominent without hiding core regions[32m 96[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders the completed-session review panel after a terminal outcome[32m 76[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders evaluator export controls after a terminal outcome[32m 137[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps review artifacts off the default operator screen until the workspace is switched[32m 59[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps critical alarms visibly pinned in the alarm area when they are active[32m 41[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22muses a fresh log on reset with a deterministic per-run session id[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mretains evaluation_capture for baseline and adaptive across reset[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mdoes not mutate completed review or evaluation capture after terminal advanceTick calls[32m 1[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders session comparison when both modes have completed captures[32m 73[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mapplies next-run scenario and session mode together on reset[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mruns Scenario B deterministically on the bounded successful recovery path[32m 14[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mruns Scenario C deterministically on the bounded successful recovery path[32m 19[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mreaches a non-success terminal state in Scenario C without corrective IC action[32m 3[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps Scenario C free of LoOP storyline drift and surfaces the IC recovery lane after onset[32m 2[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps scenario comparison buckets separate between Scenario A and Scenario B[32m 7[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mkeeps scenario comparison buckets separate across Scenario A, B, and C[32m 10[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders scenario selection and the Scenario B IC control in the HMI[32m 80[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mrenders Scenario C selection state and the steam-isolation IC control in the HMI[32m 79[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mauto-opens the refreshed tutorial when only the legacy dismissal key exists[32m 55[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mhonors the v2 dismissal key on default-app loads[32m 60[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mresets the full tutorial to the intro scenario and locks progression until the required step action completes[33m 401[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mpauses guided pace at checkpoints and turns the run controls into clearer resume actions[32m 148[2mms[22m[39m
+ [32mΓ£ô[39m src/state/sessionStore.test.tsx[2m > [22mAuraSessionStore[2m > [22mpreserves the current scenario state for the review tutorial while guiding the user into Review[32m 274[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
+[2m      Tests [22m [1m[32m94 passed[39m[22m[90m (94)[39m
+[2m   Start at [22m 05:21:31
+[2m   Duration [22m 7.39s[2m (transform 3.52s, setup 4.60s, import 3.98s, tests 3.55s, environment 36.97s)[22m
+

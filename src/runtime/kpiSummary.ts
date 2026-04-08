@@ -85,6 +85,33 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
   const validator_demo_checkpoints_completed = events.filter(
     (event) => event.event_type === "validation_demo_marker_recorded",
   ).length;
+  const counterfactual_advisor_runs = events.filter(
+    (event) => event.event_type === "counterfactual_advisor_generated",
+  ).length;
+  const counterfactual_recommendation_followed_count = events.filter((event) => {
+    if (event.event_type !== "counterfactual_advisor_followup_recorded") {
+      return false;
+    }
+    return event.payload.followed_recommendation === true;
+  }).length;
+  const counterfactual_risky_branch_flagged_count = events.filter((event) => {
+    if (event.event_type !== "counterfactual_advisor_generated") {
+      return false;
+    }
+    const branches = event.payload.branches;
+    if (!Array.isArray(branches)) {
+      return false;
+    }
+    return branches.some((branch) => {
+      if (!branch || typeof branch !== "object") {
+        return false;
+      }
+      return (
+        (branch as { validator_risk_exposure?: string }).validator_risk_exposure === "hard_prevent" ||
+        typeof (branch as { time_to_bad_threshold_sec?: number | null }).time_to_bad_threshold_sec === "number"
+      );
+    });
+  }).length;
 
   const operator_snapshots = events.filter((event) => event.event_type === "operator_state_snapshot_recorded");
   const workload_values = operator_snapshots.map((event) => {
@@ -229,6 +256,33 @@ export function computeKpiSummary(events: SessionLogEvent[], params: ComputeKpiS
       "count",
       "internal_only",
       ["validation_demo_marker_recorded"],
+    ),
+    metric(
+      "counterfactual_advisor_runs",
+      "AI branch previews generated",
+      counterfactual_advisor_runs,
+      "measured",
+      "count",
+      "demo_facing",
+      ["counterfactual_advisor_generated"],
+    ),
+    metric(
+      "counterfactual_recommendation_followed_count",
+      "AI recommendations followed",
+      counterfactual_recommendation_followed_count,
+      "measured",
+      "count",
+      "internal_only",
+      ["counterfactual_advisor_followup_recorded"],
+    ),
+    metric(
+      "counterfactual_risky_branch_flagged_count",
+      "Risky branches flagged in advance",
+      counterfactual_risky_branch_flagged_count,
+      "measured",
+      "count",
+      "demo_facing",
+      ["counterfactual_advisor_generated"],
     ),
   ];
 

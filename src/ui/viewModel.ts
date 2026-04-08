@@ -73,6 +73,23 @@ export type OperateWorkspaceModel = {
     watchSignals: string;
   }>;
   laneBadges: StatusPillModel[];
+  counterfactualAdvisor?: {
+    status: "idle" | "loading" | "ready";
+    headline: string;
+    summary: string;
+    providerLabel?: string;
+    confidenceCaveat?: string;
+    topWatchSignals: string[];
+    branches: Array<{
+      id: string;
+      title: string;
+      summary: string;
+      recommended: boolean;
+      tone: StatusTone;
+      meta: string;
+    }>;
+    followup?: string;
+  };
   laneItems: Array<{
     id: string;
     label: string;
@@ -306,6 +323,65 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         tone: snapshot.pending_action_confirmation ? "neutral" : "ok",
       },
     ],
+    ...(snapshot.counterfactual_advisor
+      ? {
+          counterfactualAdvisor: {
+            status: snapshot.counterfactual_advisor.status,
+            headline:
+              snapshot.counterfactual_advisor.status === "loading"
+                ? "Generating bounded branch preview"
+                : snapshot.counterfactual_advisor.narrative
+                  ? `Recommended branch: ${
+                      snapshot.counterfactual_advisor.branches.find(
+                        (branch) => branch.branch_id === snapshot.counterfactual_advisor?.narrative?.recommended_branch_id,
+                      )?.label ?? snapshot.counterfactual_advisor.narrative.recommended_branch_id
+                    }`
+                  : "Latest branch preview",
+            summary:
+              snapshot.counterfactual_advisor.status === "loading"
+                ? "The advisor is cloning the current twin state, comparing three bounded branches, and preparing a short brief."
+                : snapshot.counterfactual_advisor.narrative?.rationale ??
+                  "Branch preview ready. Compare the short-horizon consequences before acting.",
+            providerLabel:
+              snapshot.counterfactual_advisor.status === "ready" && snapshot.counterfactual_advisor.narrative
+                ? snapshot.counterfactual_advisor.narrative.provider === "llm"
+                  ? `LLM summary${snapshot.counterfactual_advisor.narrative.model ? ` (${snapshot.counterfactual_advisor.narrative.model})` : ""}`
+                  : "Deterministic fallback summary"
+                : undefined,
+            confidenceCaveat:
+              snapshot.counterfactual_advisor.status === "ready"
+                ? snapshot.counterfactual_advisor.narrative?.confidence_caveat
+                : undefined,
+            topWatchSignals:
+              snapshot.counterfactual_advisor.status === "ready"
+                ? snapshot.counterfactual_advisor.narrative?.top_watch_signals ?? []
+                : [],
+            branches: snapshot.counterfactual_advisor.branches.map((branch) => ({
+              id: branch.branch_id,
+              title: branch.label,
+              summary: branch.one_line_summary,
+              recommended: branch.branch_id === snapshot.counterfactual_advisor?.narrative?.recommended_branch_id,
+              tone:
+                branch.branch_id === snapshot.counterfactual_advisor?.narrative?.recommended_branch_id
+                  ? "ok"
+                  : branch.projected_risk_trend === "worsening" || branch.validator_risk_exposure === "hard_prevent"
+                    ? "alert"
+                    : "neutral",
+              meta: [
+                branch.final_outcome ? `Outcome ${branch.final_outcome}` : `Risk ${branch.final_combined_risk_band}`,
+                `Validator ${branch.validator_risk_exposure}`,
+              ].join(" | "),
+            })),
+            followup:
+              snapshot.counterfactual_advisor.status === "ready" &&
+              snapshot.counterfactual_advisor.operator_followed_recommendation !== undefined
+                ? snapshot.counterfactual_advisor.operator_followed_recommendation
+                  ? "The next applied action matched the recommended branch."
+                  : "The next applied action diverged from the recommended branch."
+                : undefined,
+          },
+        }
+      : {}),
     laneItems: presentedLaneItems.map((item) => ({
       id: item.item_id,
       label: item.label,

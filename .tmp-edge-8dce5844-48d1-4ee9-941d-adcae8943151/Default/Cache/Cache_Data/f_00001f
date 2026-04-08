@@ -1,0 +1,244 @@
+export const scnMainSteamIsolationUpset = {
+	scenario_id: "scn_main_steam_isolation_upset",
+	version: "1.0.0",
+	title: "Main Steam Isolation Upset",
+	summary: "A non-electrical steam-path isolation upset trips the unit, removes the normal condenser sink, and creates a bounded window to establish isolation-condenser cooling before pressure consequences escalate.",
+	training_goal: "Recognize the trip plus steam-path collapse as a main-steam isolation event rather than a LoOP, then establish bounded IC recovery while offsite power remains available.",
+	initiating_event: "A main steam / reactor isolation disturbance collapses the normal steam path without offsite power loss.",
+	difficulty: "high",
+	tags: [
+		"steam-isolation",
+		"post-trip",
+		"heat-sink-loss",
+		"deterministic"
+	],
+	expected_duration_sec: 300,
+	deterministic_seed: "cluster2-main-steam-isolation-seed-01",
+	initial_plant_state: {
+		reactor_power_pct: 70,
+		vessel_water_level_m: 7.34,
+		vessel_pressure_mpa: 7.04,
+		main_steam_flow_pct: 70,
+		feedwater_flow_pct: 69,
+		turbine_output_mwe: 212,
+		condenser_heat_sink_available: true,
+		condenser_backpressure_kpa: 12,
+		isolation_condenser_available: true,
+		isolation_condenser_flow_pct: 0,
+		containment_pressure_kpa: 101,
+		offsite_power_available: true,
+		dc_bus_soc_pct: 93,
+		reactor_trip_active: false,
+		safety_relief_valve_open: false,
+		alarm_load_count: 0,
+		active_alarm_cluster_count: 0
+	},
+	phases: [
+		{
+			phase_id: "phase_nominal_monitoring",
+			label: "Nominal Monitoring",
+			description: "The operator begins from a stable pre-upset operating condition.",
+			completion_condition: { elapsed_time_sec_gte: 15 },
+			nominal_duration_sec: 15,
+			allowed_action_ids: ["act_ack_alarm"]
+		},
+		{
+			phase_id: "phase_isolation_onset",
+			label: "Isolation / Trip Onset",
+			description: "Steam-path collapse, trip, and loss of the normal sink create the initial diagnosis burden.",
+			completion_condition: { any: [{ action: {
+				action_id: "act_adjust_isolation_condenser",
+				performed: true
+			} }, { elapsed_time_sec_gte: 60 }] },
+			nominal_duration_sec: 60,
+			allowed_action_ids: ["act_ack_alarm", "act_adjust_isolation_condenser"]
+		},
+		{
+			phase_id: "phase_recovery_window",
+			label: "Alternate Heat-Sink Recovery Window",
+			description: "The operator has a bounded window to establish IC cooling before pressure and containment consequences compound.",
+			completion_condition: { any: [{ elapsed_time_sec_gte: 120 }] },
+			nominal_duration_sec: 120,
+			allowed_action_ids: ["act_ack_alarm", "act_adjust_isolation_condenser"]
+		},
+		{
+			phase_id: "phase_stabilization_or_escalation",
+			label: "Stabilization Or Pressure Escalation",
+			description: "The deterministic profile resolves toward bounded post-trip stabilization or pressure-facing consequence escalation.",
+			completion_condition: { any: [{ elapsed_time_sec_gte: 105 }] },
+			nominal_duration_sec: 105,
+			allowed_action_ids: ["act_ack_alarm", "act_adjust_isolation_condenser"]
+		}
+	],
+	event_injections: [{
+		injection_id: "inj_main_steam_isolation_onset",
+		phase_id: "phase_isolation_onset",
+		trigger: {
+			trigger_kind: "time_offset_sec",
+			phase_time_sec: 0
+		},
+		effects: [
+			{
+				variable_id: "reactor_trip_active",
+				effect_operation: "set",
+				value: true
+			},
+			{
+				variable_id: "condenser_heat_sink_available",
+				effect_operation: "set",
+				value: false
+			},
+			{
+				variable_id: "main_steam_flow_pct",
+				effect_operation: "ramp_to",
+				value: 28
+			},
+			{
+				variable_id: "turbine_output_mwe",
+				effect_operation: "ramp_to",
+				value: 18
+			},
+			{
+				variable_id: "vessel_pressure_mpa",
+				effect_operation: "delta",
+				value: .14
+			}
+		],
+		note: "Steam-path collapse trips the unit and removes the normal condenser sink without any electrical disturbance."
+	}, {
+		injection_id: "inj_main_steam_isolation_pressure_bias",
+		phase_id: "phase_recovery_window",
+		trigger: {
+			trigger_kind: "time_offset_sec",
+			phase_time_sec: 25
+		},
+		effects: [{
+			variable_id: "vessel_pressure_mpa",
+			effect_operation: "delta",
+			value: .18
+		}, {
+			variable_id: "containment_pressure_kpa",
+			effect_operation: "delta",
+			value: 1.4
+		}],
+		note: "If alternate heat-sink recovery is late or weak, pressure and containment consequence cues become explicit."
+	}],
+	alarm_hooks: [
+		{
+			hook_id: "hook_msi_ic_low_assert",
+			alarm_id: "ALM_ISOLATION_CONDENSER_FLOW_LOW",
+			trigger: {
+				trigger_kind: "condition",
+				condition: { all: [{ variable: {
+					variable_id: "condenser_heat_sink_available",
+					operator: "eq",
+					value: false
+				} }, { variable: {
+					variable_id: "isolation_condenser_flow_pct",
+					operator: "lt",
+					value: 56
+				} }] }
+			},
+			action: "assert",
+			note: "Scenario C needs an IC-low cue even though offsite power remains available."
+		},
+		{
+			hook_id: "hook_msi_pressure_high_assert",
+			alarm_id: "ALM_RPV_PRESSURE_HIGH",
+			trigger: {
+				trigger_kind: "condition",
+				condition: { variable: {
+					variable_id: "vessel_pressure_mpa",
+					operator: "gt",
+					value: 7.55
+				} }
+			},
+			action: "assert",
+			note: "Pressure rise marks a missed or incomplete alternate heat-sink recovery path."
+		},
+		{
+			hook_id: "hook_msi_turbine_low_assert",
+			alarm_id: "ALM_TURBINE_OUTPUT_LOW",
+			trigger: {
+				trigger_kind: "condition",
+				condition: { variable: {
+					variable_id: "turbine_output_mwe",
+					operator: "lt",
+					value: 55
+				} }
+			},
+			action: "assert",
+			note: "Turbine collapse makes the steam-path upset explicit without implying electrical loss."
+		}
+	],
+	allowed_operator_actions: [{
+		action_id: "act_ack_alarm",
+		label: "Acknowledge highlighted alarm",
+		category: "acknowledgement",
+		target_variable_ids: ["alarm_load_count"],
+		allowed_phase_ids: [
+			"phase_nominal_monitoring",
+			"phase_isolation_onset",
+			"phase_recovery_window",
+			"phase_stabilization_or_escalation"
+		],
+		can_change_progression: false,
+		unsafe_if_misused: false,
+		requires_validation: false,
+		effect_note: "Records operator acknowledgement without changing plant state."
+	}, {
+		action_id: "act_adjust_isolation_condenser",
+		label: "Adjust isolation condenser demand",
+		category: "control_input",
+		target_variable_ids: ["isolation_condenser_flow_pct"],
+		allowed_phase_ids: [
+			"phase_isolation_onset",
+			"phase_recovery_window",
+			"phase_stabilization_or_escalation"
+		],
+		can_change_progression: true,
+		unsafe_if_misused: true,
+		requires_validation: true,
+		effect_note: "A bounded IC-demand alignment establishes alternate post-trip cooling; weak or reversed demand worsens pressure-facing escalation deterministically."
+	}],
+	expected_root_cause_hypothesis_id: "hyp_main_steam_isolation_upset",
+	success_condition: { all: [
+		{ action: {
+			action_id: "act_adjust_isolation_condenser",
+			performed: true
+		} },
+		{ variable: {
+			variable_id: "offsite_power_available",
+			operator: "eq",
+			value: true
+		} },
+		{ variable: {
+			variable_id: "isolation_condenser_flow_pct",
+			operator: "gte",
+			value: 60
+		} },
+		{ variable: {
+			variable_id: "vessel_pressure_mpa",
+			operator: "lte",
+			value: 7.24
+		} },
+		{ variable: {
+			variable_id: "containment_pressure_kpa",
+			operator: "lte",
+			value: 106
+		} },
+		{ elapsed_time_sec_gte: 180 }
+	] },
+	failure_condition: { any: [{ variable: {
+		variable_id: "containment_pressure_kpa",
+		operator: "gt",
+		value: 112
+	} }, { variable: {
+		variable_id: "vessel_pressure_mpa",
+		operator: "gt",
+		value: 7.84
+	} }] },
+	timeout_condition: { elapsed_time_sec_gte: 300 }
+};
+
+//# sourceMappingURL=data:application/json;base64,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LEVBQ2pCLEtBQUssQ0FDSCxFQUFFLFVBQVU7RUFBRSxhQUFhO0VBQTRCLFVBQVU7RUFBTSxPQUFPO0VBQUssRUFBRSxFQUNyRixFQUFFLFVBQVU7RUFBRSxhQUFhO0VBQXVCLFVBQVU7RUFBTSxPQUFPO0VBQU0sRUFBRSxDQUNsRixFQUNGO0NBQ0QsbUJBQW1CLEVBQUUsc0JBQXNCLEtBQUs7Q0FDakQiLCJuYW1lcyI6W10sInNvdXJjZXMiOlsic2NuX21haW5fc3RlYW1faXNvbGF0aW9uX3Vwc2V0LnRzIl0sInZlcnNpb24iOjMsInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB0eXBlIHsgU2NlbmFyaW9EZWZpbml0aW9uIH0gZnJvbSBcIi4uL2NvbnRyYWN0cy9hdXJhXCI7XG5cbmV4cG9ydCBjb25zdCBzY25NYWluU3RlYW1Jc29sYXRpb25VcHNldDogU2NlbmFyaW9EZWZpbml0aW9uID0ge1xuICBzY2VuYXJpb19pZDogXCJzY25fbWFpbl9zdGVhbV9pc29sYXRpb25fdXBzZXRcIixcbiAgdmVyc2lvbjogXCIxLjAuMFwiLFxuICB0aXRsZTogXCJNYWluIFN0ZWFtIElzb2xhdGlvbiBVcHNldFwiLFxuICBzdW1tYXJ5OlxuICAgIFwiQSBub24tZWxlY3RyaWNhbCBzdGVhbS1wYXRoIGlzb2xhdGlvbiB1cHNldCB0cmlwcyB0aGUgdW5pdCwgcmVtb3ZlcyB0aGUgbm9ybWFsIGNvbmRlbnNlciBzaW5rLCBhbmQgY3JlYXRlcyBhIGJvdW5kZWQgd2luZG93IHRvIGVzdGFibGlzaCBpc29sYXRpb24tY29uZGVuc2VyIGNvb2xpbmcgYmVmb3JlIHByZXNzdXJlIGNvbnNlcXVlbmNlcyBlc2NhbGF0ZS5cIixcbiAgdHJhaW5pbmdfZ29hbDpcbiAgICBcIlJlY29nbml6ZSB0aGUgdHJpcCBwbHVzIHN0ZWFtLXBhdGggY29sbGFwc2UgYXMgYSBtYWluLXN0ZWFtIGlzb2xhdGlvbiBldmVudCByYXRoZXIgdGhhbiBhIExvT1AsIHRoZW4gZXN0YWJsaXNoIGJvdW5kZWQgSUMgcmVjb3Zlcnkgd2hpbGUgb2Zmc2l0ZSBwb3dlciByZW1haW5zIGF2YWlsYWJsZS5cIixcbiAgaW5pdGlhdGluZ19ldmVudDogXCJBIG1haW4gc3RlYW0gLyByZWFjdG9yIGlzb2xhdGlvbiBkaXN0dXJiYW5jZSBjb2xsYXBzZXMgdGhlIG5vcm1hbCBzdGVhbSBwYXRoIHdpdGhvdXQgb2Zmc2l0ZSBwb3dlciBsb3NzLlwiLFxuICBkaWZmaWN1bHR5OiBcImhpZ2hcIixcbiAgdGFnczogW1wic3RlYW0taXNvbGF0aW9uXCIsIFwicG9zdC10cmlwXCIsIFwiaGVhdC1zaW5rLWxvc3NcIiwgXCJkZXRlcm1pbmlzdGljXCJdLFxuICBleHBlY3RlZF9kdXJhdGlvbl9zZWM6IDMwMCxcbiAgZGV0ZXJtaW5pc3RpY19zZWVkOiBcImNsdXN0ZXIyLW1haW4tc3RlYW0taXNvbGF0aW9uLXNlZWQtMDFcIixcbiAgaW5pdGlhbF9wbGFudF9zdGF0ZToge1xuICAgIHJlYWN0b3JfcG93ZXJfcGN0OiA3MCxcbiAgICB2ZXNzZWxfd2F0ZXJfbGV2ZWxfbTogNy4zNCxcbiAgICB2ZXNzZWxfcHJlc3N1cmVfbXBhOiA3LjA0LFxuICAgIG1haW5fc3RlYW1fZmxvd19wY3Q6IDcwLFxuICAgIGZlZWR3YXRlcl9mbG93X3BjdDogNjksXG4gICAgdHVyYmluZV9vdXRwdXRfbXdlOiAyMTIsXG4gICAgY29uZGVuc2VyX2hlYXRfc2lua19hdmFpbGFibGU6IHRydWUsXG4gICAgY29uZGVuc2VyX2JhY2twcmVzc3VyZV9rcGE6IDEyLFxuICAgIGlzb2xhdGlvbl9jb25kZW5zZXJfYXZhaWxhYmxlOiB0cnVlLFxuICAgIGlzb2xhdGlvbl9jb25kZW5zZXJfZmxvd19wY3Q6IDAsXG4gICAgY29udGFpbm1lbnRfcHJlc3N1cmVfa3BhOiAxMDEsXG4gICAgb2Zmc2l0ZV9wb3dlcl9hdmFpbGFibGU6IHRydWUsXG4gICAgZGNfYnVzX3NvY19wY3Q6IDkzLFxuICAgIHJlYWN0b3JfdHJpcF9hY3RpdmU6IGZhbHNlLFxuICAgIHNhZmV0eV9yZWxpZWZfdmFsdmVfb3BlbjogZmFsc2UsXG4gICAgYWxhcm1fbG9hZF9jb3VudDogMCxcbiAgICBhY3RpdmVfYWxhcm1fY2x1c3Rlcl9jb3VudDogMCxcbiAgfSxcbiAgcGhhc2VzOiBbXG4gICAge1xuICAgICAgcGhhc2VfaWQ6IFwicGhhc2Vfbm9taW5hbF9tb25pdG9yaW5nXCIsXG4gICAgICBsYWJlbDogXCJOb21pbmFsIE1vbml0b3JpbmdcIixcbiAgICAgIGRlc2NyaXB0aW9uOiBcIlRoZSBvcGVyYXRvciBiZWdpbnMgZnJvbSBhIHN0YWJsZSBwcmUtdXBzZXQgb3BlcmF0aW5nIGNvbmRpdGlvbi5cIixcbiAgICAgIGNvbXBsZXRpb25fY29uZGl0aW9uOiB7IGVsYXBzZWRfdGltZV9zZWNfZ3RlOiAxNSB9LFxuICAgICAgbm9taW5hbF9kdXJhdGlvbl9zZWM6IDE1LFxuICAgICAgYWxsb3dlZF9hY3Rpb25faWRzOiBbXCJhY3RfYWNrX2FsYXJtXCJdLFxuICAgIH0sXG4gICAge1xuICAgICAgcGhhc2VfaWQ6IFwicGhhc2VfaXNvbGF0aW9uX29uc2V0XCIsXG4gICAgICBsYWJlbDogXCJJc29sYXRpb24gLyBUcmlwIE9uc2V0XCIsXG4gICAgICBkZXNjcmlwdGlvbjogXCJTdGVhbS1wYXRoIGNvbGxhcHNlLCB0cmlwLCBhbmQgbG9zcyBvZiB0aGUgbm9ybWFsIHNpbmsgY3JlYXRlIHRoZSBpbml0aWFsIGRpYWdub3NpcyBidXJkZW4uXCIsXG4gICAgICBjb21wbGV0aW9uX2NvbmRpdGlvbjoge1xuICAgICAgICBhbnk6IFt7IGFjdGlvbjogeyBhY3Rpb25faWQ6IFwiYWN0X2FkanVzdF9pc29sYXRpb25fY29uZGVuc2VyXCIsIHBlcmZvcm1lZDogdHJ1ZSB9IH0sIHsgZWxhcHNlZF90aW1lX3NlY19ndGU6IDYwIH1dLFxuICAgICAgfSxcbiAgICAgIG5vbWluYWxfZHVyYXRpb25fc2VjOiA2MCxcbiAgICAgIGFsbG93ZWRfYWN0aW9uX2lkczogW1wiYWN0X2Fja19hbGFybVwiLCBcImFjdF9hZGp1c3RfaXNvbGF0aW9uX2NvbmRlbnNlclwiXSxcbiAgICB9LFxuICAgIHtcbiAgICAgIHBoYXNlX2lkOiBcInBoYXNlX3JlY292ZXJ5X3dpbmRvd1wiLFxuICAgICAgbGFiZWw6IFwiQWx0ZXJuYXRlIEhlYXQtU2luayBSZWNvdmVyeSBXaW5kb3dcIixcbiAgICAgIGRlc2NyaXB0aW9uOiBcIlRoZSBvcGVyYXRvciBoYXMgYSBib3VuZGVkIHdpbmRvdyB0byBlc3RhYmxpc2ggSUMgY29vbGluZyBiZWZvcmUgcHJlc3N1cmUgYW5kIGNvbnRhaW5tZW50IGNvbnNlcXVlbmNlcyBjb21wb3VuZC5cIixcbiAgICAgIGNvbXBsZXRpb25fY29uZGl0aW9uOiB7IGFueTogW3sgZWxhcHNlZF90aW1lX3NlY19ndGU6IDEyMCB9XSB9LFxuICAgICAgbm9taW5hbF9kdXJhdGlvbl9zZWM6IDEyMCxcbiAgICAgIGFsbG93ZWRfYWN0aW9uX2lkczogW1wiYWN0X2Fja19hbGFybVwiLCBcImFjdF9hZGp1c3RfaXNvbGF0aW9uX2NvbmRlbnNlclwiXSxcbiAgICB9LFxuICAgIHtcbiAgICAgIHBoYXNlX2lkOiBcInBoYXNlX3N0YWJpbGl6YXRpb25fb3JfZXNjYWxhdGlvblwiLFxuICAgICAgbGFiZWw6IFwiU3RhYmlsaXphdGlvbiBPciBQcmVzc3VyZSBFc2NhbGF0aW9uXCIsXG4gICAgICBkZXNjcmlwdGlvbjogXCJUaGUgZGV0ZXJtaW5pc3RpYyBwcm9maWxlIHJlc29sdmVzIHRvd2FyZCBib3VuZGVkIHBvc3QtdHJpcCBzdGFiaWxpemF0aW9uIG9yIHByZXNzdXJlLWZhY2luZyBjb25zZXF1ZW5jZSBlc2NhbGF0aW9uLlwiLFxuICAgICAgY29tcGxldGlvbl9jb25kaXRpb246IHsgYW55OiBbeyBlbGFwc2VkX3RpbWVfc2VjX2d0ZTogMTA1IH1dIH0sXG4gICAgICBub21pbmFsX2R1cmF0aW9uX3NlYzogMTA1LFxuICAgICAgYWxsb3dlZF9hY3Rpb25faWRzOiBbXCJhY3RfYWNrX2FsYXJtXCIsIFwiYWN0X2FkanVzdF9pc29sYXRpb25fY29uZGVuc2VyXCJdLFxuICAgIH0sXG4gIF0sXG4gIGV2ZW50X2luamVjdGlvbnM6IFtcbiAgICB7XG4gICAgICBpbmplY3Rpb25faWQ6IFwiaW5qX21haW5fc3RlYW1faXNvbGF0aW9uX29uc2V0XCIsXG4gICAgICBwaGFzZV9pZDogXCJwaGFzZV9pc29sYXRpb25fb25zZXRcIixcbiAgICAgIHRyaWdnZXI6IHsgdHJpZ2dlcl9raW5kOiBcInRpbWVfb2Zmc2V0X3NlY1wiLCBwaGFzZV90aW1lX3NlYzogMCB9LFxuICAgICAgZWZmZWN0czogW1xuICAgICAgICB7IHZhcmlhYmxlX2lkOiBcInJlYWN0b3JfdHJpcF9hY3RpdmVcIiwgZWZmZWN0X29wZXJhdGlvbjogXCJzZXRcIiwgdmFsdWU6IHRydWUgfSxcbiAgICAgICAgeyB2YXJpYWJsZV9pZDogXCJjb25kZW5zZXJfaGVhdF9zaW5rX2F2YWlsYWJsZVwiLCBlZmZlY3Rfb3BlcmF0aW9uOiBcInNldFwiLCB2YWx1ZTogZmFsc2UgfSxcbiAgICAgICAgeyB2YXJpYWJsZV9pZDogXCJtYWluX3N0ZWFtX2Zsb3dfcGN0XCIsIGVmZmVjdF9vcGVyYXRpb246IFwicmFtcF90b1wiLCB2YWx1ZTogMjggfSxcbiAgICAgICAgeyB2YXJpYWJsZV9pZDogXCJ0dXJiaW5lX291dHB1dF9td2VcIiwgZWZmZWN0X29wZXJhdGlvbjogXCJyYW1wX3RvXCIsIHZhbHVlOiAxOCB9LFxuICAgICAgICB7IHZhcmlhYmxlX2lkOiBcInZlc3NlbF9wcmVzc3VyZV9tcGFcIiwgZWZmZWN0X29wZXJhdGlvbjogXCJkZWx0YVwiLCB2YWx1ZTogMC4xNCB9LFxuICAgICAgXSxcbiAgICAgIG5vdGU6IFwiU3RlYW0tcGF0aCBjb2xsYXBzZSB0cmlwcyB0aGUgdW5pdCBhbmQgcmVtb3ZlcyB0aGUgbm9ybWFsIGNvbmRlbnNlciBzaW5rIHdpdGhvdXQgYW55IGVsZWN0cmljYWwgZGlzdHVyYmFuY2UuXCIsXG4gICAgfSxcbiAgICB7XG4gICAgICBpbmplY3Rpb25faWQ6IFwiaW5qX21haW5fc3RlYW1faXNvbGF0aW9uX3ByZXNzdXJlX2JpYXNcIixcbiAgICAgIHBoYXNlX2lkOiBcInBoYXNlX3JlY292ZXJ5X3dpbmRvd1wiLFxuICAgICAgdHJpZ2dlcjogeyB0cmlnZ2VyX2tpbmQ6IFwidGltZV9vZmZzZXRfc2VjXCIsIHBoYXNlX3RpbWVfc2VjOiAyNSB9LFxuICAgICAgZWZmZWN0czogW1xuICAgICAgICB7IHZhcmlhYmxlX2lkOiBcInZlc3NlbF9wcmVzc3VyZV9tcGFcIiwgZWZmZWN0X29wZXJhdGlvbjogXCJkZWx0YVwiLCB2YWx1ZTogMC4xOCB9LFxuICAgICAgICB7IHZhcmlhYmxlX2lkOiBcImNvbnRhaW5tZW50X3ByZXNzdXJlX2twYVwiLCBlZmZlY3Rfb3BlcmF0aW9uOiBcImRlbHRhXCIsIHZhbHVlOiAxLjQgfSxcbiAgICAgIF0sXG4gICAgICBub3RlOiBcIklmIGFsdGVybmF0ZSBoZWF0LXNpbmsgcmVjb3ZlcnkgaXMgbGF0ZSBvciB3ZWFrLCBwcmVzc3VyZSBhbmQgY29udGFpbm1lbnQgY29uc2VxdWVuY2UgY3VlcyBiZWNvbWUgZXhwbGljaXQuXCIsXG4gICAgfSxcbiAgXSxcbiAgYWxhcm1faG9va3M6IFtcbiAgICB7XG4gICAgICBob29rX2lkOiBcImhvb2tfbXNpX2ljX2xvd19hc3NlcnRcIixcbiAgICAgIGFsYXJtX2lkOiBcIkFMTV9JU09MQVRJT05fQ09OREVOU0VSX0ZMT1dfTE9XXCIsXG4gICAgICB0cmlnZ2VyOiB7XG4gICAgICAgIHRyaWdnZXJfa2luZDogXCJjb25kaXRpb25cIixcbiAgICAgICAgY29uZGl0aW9uOiB7XG4gICAgICAgICAgYWxsOiBbXG4gICAgICAgICAgICB7IHZhcmlhYmxlOiB7IHZhcmlhYmxlX2lkOiBcImNvbmRlbnNlcl9oZWF0X3NpbmtfYXZhaWxhYmxlXCIsIG9wZXJhdG9yOiBcImVxXCIsIHZhbHVlOiBmYWxzZSB9IH0sXG4gICAgICAgICAgICB7IHZhcmlhYmxlOiB7IHZhcmlhYmxlX2lkOiBcImlzb2xhdGlvbl9jb25kZW5zZXJfZmxvd19wY3RcIiwgb3BlcmF0b3I6IFwibHRcIiwgdmFsdWU6IDU2IH0gfSxcbiAgICAgICAgICBdLFxuICAgICAgICB9LFxuICAgICAgfSxcbiAgICAgIGFjdGlvbjogXCJhc3NlcnRcIixcbiAgICAgIG5vdGU6IFwiU2NlbmFyaW8gQyBuZWVkcyBhbiBJQy1sb3cgY3VlIGV2ZW4gdGhvdWdoIG9mZnNpdGUgcG93ZXIgcmVtYWlucyBhdmFpbGFibGUuXCIsXG4gICAgfSxcbiAgICB7XG4gICAgICBob29rX2lkOiBcImhvb2tfbXNpX3ByZXNzdXJlX2hpZ2hfYXNzZXJ0XCIsXG4gICAgICBhbGFybV9pZDogXCJBTE1fUlBWX1BSRVNTVVJFX0hJR0hcIixcbiAgICAgIHRyaWdnZXI6IHtcbiAgICAgICAgdHJpZ2dlcl9raW5kOiBcImNvbmRpdGlvblwiLFxuICAgICAgICBjb25kaXRpb246IHsgdmFyaWFibGU6IHsgdmFyaWFibGVfaWQ6IFwidmVzc2VsX3ByZXNzdXJlX21wYVwiLCBvcGVyYXRvcjogXCJndFwiLCB2YWx1ZTogNy41NSB9IH0sXG4gICAgICB9LFxuICAgICAgYWN0aW9uOiBcImFzc2VydFwiLFxuICAgICAgbm90ZTogXCJQcmVzc3VyZSByaXNlIG1hcmtzIGEgbWlzc2VkIG9yIGluY29tcGxldGUgYWx0ZXJuYXRlIGhlYXQtc2luayByZWNvdmVyeSBwYXRoLlwiLFxuICAgIH0sXG4gICAge1xuICAgICAgaG9va19pZDogXCJob29rX21zaV90dXJiaW5lX2xvd19hc3NlcnRcIixcbiAgICAgIGFsYXJtX2lkOiBcIkFMTV9UVVJCSU5FX09VVFBVVF9MT1dcIixcbiAgICAgIHRyaWdnZXI6IHtcbiAgICAgICAgdHJpZ2dlcl9raW5kOiBcImNvbmRpdGlvblwiLFxuICAgICAgICBjb25kaXRpb246IHsgdmFyaWFibGU6IHsgdmFyaWFibGVfaWQ6IFwidHVyYmluZV9vdXRwdXRfbXdlXCIsIG9wZXJhdG9yOiBcImx0XCIsIHZhbHVlOiA1NSB9IH0sXG4gICAgICB9LFxuICAgICAgYWN0aW9uOiBcImFzc2VydFwiLFxuICAgICAgbm90ZTogXCJUdXJiaW5lIGNvbGxhcHNlIG1ha2VzIHRoZSBzdGVhbS1wYXRoIHVwc2V0IGV4cGxpY2l0IHdpdGhvdXQgaW1wbHlpbmcgZWxlY3RyaWNhbCBsb3NzLlwiLFxuICAgIH0sXG4gIF0sXG4gIGFsbG93ZWRfb3BlcmF0b3JfYWN0aW9uczogW1xuICAgIHtcbiAgICAgIGFjdGlvbl9pZDogXCJhY3RfYWNrX2FsYXJtXCIsXG4gICAgICBsYWJlbDogXCJBY2tub3dsZWRnZSBoaWdobGlnaHRlZCBhbGFybVwiLFxuICAgICAgY2F0ZWdvcnk6IFwiYWNrbm93bGVkZ2VtZW50XCIsXG4gICAgICB0YXJnZXRfdmFyaWFibGVfaWRzOiBbXCJhbGFybV9sb2FkX2NvdW50XCJdLFxuICAgICAgYWxsb3dlZF9waGFzZV9pZHM6IFtcbiAgICAgICAgXCJwaGFzZV9ub21pbmFsX21vbml0b3JpbmdcIixcbiAgICAgICAgXCJwaGFzZV9pc29sYXRpb25fb25zZXRcIixcbiAgICAgICAgXCJwaGFzZV9yZWNvdmVyeV93aW5kb3dcIixcbiAgICAgICAgXCJwaGFzZV9zdGFiaWxpemF0aW9uX29yX2VzY2FsYXRpb25cIixcbiAgICAgIF0sXG4gICAgICBjYW5fY2hhbmdlX3Byb2dyZXNzaW9uOiBmYWxzZSxcbiAgICAgIHVuc2FmZV9pZl9taXN1c2VkOiBmYWxzZSxcbiAgICAgIHJlcXVpcmVzX3ZhbGlkYXRpb246IGZhbHNlLFxuICAgICAgZWZmZWN0X25vdGU6IFwiUmVjb3JkcyBvcGVyYXRvciBhY2tub3dsZWRnZW1lbnQgd2l0aG91dCBjaGFuZ2luZyBwbGFudCBzdGF0ZS5cIixcbiAgICB9LFxuICAgIHtcbiAgICAgIGFjdGlvbl9pZDogXCJhY3RfYWRqdXN0X2lzb2xhdGlvbl9jb25kZW5zZXJcIixcbiAgICAgIGxhYmVsOiBcIkFkanVzdCBpc29sYXRpb24gY29uZGVuc2VyIGRlbWFuZFwiLFxuICAgICAgY2F0ZWdvcnk6IFwiY29udHJvbF9pbnB1dFwiLFxuICAgICAgdGFyZ2V0X3ZhcmlhYmxlX2lkczogW1wiaXNvbGF0aW9uX2NvbmRlbnNlcl9mbG93X3BjdFwiXSxcbiAgICAgIGFsbG93ZWRfcGhhc2VfaWRzOiBbXCJwaGFzZV9pc29sYXRpb25fb25zZXRcIiwgXCJwaGFzZV9yZWNvdmVyeV93aW5kb3dcIiwgXCJwaGFzZV9zdGFiaWxpemF0aW9uX29yX2VzY2FsYXRpb25cIl0sXG4gICAgICBjYW5fY2hhbmdlX3Byb2dyZXNzaW9uOiB0cnVlLFxuICAgICAgdW5zYWZlX2lmX21pc3VzZWQ6IHRydWUsXG4gICAgICByZXF1aXJlc192YWxpZGF0aW9uOiB0cnVlLFxuICAgICAgZWZmZWN0X25vdGU6XG4gICAgICAgIFwiQSBib3VuZGVkIElDLWRlbWFuZCBhbGlnbm1lbnQgZXN0YWJsaXNoZXMgYWx0ZXJuYXRlIHBvc3QtdHJpcCBjb29saW5nOyB3ZWFrIG9yIHJldmVyc2VkIGRlbWFuZCB3b3JzZW5zIHByZXNzdXJlLWZhY2luZyBlc2NhbGF0aW9uIGRldGVybWluaXN0aWNhbGx5LlwiLFxuICAgIH0sXG4gIF0sXG4gIGV4cGVjdGVkX3Jvb3RfY2F1c2VfaHlwb3RoZXNpc19pZDogXCJoeXBfbWFpbl9zdGVhbV9pc29sYXRpb25fdXBzZXRcIixcbiAgc3VjY2Vzc19jb25kaXRpb246IHtcbiAgICBhbGw6IFtcbiAgICAgIHsgYWN0aW9uOiB7IGFjdGlvbl9pZDogXCJhY3RfYWRqdXN0X2lzb2xhdGlvbl9jb25kZW5zZXJcIiwgcGVyZm9ybWVkOiB0cnVlIH0gfSxcbiAgICAgIHsgdmFyaWFibGU6IHsgdmFyaWFibGVfaWQ6IFwib2Zmc2l0ZV9wb3dlcl9hdmFpbGFibGVcIiwgb3BlcmF0b3I6IFwiZXFcIiwgdmFsdWU6IHRydWUgfSB9LFxuICAgICAgeyB2YXJpYWJsZTogeyB2YXJpYWJsZV9pZDogXCJpc29sYXRpb25fY29uZGVuc2VyX2Zsb3dfcGN0XCIsIG9wZXJhdG9yOiBcImd0ZVwiLCB2YWx1ZTogNjAgfSB9LFxuICAgICAgeyB2YXJpYWJsZTogeyB2YXJpYWJsZV9pZDogXCJ2ZXNzZWxfcHJlc3N1cmVfbXBhXCIsIG9wZXJhdG9yOiBcImx0ZVwiLCB2YWx1ZTogNy4yNCB9IH0sXG4gICAgICB7IHZhcmlhYmxlOiB7IHZhcmlhYmxlX2lkOiBcImNvbnRhaW5tZW50X3ByZXNzdXJlX2twYVwiLCBvcGVyYXRvcjogXCJsdGVcIiwgdmFsdWU6IDEwNiB9IH0sXG4gICAgICB7IGVsYXBzZWRfdGltZV9zZWNfZ3RlOiAxODAgfSxcbiAgICBdLFxuICB9LFxuICBmYWlsdXJlX2NvbmRpdGlvbjoge1xuICAgIGFueTogW1xuICAgICAgeyB2YXJpYWJsZTogeyB2YXJpYWJsZV9pZDogXCJjb250YWlubWVudF9wcmVzc3VyZV9rcGFcIiwgb3BlcmF0b3I6IFwiZ3RcIiwgdmFsdWU6IDExMiB9IH0sXG4gICAgICB7IHZhcmlhYmxlOiB7IHZhcmlhYmxlX2lkOiBcInZlc3NlbF9wcmVzc3VyZV9tcGFcIiwgb3BlcmF0b3I6IFwiZ3RcIiwgdmFsdWU6IDcuODQgfSB9LFxuICAgIF0sXG4gIH0sXG4gIHRpbWVvdXRfY29uZGl0aW9uOiB7IGVsYXBzZWRfdGltZV9zZWNfZ3RlOiAzMDAgfSxcbn07XG4iXX0=

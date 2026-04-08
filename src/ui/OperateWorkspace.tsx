@@ -23,6 +23,7 @@ type OperateWorkspaceProps = {
   onRequestLaneAction: (actionId: string, recommendedValue?: number) => void;
   onChangeControlValue: (controlId: string, value: number) => void;
   onApplyControlAction: (control: ScenarioControlRangeSchema, value: number) => void;
+  onRequestCounterfactualAdvisor: (control?: ScenarioControlRangeSchema, value?: number) => void;
   onTriggerValidationDemoPreset: (control: ScenarioControlRangeSchema, requestedValue: number, label: string) => void;
   onAcknowledgeTopAlarm: () => void;
   onConfirmPendingAction: () => void;
@@ -103,6 +104,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
     onRequestLaneAction,
     onChangeControlValue,
     onApplyControlAction,
+    onRequestCounterfactualAdvisor,
     onTriggerValidationDemoPreset,
     onAcknowledgeTopAlarm,
     onConfirmPendingAction,
@@ -456,6 +458,14 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                     >
                       {control.apply_button_label}
                     </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={actionConfirmationPending || model.counterfactualAdvisor?.status === "loading"}
+                      onClick={() => onRequestCounterfactualAdvisor(control, controlValue)}
+                    >
+                      Preview with AI
+                    </button>
                   </div>
                   {presets.length > 0 ? (
                     <div className="preset-strip">
@@ -497,6 +507,67 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
               </button>
             </div>
           </div>
+        </SectionShell>
+
+        <SectionShell
+          className="operate-advisor"
+          title="What Happens Next?"
+          subtitle="Bounded branch preview compares guided recovery, the current manual request, and hold/no-action before you commit."
+        >
+          <div className="section-divider">
+            <div>
+              <strong>{model.counterfactualAdvisor?.headline ?? "No branch preview yet"}</strong>
+              <p>
+                {model.counterfactualAdvisor?.summary ??
+                  "Run the advisor to compare three short-horizon branches grounded in the current twin, alarms, and support lane."}
+              </p>
+            </div>
+            {model.counterfactualAdvisor?.providerLabel ? (
+              <StatusPill tone={model.counterfactualAdvisor.status === "ready" ? "ok" : "neutral"}>
+                {model.counterfactualAdvisor.providerLabel}
+              </StatusPill>
+            ) : null}
+          </div>
+
+          <div className="utility-action-row">
+            <button
+              type="button"
+              disabled={actionConfirmationPending || model.counterfactualAdvisor?.status === "loading"}
+              onClick={() =>
+                onRequestCounterfactualAdvisor(
+                  snapshot.manual_control_schema.controls[0],
+                  controlValues[snapshot.manual_control_schema.controls[0]?.control_id ?? ""] ??
+                    snapshot.manual_control_schema.controls[0]?.default_value,
+                )
+              }
+            >
+              {model.counterfactualAdvisor?.status === "loading" ? "Generating preview..." : "Preview next-action branches"}
+            </button>
+          </div>
+
+          {model.counterfactualAdvisor ? (
+            <>
+              <div className="advisor-branch-list">
+                {model.counterfactualAdvisor.branches.map((branch) => (
+                  <article key={branch.id} className={cx("advisor-branch-card", branch.recommended && "advisor-branch-card--recommended")}>
+                    <div className="section-divider">
+                      <strong>{branch.title}</strong>
+                      <StatusPill tone={branch.tone}>{branch.recommended ? "Recommended" : "Compared"}</StatusPill>
+                    </div>
+                    <p>{branch.summary}</p>
+                    <p className="lane-meta">{branch.meta}</p>
+                  </article>
+                ))}
+              </div>
+              {model.counterfactualAdvisor.topWatchSignals.length > 0 ? (
+                <p className="lane-meta">Watch next: {model.counterfactualAdvisor.topWatchSignals.join(", ")}</p>
+              ) : null}
+              {model.counterfactualAdvisor.confidenceCaveat ? (
+                <p className="lane-caution">{model.counterfactualAdvisor.confidenceCaveat}</p>
+              ) : null}
+              {model.counterfactualAdvisor.followup ? <p className="lane-meta">{model.counterfactualAdvisor.followup}</p> : null}
+            </>
+          ) : null}
         </SectionShell>
 
         <SectionShell

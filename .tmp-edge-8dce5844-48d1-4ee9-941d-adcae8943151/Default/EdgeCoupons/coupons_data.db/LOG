@@ -1,0 +1,4 @@
+2026/04/08-00:07:05.056 6fd8 Creating DB C:\Users\hassan\Documents\aura-idcr\.tmp-edge-8dce5844-48d1-4ee9-941d-adcae8943151\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/04/08-00:07:05.062 6fd8 Reusing MANIFEST C:\Users\hassan\Documents\aura-idcr\.tmp-edge-8dce5844-48d1-4ee9-941d-adcae8943151\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/04/08-00:07:05.067 bb40 Level-0 table #5: started
+2026/04/08-00:07:05.071 bb40 Level-0 table #5: 682105 bytes OK

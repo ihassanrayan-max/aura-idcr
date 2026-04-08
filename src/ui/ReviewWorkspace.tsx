@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type {
   CompletedSessionReview,
+  CounterfactualAdvisorState,
   SessionLogEvent,
   SessionRunComparison,
 } from "../contracts/aura";
@@ -263,6 +264,7 @@ function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
 type ReviewWorkspaceProps = {
   model: ReviewWorkspaceModel;
   completedReview?: CompletedSessionReview;
+  latestCounterfactualAdvisor?: CounterfactualAdvisorState;
   canonicalEvents: SessionLogEvent[];
   sessionRunComparison?: SessionRunComparison;
   sessionReportReady: boolean;
@@ -285,6 +287,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
   const {
     model,
     completedReview,
+    latestCounterfactualAdvisor,
     canonicalEvents,
     sessionRunComparison,
     sessionReportReady,
@@ -358,6 +361,36 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                 body="If an override-eligible hard prevent is requested, the approval flow will appear here without crowding Operate."
               />
             )}
+
+            {latestCounterfactualAdvisor?.status === "ready" ? (
+              <article className="review-card" data-testid="counterfactual-review-card">
+                <h3>Counterfactual advisor evidence</h3>
+                <p>
+                  Source tick <code>{latestCounterfactualAdvisor.source_tick_id}</code> at t+
+                  {formatClock(latestCounterfactualAdvisor.source_sim_time_sec)}
+                </p>
+                <p>
+                  Recommendation <strong>{latestCounterfactualAdvisor.narrative?.recommended_branch_id ?? "n/a"}</strong>
+                  {" | "}
+                  {latestCounterfactualAdvisor.narrative?.provider === "llm" ? "LLM-backed brief" : "Deterministic fallback brief"}
+                </p>
+                <ul className="review-list">
+                  {latestCounterfactualAdvisor.branches.map((branch) => (
+                    <li key={branch.branch_id}>
+                      <strong>{branch.label}</strong>: {branch.one_line_summary}
+                    </li>
+                  ))}
+                </ul>
+                {latestCounterfactualAdvisor.operator_followed_recommendation !== undefined ? (
+                  <p>
+                    Follow-up:{" "}
+                    {latestCounterfactualAdvisor.operator_followed_recommendation
+                      ? "the next applied action matched the recommendation."
+                      : "the next applied action diverged from the recommendation."}
+                  </p>
+                ) : null}
+              </article>
+            ) : null}
 
             <article className="review-card">
               <h3>Recent event stream</h3>

@@ -196,6 +196,48 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Operator Orientation/i)).toBeInTheDocument();
   });
 
+  it("generates a bounded counterfactual advisor preview without mutating the live session", async () => {
+    const store = new AuraSessionStore({ session_index: 130, tick_duration_sec: 5 });
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    const before = store.getSnapshot();
+
+    await act(async () => {
+      await store.requestCounterfactualAdvisor({
+        requested_control_id: before.manual_control_schema.controls[0]?.control_id,
+        requested_value: 70,
+      });
+    });
+
+    const after = store.getSnapshot();
+
+    expect(after.sim_time_sec).toBe(before.sim_time_sec);
+    expect(after.executed_actions).toHaveLength(before.executed_actions.length);
+    expect(after.counterfactual_advisor?.status).toBe("ready");
+    expect(after.counterfactual_advisor?.branches).toHaveLength(3);
+    expect(after.events.some((event) => event.event_type === "counterfactual_advisor_generated")).toBe(true);
+  });
+
+  it("renders the counterfactual advisor panel after the operator requests a preview", async () => {
+    const store = new AuraSessionStore({ session_index: 131, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      act(() => {
+        store.advanceTick();
+      });
+    }
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Preview next-action branches/i }));
+    });
+
+    expect(screen.getByText(/What Happens Next\?/i)).toBeInTheDocument();
+    expect(screen.getByText(/Recommended branch:/i)).toBeInTheDocument();
+  });
+
   it("records the required baseline log events for the corrected run", () => {
     const snapshot = runSuccessfulSession().getSnapshot();
     const eventTypes = snapshot.events.map((event) => event.event_type);
@@ -209,6 +251,7 @@ describe("AuraSessionStore", () => {
     expect(eventTypes).toContain("operator_action_applied");
     expect(eventTypes).toContain("operator_state_snapshot_recorded");
     expect(eventTypes).toContain("reasoning_snapshot_published");
+    expect(eventTypes).not.toContain("counterfactual_advisor_generated");
     expect(eventTypes).toContain("diagnosis_committed");
     expect(eventTypes).toContain("scenario_outcome_recorded");
     expect(eventTypes).toContain("session_ended");
@@ -220,6 +263,33 @@ describe("AuraSessionStore", () => {
     expect(snapshot.completed_review?.session_id).toBe(snapshot.session_id);
     expect(snapshot.completed_review?.terminal_outcome.outcome).toBe(snapshot.outcome?.outcome);
     expect(snapshot.completed_review?.kpi_summary.kpi_summary_id).toBe(snapshot.kpi_summary?.kpi_summary_id);
+  });
+
+  it("carries counterfactual advisor evidence into completed review artifacts", async () => {
+    const store = new AuraSessionStore({ session_index: 132, tick_duration_sec: 5 });
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    await store.requestCounterfactualAdvisor({
+      requested_control_id: store.getSnapshot().manual_control_schema.controls[0]?.control_id,
+      requested_value: 82,
+    });
+    store.requestAction({
+      action_id: "act_adjust_feedwater",
+      requested_value: 82,
+      ui_region: "plant_mimic",
+      reason_note: "Counterfactual follow-through test",
+    });
+    store.runUntilComplete(60);
+
+    const snapshot = store.getSnapshot();
+    const aiHighlight = snapshot.completed_review?.highlights.find((highlight) => highlight.kind === "ai_advisor");
+    const advisorRunsMetric = snapshot.kpi_summary?.metrics.find((metric) => metric.kpi_id === "counterfactual_advisor_runs");
+
+    expect(aiHighlight?.detail).toMatch(/Latest recommendation/i);
+    expect(advisorRunsMetric?.value).toBe(1);
+    expect(snapshot.events.some((event) => event.event_type === "counterfactual_advisor_followup_recorded")).toBe(true);
   });
 
   it("reduces visible overload with grouped alarms and keeps the dominant hypothesis stable", () => {

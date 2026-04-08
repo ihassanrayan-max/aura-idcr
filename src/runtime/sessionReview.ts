@@ -24,6 +24,8 @@ const KEY_EVENT_TYPES: ReadonlySet<SessionLogEventType> = new Set([
   "phase_changed",
   "diagnosis_committed",
   "support_mode_changed",
+  "counterfactual_advisor_generated",
+  "counterfactual_advisor_followup_recorded",
   "action_requested",
   "action_validated",
   "action_confirmation_recorded",
@@ -92,6 +94,26 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
         summary: [from && to ? `${from} -> ${to}` : to || from || "Support mode updated", reason && `- ${reason}`]
           .filter(Boolean)
           .join(" "),
+      };
+    }
+    case "counterfactual_advisor_generated": {
+      const recommended = typeof p.recommended_branch_id === "string" ? p.recommended_branch_id : "";
+      const provider = typeof p.narrative_provider === "string" ? p.narrative_provider : "";
+      return {
+        title: "Counterfactual advisor generated",
+        summary: [recommended && `Recommended branch: ${recommended}.`, provider && `Summary source: ${provider}.`]
+          .filter(Boolean)
+          .join(" ") || "Short-horizon branch comparison was generated.",
+      };
+    }
+    case "counterfactual_advisor_followup_recorded": {
+      const followed = p.followed_recommendation === true;
+      const matched = typeof p.matched_branch_id === "string" ? p.matched_branch_id : "";
+      return {
+        title: "Counterfactual follow-up recorded",
+        summary: followed
+          ? `The operator followed the recommended branch${matched ? ` (${matched})` : ""}.`
+          : `The next applied action diverged from the recommended branch${matched ? ` and matched ${matched}` : ""}.`,
       };
     }
     case "action_requested": {
@@ -360,6 +382,27 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
       kind: "intervention",
       label: "Interceptor activity",
       detail: `Hard prevents (harm-marked): ${prevents.length}. Soft warnings: ${soft.length}. Supervisor overrides applied: ${overrides.length}. Demo checkpoints completed: ${demoMarkers.length}/3.`,
+    });
+  }
+
+  const advisorRuns = events.filter((e) => e.event_type === "counterfactual_advisor_generated");
+  if (advisorRuns.length > 0) {
+    const latestAdvisor = advisorRuns[advisorRuns.length - 1]!;
+    const advisorPayload = latestAdvisor.payload;
+    const recommendedBranch =
+      typeof advisorPayload.recommended_branch_id === "string" ? advisorPayload.recommended_branch_id : "unknown";
+    const followup = events.find((event) => event.event_type === "counterfactual_advisor_followup_recorded");
+    const followed =
+      followup && followup.payload.followed_recommendation === true
+        ? "The next applied action matched the recommendation."
+        : followup
+          ? "The next applied action diverged from the recommendation."
+          : "No follow-up action was recorded after the latest preview.";
+    highlights.push({
+      highlight_id: `hl_ai_${latestAdvisor.event_id}`,
+      kind: "ai_advisor",
+      label: "Counterfactual advisor",
+      detail: `${advisorRuns.length} branch preview(s) generated. Latest recommendation: ${recommendedBranch}. ${followed}`,
     });
   }
 

@@ -9,6 +9,7 @@ export type SourceModule =
   | "reasoning_layer"
   | "adaptive_orchestrator"
   | "action_validator"
+  | "ai_advisor"
   | "hmi"
   | "evaluation";
 export type SupportMode =
@@ -390,6 +391,65 @@ export type FirstResponseLane = {
   items: FirstResponseItem[];
 };
 
+export type CounterfactualBranchId = "guided" | "operator_requested" | "hold";
+export type CounterfactualRiskTrend = "improving" | "flat" | "worsening";
+export type CounterfactualStabilizationLikelihood = "high" | "medium" | "low";
+export type CounterfactualValidatorRiskExposure = ValidationOutcome | "not_applicable";
+
+export type CounterfactualBranchAction = {
+  action_id: string;
+  action_label: string;
+  requested_value?: number;
+  requested_value_label?: string;
+};
+
+export type CounterfactualBranchResult = {
+  branch_id: CounterfactualBranchId;
+  label: string;
+  description: string;
+  simulated_action?: CounterfactualBranchAction;
+  final_outcome?: OutcomeKind;
+  projected_risk_trend: CounterfactualRiskTrend;
+  final_combined_risk_score: number;
+  final_combined_risk_band: CombinedRiskBand;
+  expected_alarm_ids_added: string[];
+  expected_alarm_ids_cleared: string[];
+  stabilization_likelihood: CounterfactualStabilizationLikelihood;
+  time_to_bad_threshold_sec?: number;
+  validator_risk_exposure: CounterfactualValidatorRiskExposure;
+  watch_signals: string[];
+  decision_score: number;
+  one_line_summary: string;
+};
+
+export type CounterfactualAdvisorNarrativeProvider = "llm" | "deterministic_fallback";
+
+export type CounterfactualAdvisorNarrative = {
+  provider: CounterfactualAdvisorNarrativeProvider;
+  model?: string;
+  recommended_branch_id: CounterfactualBranchId;
+  rationale: string;
+  why_not: string[];
+  top_watch_signals: string[];
+  confidence_caveat: string;
+};
+
+export type CounterfactualAdvisorState = {
+  status: "idle" | "loading" | "ready";
+  request_id: string;
+  source_tick_id: string;
+  source_sim_time_sec: number;
+  requested_control_id?: string;
+  requested_value?: number;
+  branches: CounterfactualBranchResult[];
+  narrative?: CounterfactualAdvisorNarrative;
+  error_message?: string;
+  operator_followed_recommendation?: boolean;
+  followed_branch_id?: CounterfactualBranchId;
+  followed_action_request_id?: string;
+  followup_recorded_at_sim_time_sec?: number;
+};
+
 export type SessionLogEventType =
   | "session_started"
   | "phase_changed"
@@ -398,6 +458,8 @@ export type SessionLogEventType =
   | "reasoning_snapshot_published"
   | "support_mode_changed"
   | "operator_state_snapshot_recorded"
+  | "counterfactual_advisor_generated"
+  | "counterfactual_advisor_followup_recorded"
   | "action_requested"
   | "action_validated"
   | "action_confirmation_recorded"
@@ -501,6 +563,7 @@ export type CompletedSessionReviewHighlightKind =
   | "storyline"
   | "assistance"
   | "intervention"
+  | "ai_advisor"
   | "workload"
   | "outcome";
 
@@ -690,6 +753,7 @@ export type SessionSnapshot = {
   alarm_history: LoggedAlarmState[];
   events: SessionLogEvent[];
   executed_actions: ExecutedAction[];
+  counterfactual_advisor?: CounterfactualAdvisorState;
   last_validation_result?: ActionValidationResult;
   pending_action_confirmation?: PendingActionConfirmation;
   pending_supervisor_override?: PendingSupervisorOverride;
