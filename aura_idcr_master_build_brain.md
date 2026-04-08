@@ -1260,6 +1260,21 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Add one narrow automatic advisor trigger tied to support-mode escalation or validator warning so the AI impact is even more visible during the live demo
 
+- Date: 2026-04-08
+- Agent/session: Codex GPT-5 testing-protocol documentation session
+- Task worked on: Rewrote `verification_report.md` into a detailed browser-driven test protocol for the AI Counterfactual Twin Advisor and clarified the current AI roadmap status
+- Status: Done
+- What changed:
+  - Replaced the older generic verification summary with a structured manual/browser testing document that tells a generic browser agent exactly how to validate the advisor across Operate, Review, all three scenarios, provider/fallback behavior, and evidence/reporting surfaces
+  - Added an explicit current-status section in the verification document clarifying that the implemented AI slice is the Counterfactual Twin Advisor, while the other proposed AI ideas remain unimplemented
+  - Added scenario-specific pass/fail expectations, screenshot/reporting guidance, and a suggested output template so external browser testing can return a high-signal report
+- What remains:
+  - The browser test protocol still needs to be executed by a live browser agent or human tester and reviewed against observed behavior
+- Blockers:
+  - None in repo; this slice is documentation-only
+- Next recommended step:
+  - Run the new browser protocol, review the resulting findings, and then implement the next narrow AI slice based on the highest-value gap exposed by that report
+
 ---
 
 ## 26) Final reminder to all future agents
