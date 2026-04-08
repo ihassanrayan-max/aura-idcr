@@ -87,14 +87,19 @@ describe("buildCompletedSessionReview", () => {
     expect(ka.milestones.map((m) => m.kind)).toContain("terminal_outcome");
     expect(ka.highlights.some((h) => h.kind === "outcome")).toBe(true);
     expect(ka.key_events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
+    expect(ka.key_events.some((event) => event.event_type === "reasoning_snapshot_published")).toBe(true);
     expect(ka.highlights.some((highlight) => highlight.kind === "human_monitoring")).toBe(true);
     expect(
       ka.key_events.find((event) => event.event_type === "human_monitoring_snapshot_recorded")?.summary,
     ).toMatch(/Contributing sources:/i);
+    expect(
+      ka.key_events.find((event) => event.event_type === "reasoning_snapshot_published")?.summary,
+    ).toMatch(/Recommended posture:/i);
     expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(/freshness/i);
     expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(
       /live monitoring sources contributed evidence during the run/i,
     );
+    expect(ka.highlights.find((highlight) => highlight.kind === "assistance")?.detail).toMatch(/Fusion confidence/i);
   });
 
   it("always includes terminal key events at the end of the key timeline", () => {

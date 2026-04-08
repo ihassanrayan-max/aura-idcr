@@ -44,35 +44,43 @@ function buildLane(): FirstResponseLane {
 
 function buildCombinedRisk(overrides: Partial<CombinedRiskSnapshot> = {}): CombinedRiskSnapshot {
   return {
+    risk_model_id: "hpsn_lite_v1",
     combined_risk_score: 54,
     combined_risk_band: "elevated",
+    plant_urgency_index: 60,
+    human_pressure_index: 58,
+    fusion_confidence: 82,
+    human_influence_scale: 1,
+    recommended_assistance_mode: "guided_support",
+    recommended_assistance_reason:
+      "Recommend Guided Support because elevated risk is being driven mainly by plant urgency and human workload pressure.",
     factor_breakdown: [
       {
-        factor_id: "plant_severity",
-        label: "Plant severity",
+        factor_id: "plant_urgency",
+        label: "Plant urgency",
         raw_index: 60,
         contribution: 20.4,
-        detail: "Plant severity is elevated.",
+        detail: "Plant urgency is elevated.",
       },
       {
-        factor_id: "operator_workload",
-        label: "Operator workload",
+        factor_id: "human_workload_pressure",
+        label: "Human workload pressure",
         raw_index: 72,
         contribution: 10.1,
         detail: "Workload is elevated.",
       },
       {
-        factor_id: "diagnosis_uncertainty",
-        label: "Diagnosis uncertainty",
+        factor_id: "storyline_procedure_pressure",
+        label: "Storyline/procedure pressure",
         raw_index: 48,
         contribution: 7.7,
         detail: "Reasoning is still settling.",
       },
     ],
-    top_contributing_factors: ["Plant severity", "Operator workload", "Diagnosis uncertainty"],
+    top_contributing_factors: ["Plant urgency", "Human workload pressure", "Storyline/procedure pressure"],
     confidence_caveat: "Signal confidence 82/100 from current runtime and session cues.",
-    why_risk_is_current: "Combined risk is elevated because plant severity and operator workload are the strongest current drivers.",
-    what_changed: "Risk is steady; plant severity remains the main driver.",
+    why_risk_is_current: "Elevated risk is being driven mainly by plant urgency and human workload pressure; the raw assistance recommendation is Guided Support.",
+    what_changed: "Risk is steady; plant urgency remains the main driver.",
     ...overrides,
   };
 }

@@ -338,11 +338,23 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         : [],
     })),
     supportMetrics: [
-      { label: "Combined risk", value: `${snapshot.combined_risk.combined_risk_score.toFixed(1)}/100`, caption: snapshot.combined_risk.combined_risk_band },
-      { label: "Assistance mode", value: formatSupportModeLabel(snapshot.support_mode) },
+      {
+        label: "Combined risk",
+        value: `${snapshot.combined_risk.combined_risk_score.toFixed(1)}/100`,
+        caption: `${snapshot.combined_risk.combined_risk_band} | fusion ${snapshot.combined_risk.fusion_confidence.toFixed(1)}/100`,
+      },
+      {
+        label: "Assistance mode",
+        value: formatSupportModeLabel(snapshot.support_mode),
+        caption: `Recommend ${formatSupportModeLabel(snapshot.combined_risk.recommended_assistance_mode)}`,
+      },
       { label: "Workload", value: `${snapshot.operator_state.workload_index}/100` },
       { label: "Attention stability", value: `${snapshot.operator_state.attention_stability_index}/100` },
-      { label: "Signal confidence", value: `${snapshot.operator_state.signal_confidence}/100` },
+      {
+        label: "Signal confidence",
+        value: `${snapshot.operator_state.signal_confidence}/100`,
+        caption: `Human influence ${snapshot.combined_risk.human_influence_scale.toFixed(2)}`,
+      },
     ],
     supportPills: [
       {
@@ -367,8 +379,12 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
     ],
     supportNotes: [
       {
+        label: "Recommendation now",
+        body: snapshot.combined_risk.recommended_assistance_reason,
+      },
+      {
         label: "Mode effect now",
-        body: snapshot.support_policy.support_behavior_changes.join(" "),
+        body: `${snapshot.support_policy.current_mode_reason} ${snapshot.support_policy.support_behavior_changes.join(" ")}`,
       },
       {
         label: "Why risk is here now",

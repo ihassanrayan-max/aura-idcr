@@ -248,6 +248,7 @@ describe("humanMonitoring interaction telemetry", () => {
     expect(interactionSource?.freshness_status).toBe("no_observations");
     expect(interactionSource?.contributes_to_aggregate).toBe(false);
     expect(interactionSource?.status_note).toMatch(/no practical operator interaction evidence has been captured yet/i);
+    expect(snapshot.interpretation_input?.risk_cues.inactivity_pressure ?? 0).toBeGreaterThanOrEqual(0);
   });
 
   it("produces a bounded live interaction contribution from a stable nominal interaction window", () => {
@@ -304,6 +305,8 @@ describe("humanMonitoring interaction telemetry", () => {
     expect(interactionSource?.confidence).toBeGreaterThanOrEqual(70);
     expect(interactionSource?.status_note).toMatch(/interaction telemetry observed/i);
     expect(snapshot.status_summary).toMatch(/interaction telemetry/i);
+    expect(snapshot.interpretation_input?.risk_cues.hesitation_pressure ?? 0).toBeGreaterThanOrEqual(0);
+    expect(snapshot.interpretation_input?.risk_cues.navigation_instability_pressure ?? 0).toBeGreaterThanOrEqual(0);
   });
 
   it("marks sparse interaction windows as degraded without claiming the source is unavailable", () => {
@@ -427,6 +430,9 @@ describe("humanMonitoring interaction telemetry", () => {
     expect(meaningfulSnapshot.interpretation_input?.workload_index ?? 0).toBeGreaterThan(
       calmSnapshot.interpretation_input?.workload_index ?? 0,
     );
+    expect(meaningfulSnapshot.interpretation_input?.risk_cues.inactivity_pressure ?? 0).toBeGreaterThan(
+      calmSnapshot.interpretation_input?.risk_cues.inactivity_pressure ?? 0,
+    );
     expect(meaningfulSnapshot.sources.find((source) => source.source_kind === "interaction_telemetry")?.status_note).toMatch(
       /hesitation pressure elevated/i,
     );
@@ -514,6 +520,7 @@ describe("humanMonitoring interaction telemetry", () => {
     expect(snapshot.mode).toBe("live_sources");
     expect(snapshot.interpretation_input?.contributing_source_ids).toContain("camera_cv");
     expect(cameraSource?.status_note).toMatch(/webcam monitoring reports stable face signal/i);
+    expect(snapshot.interpretation_input?.risk_cues.advisory_visual_attention_pressure ?? 0).toBeGreaterThan(0);
   });
 
   it("marks webcam permission denial as unavailable without claiming live contribution", () => {

@@ -222,6 +222,7 @@ function summarizeHumanMonitoring(human_monitoring: HumanMonitoringSnapshot) {
           workload_index: human_monitoring.interpretation_input.workload_index,
           attention_stability_index: human_monitoring.interpretation_input.attention_stability_index,
           signal_confidence: human_monitoring.interpretation_input.signal_confidence,
+          risk_cues: human_monitoring.interpretation_input.risk_cues,
           degraded_mode_active: human_monitoring.interpretation_input.degraded_mode_active,
           degraded_mode_reason: human_monitoring.interpretation_input.degraded_mode_reason,
           observation_window_ticks: human_monitoring.interpretation_input.observation_window_ticks,
@@ -347,7 +348,9 @@ export class AuraSessionStore {
     alarm_intelligence: AlarmIntelligenceSnapshot;
     reasoning_snapshot: ReasoningSnapshot;
     first_response_lane: FirstResponseLane;
+    current_phase: SessionSnapshot["current_phase"];
   } {
+    const current_phase = getActivePhase(this.scenario, this.scenario_runtime_state);
     const runtime_profile_id = this.runtime_profile_id;
     const alarm_intelligence = buildAlarmIntelligence(params.alarm_set, runtime_profile_id);
     const reasoning_result = buildReasoningSnapshot({
@@ -373,6 +376,7 @@ export class AuraSessionStore {
       alarm_intelligence,
       reasoning_snapshot: reasoning_result.reasoning_snapshot,
       first_response_lane,
+      current_phase,
     };
   }
 
@@ -426,13 +430,23 @@ export class AuraSessionStore {
     const operator_state = buildOperatorStateSnapshot({
       human_monitoring: human_monitoring_result.snapshot,
     });
+    const current_phase_elapsed_time_sec = getPhaseElapsedTimeSec(
+      params.sim_time_sec,
+      this.scenario_runtime_state,
+    );
 
     const combined_risk = buildCombinedRiskSnapshot({
+      sim_time_sec: params.sim_time_sec,
       plant_state: params.plant_state,
       alarm_set: params.alarm_set,
       alarm_intelligence: phase2_state.alarm_intelligence,
       reasoning_snapshot: phase2_state.reasoning_snapshot,
+      human_monitoring: human_monitoring_result.snapshot,
       operator_state,
+      first_response_lane: phase2_state.first_response_lane,
+      current_phase: phase2_state.current_phase,
+      current_phase_elapsed_time_sec,
+      scenario_expected_duration_sec: this.scenario.expected_duration_sec,
       previous_combined_risk: params.previous_snapshot?.combined_risk,
     });
     const support_mode_result =
@@ -623,9 +637,16 @@ export class AuraSessionStore {
         expected_root_cause_aligned: phase3_state.reasoning_snapshot.expected_root_cause_aligned,
         lane_item_ids: phase3_state.first_response_lane.items.map((item) => item.item_id),
         lane_items: summarizeLaneItems(phase3_state.first_response_lane),
+        risk_model_id: phase3_state.combined_risk.risk_model_id,
         combined_risk_score: phase3_state.combined_risk.combined_risk_score,
         combined_risk_band: phase3_state.combined_risk.combined_risk_band,
+        plant_urgency_index: phase3_state.combined_risk.plant_urgency_index,
+        human_pressure_index: phase3_state.combined_risk.human_pressure_index,
+        fusion_confidence: phase3_state.combined_risk.fusion_confidence,
+        human_influence_scale: phase3_state.combined_risk.human_influence_scale,
         top_contributing_factors: phase3_state.combined_risk.top_contributing_factors,
+        recommended_assistance_mode: phase3_state.combined_risk.recommended_assistance_mode,
+        recommended_assistance_reason: phase3_state.combined_risk.recommended_assistance_reason,
         confidence_caveat: phase3_state.combined_risk.confidence_caveat,
         factor_breakdown: summarizeRiskFactors(phase3_state.combined_risk),
         support_mode: phase3_state.support_mode,
@@ -1685,9 +1706,16 @@ export class AuraSessionStore {
         lane_changed: phase3_state.lane_changed,
         lane_item_ids: phase3_state.first_response_lane.items.map((item) => item.item_id),
         lane_items: summarizeLaneItems(phase3_state.first_response_lane),
+        risk_model_id: phase3_state.combined_risk.risk_model_id,
         combined_risk_score: phase3_state.combined_risk.combined_risk_score,
         combined_risk_band: phase3_state.combined_risk.combined_risk_band,
+        plant_urgency_index: phase3_state.combined_risk.plant_urgency_index,
+        human_pressure_index: phase3_state.combined_risk.human_pressure_index,
+        fusion_confidence: phase3_state.combined_risk.fusion_confidence,
+        human_influence_scale: phase3_state.combined_risk.human_influence_scale,
         top_contributing_factors: phase3_state.combined_risk.top_contributing_factors,
+        recommended_assistance_mode: phase3_state.combined_risk.recommended_assistance_mode,
+        recommended_assistance_reason: phase3_state.combined_risk.recommended_assistance_reason,
         confidence_caveat: phase3_state.combined_risk.confidence_caveat,
         factor_breakdown: summarizeRiskFactors(phase3_state.combined_risk),
         support_mode: phase3_state.support_mode,
@@ -1706,6 +1734,8 @@ export class AuraSessionStore {
         payload: {
           from_mode: this.snapshot.support_mode,
           to_mode: phase3_state.support_mode,
+          recommended_mode: phase3_state.combined_risk.recommended_assistance_mode,
+          recommended_reason: phase3_state.combined_risk.recommended_assistance_reason,
           trigger_reason: phase3_state.support_policy.transition_reason,
           current_mode_reason: phase3_state.support_policy.current_mode_reason,
           support_behavior_changes: phase3_state.support_policy.support_behavior_changes,

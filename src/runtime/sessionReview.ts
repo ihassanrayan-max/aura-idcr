@@ -23,6 +23,7 @@ const KEY_EVENT_TYPES: ReadonlySet<SessionLogEventType> = new Set([
   "session_started",
   "phase_changed",
   "human_monitoring_snapshot_recorded",
+  "reasoning_snapshot_published",
   "diagnosis_committed",
   "support_mode_changed",
   "action_requested",
@@ -116,6 +117,26 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
             .join(" ") || "Human-monitoring foundation snapshot recorded.",
       };
     }
+    case "reasoning_snapshot_published": {
+      const dominant = typeof p.dominant_summary === "string" ? p.dominant_summary : "";
+      const riskBand = typeof p.combined_risk_band === "string" ? p.combined_risk_band : "";
+      const recommendation = typeof p.recommended_assistance_mode === "string" ? p.recommended_assistance_mode : "";
+      const topFactors = Array.isArray(p.top_contributing_factors)
+        ? p.top_contributing_factors.filter((value): value is string => typeof value === "string")
+        : [];
+      return {
+        title: "Reasoning snapshot published",
+        summary:
+          [
+            dominant,
+            riskBand ? `Risk band: ${riskBand}.` : "",
+            topFactors.length > 0 ? `Top contributors: ${topFactors.slice(0, 2).join(" and ")}.` : "",
+            recommendation ? `Recommended posture: ${recommendation}.` : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || "Reasoning snapshot published with updated risk and storyline context.",
+      };
+    }
     case "diagnosis_committed": {
       const id = typeof p.diagnosis_id === "string" ? p.diagnosis_id : "";
       const aligned = p.matches_expected_root_cause === true;
@@ -127,10 +148,15 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
     case "support_mode_changed": {
       const from = typeof p.from_mode === "string" ? p.from_mode : "";
       const to = typeof p.to_mode === "string" ? p.to_mode : "";
+      const recommendation = typeof p.recommended_mode === "string" ? p.recommended_mode : "";
       const reason = typeof p.trigger_reason === "string" ? p.trigger_reason : "";
       return {
         title: "Assistance mode changed",
-        summary: [from && to ? `${from} -> ${to}` : to || from || "Support mode updated", reason && `- ${reason}`]
+        summary: [
+          from && to ? `${from} -> ${to}` : to || from || "Support mode updated",
+          recommendation ? `(risk recommended ${recommendation})` : "",
+          reason && `- ${reason}`,
+        ]
           .filter(Boolean)
           .join(" "),
       };
@@ -376,19 +402,41 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
   }
 
   const support = events.filter((e) => e.event_type === "support_mode_changed");
+  const lastReasoningEvent = [...events].reverse().find((event) => event.event_type === "reasoning_snapshot_published");
   if (support.length > 0) {
     const last = support[support.length - 1]!;
     const p = last.payload;
     const to = typeof p.to_mode === "string" ? p.to_mode : "";
+    const recommended = typeof p.recommended_mode === "string" ? p.recommended_mode : "";
+    const fusionConfidence =
+      typeof lastReasoningEvent?.payload.fusion_confidence === "number"
+        ? lastReasoningEvent.payload.fusion_confidence
+        : undefined;
     highlights.push({
       highlight_id: `hl_asst_${last.event_id}`,
       kind: "assistance",
       label: "Assistance trajectory",
       detail:
         support.length === 1
-          ? `One assistance transition recorded${to ? ` (now ${to})` : ""}.`
-          : `${support.length} assistance transitions; final mode${to ? `: ${to}` : " recorded"}.`,
+          ? `One assistance transition recorded${to ? ` (now ${to})` : ""}.${recommended ? ` Risk recommendation ended at ${recommended}.` : ""}${typeof fusionConfidence === "number" ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}`
+          : `${support.length} assistance transitions; final mode${to ? `: ${to}` : " recorded"}.${recommended ? ` Risk recommendation ended at ${recommended}.` : ""}${typeof fusionConfidence === "number" ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}`,
     });
+  } else if (lastReasoningEvent) {
+    const recommended = typeof lastReasoningEvent.payload.recommended_assistance_mode === "string"
+      ? lastReasoningEvent.payload.recommended_assistance_mode
+      : "";
+    const fusionConfidence =
+      typeof lastReasoningEvent.payload.fusion_confidence === "number"
+        ? lastReasoningEvent.payload.fusion_confidence
+        : undefined;
+    if (recommended) {
+      highlights.push({
+        highlight_id: `hl_asst_${lastReasoningEvent.event_id}`,
+        kind: "assistance",
+        label: "Assistance trajectory",
+        detail: `No mode transition was required; the latest risk recommendation remained ${recommended}.${typeof fusionConfidence === "number" ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}`,
+      });
+    }
   }
 
   const latestMonitoring = [...events].reverse().find((e) => e.event_type === "human_monitoring_snapshot_recorded");

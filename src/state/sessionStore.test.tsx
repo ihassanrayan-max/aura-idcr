@@ -119,10 +119,18 @@ function summarizeStore(store: AuraSessionStore) {
     },
     operator_state: snapshot.operator_state,
     combined_risk: {
+      risk_model_id: snapshot.combined_risk.risk_model_id,
       combined_risk_score: snapshot.combined_risk.combined_risk_score,
       combined_risk_band: snapshot.combined_risk.combined_risk_band,
+      plant_urgency_index: snapshot.combined_risk.plant_urgency_index,
+      human_pressure_index: snapshot.combined_risk.human_pressure_index,
+      fusion_confidence: snapshot.combined_risk.fusion_confidence,
+      human_influence_scale: snapshot.combined_risk.human_influence_scale,
+      recommended_assistance_mode: snapshot.combined_risk.recommended_assistance_mode,
+      recommended_assistance_reason: snapshot.combined_risk.recommended_assistance_reason,
       top_contributing_factors: snapshot.combined_risk.top_contributing_factors,
       confidence_caveat: snapshot.combined_risk.confidence_caveat,
+      why_risk_is_current: snapshot.combined_risk.why_risk_is_current,
       what_changed: snapshot.combined_risk.what_changed,
       factor_breakdown: snapshot.combined_risk.factor_breakdown.map((factor) => ({
         factor_id: factor.factor_id,

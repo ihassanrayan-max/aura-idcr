@@ -350,10 +350,21 @@ export type HumanMonitoringSourceAvailability =
 
 export type HumanMonitoringFreshnessStatus = "current" | "aging" | "stale" | "no_observations";
 
+export type HumanMonitoringRiskCues = {
+  hesitation_pressure: number;
+  latency_trend_pressure: number;
+  reversal_oscillation_pressure: number;
+  inactivity_pressure: number;
+  burstiness_pressure: number;
+  navigation_instability_pressure: number;
+  advisory_visual_attention_pressure: number;
+};
+
 export type HumanMonitoringInterpretationInput = {
   workload_index: number;
   attention_stability_index: number;
   signal_confidence: number;
+  risk_cues: HumanMonitoringRiskCues;
   degraded_mode_active: boolean;
   degraded_mode_reason: string;
   observation_window_ticks: number;
@@ -415,12 +426,14 @@ export type CombinedRiskBand = "low" | "guarded" | "elevated" | "high";
 
 export type CombinedRiskFactor = {
   factor_id:
-    | "plant_severity"
-    | "alarm_burden"
-    | "diagnosis_uncertainty"
-    | "operator_workload"
+    | "plant_urgency"
+    | "alarm_escalation_pressure"
+    | "storyline_procedure_pressure"
+    | "phase_time_pressure"
+    | "human_workload_pressure"
     | "attention_instability"
-    | "signal_confidence_penalty";
+    | "interaction_friction"
+    | "human_confidence_penalty";
   label: string;
   raw_index: number;
   contribution: number;
@@ -428,8 +441,15 @@ export type CombinedRiskFactor = {
 };
 
 export type CombinedRiskSnapshot = {
+  risk_model_id: string;
   combined_risk_score: number;
   combined_risk_band: CombinedRiskBand;
+  plant_urgency_index: number;
+  human_pressure_index: number;
+  fusion_confidence: number;
+  human_influence_scale: number;
+  recommended_assistance_mode: SupportMode;
+  recommended_assistance_reason: string;
   factor_breakdown: CombinedRiskFactor[];
   top_contributing_factors: string[];
   confidence_caveat: string;

@@ -1318,6 +1318,28 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 4 HPSN-Lite fusion completion session
+- Task worked on: Finished Packet 4 by replacing the legacy combined-risk math with bounded HPSN-Lite plant+human fusion on the canonical monitoring backbone and wiring the richer recommendation metadata through support, review, and existing Operate text
+- Status: Done
+- What changed:
+  - Added `Packet4_PLAN.md` as the checked-in implementation plan for this packet and extended `src/contracts/aura.ts` additively with `risk_cues`, the new HPSN-Lite risk factor families, and richer `CombinedRiskSnapshot` metadata including `risk_model_id`, plant/human indices, fusion confidence, human influence scaling, and the risk-layer assistance recommendation
+  - Updated `src/runtime/humanMonitoring.ts` so interaction telemetry, the legacy placeholder fallback, and the advisory webcam source all publish bounded additive `risk_cues`, allowing Packet 4 fusion to use the canonical monitoring evaluator instead of inventing a parallel downstream monitoring path
+  - Replaced the previous risk computation in `src/runtime/combinedRisk.ts` with a bounded HPSN-Lite fusion model covering plant urgency, alarm escalation pressure, storyline/procedure pressure, phase/time pressure, human workload pressure, attention instability, interaction friction, and human-confidence penalty with fixed contribution caps, human-side confidence gating, one-sentence explanation text, and damped human-only dropoff behavior when plant/context stay steady
+  - Updated `src/state/sessionStore.ts` so canonical combined-risk publication now receives `human_monitoring`, `first_response_lane`, the active scenario phase, phase elapsed time, and scenario expected duration while preserving the required publication order `human_monitoring -> operator_state -> combined_risk` and keeping monitoring-only webcam refreshes bounded to monitoring/operator republish only
+  - Tightened `src/runtime/supportModePolicy.ts`, `src/runtime/actionValidator.ts`, `src/runtime/sessionReview.ts`, and `src/ui/viewModel.ts` so the risk-layer recommendation is visible downstream, support-mode dwell/guardrail behavior still controls the active posture, validator factor lookups use the new ids, completed review artifacts expose richer risk context, and the existing Operate support card shows fusion confidence, recommendation, and degraded-confidence posture without a layout redesign
+  - Extended verification in `src/runtime/combinedRisk.test.ts`, `src/runtime/humanMonitoring.test.ts`, `src/runtime/supportModePolicy.test.ts`, `src/runtime/supportRefinement.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx`, then re-verified with `npm test` and `npm run build`; the repo is green at 116 passing tests and still includes deterministic Scenario A/B/C progression coverage in the passing store suite
+- What remains:
+  - Packet 4 intentionally does not add a new `risk_state`, new UI regions, probabilistic or ML-driven plant progression, stronger visible adaptive UI changes, or any webcam-specific downstream fusion logic beyond the advisory attention cue already folded into the canonical risk layer
+  - The Vite production build still emits a large-chunk warning for the existing lazy MediaPipe bundle, but this packet did not broaden the webcam footprint and the build remains passing
+- Blockers:
+  - None in-repo after verification
+- Next recommended step:
+  - Packet 5 can now build stronger adaptive presentation behavior or evaluator/reporting polish on top of the richer canonical risk recommendation metadata without replacing the Packet 4 fusion model
+  - If future work needs additional human-side evidence, extend `risk_cues` through the canonical monitoring pipeline rather than adding ad hoc downstream factors
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

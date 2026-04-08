@@ -284,6 +284,22 @@ function roundIndex(value: number): number {
   return Math.round(clamp(value, 0, 100));
 }
 
+function emptyRiskCues(): HumanMonitoringInterpretationInput["risk_cues"] {
+  return {
+    hesitation_pressure: 0,
+    latency_trend_pressure: 0,
+    reversal_oscillation_pressure: 0,
+    inactivity_pressure: 0,
+    burstiness_pressure: 0,
+    navigation_instability_pressure: 0,
+    advisory_visual_attention_pressure: 0,
+  };
+}
+
+function clampRiskCue(value: number): number {
+  return roundIndex(clamp(value, 0, 100));
+}
+
 function topHypothesisGap(reasoning_snapshot: ReasoningSnapshot): number {
   const top_score = reasoning_snapshot.ranked_hypotheses[0]?.score ?? 0;
   const second_score = reasoning_snapshot.ranked_hypotheses[1]?.score ?? 0;
@@ -476,6 +492,29 @@ function buildInterpretationInput(params: {
       (contributor) => contributor.interpretation.attention_stability_index,
     ),
     signal_confidence: weightedAverage((contributor) => contributor.interpretation.signal_confidence),
+    risk_cues: {
+      hesitation_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.hesitation_pressure,
+      ),
+      latency_trend_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.latency_trend_pressure,
+      ),
+      reversal_oscillation_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.reversal_oscillation_pressure,
+      ),
+      inactivity_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.inactivity_pressure,
+      ),
+      burstiness_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.burstiness_pressure,
+      ),
+      navigation_instability_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.navigation_instability_pressure,
+      ),
+      advisory_visual_attention_pressure: weightedAverage(
+        (contributor) => contributor.interpretation.risk_cues.advisory_visual_attention_pressure,
+      ),
+    },
     degraded_mode_active: contributors.some((contributor) => contributor.interpretation.degraded_mode_active),
     degraded_mode_reason:
       degraded_reasons.join(" ") ||
@@ -884,6 +923,7 @@ function buildInteractionTelemetrySource(
         workload_index: 20,
         attention_stability_index: 82,
         signal_confidence: 32,
+        risk_cues: emptyRiskCues(),
         degraded_mode_active: true,
         degraded_mode_reason:
           "Interaction telemetry is connected but still waiting for practical operator interaction evidence.",
@@ -926,6 +966,10 @@ function buildInteractionTelemetrySource(
     0,
     42,
   );
+  const inactivity_pressure =
+    actionable_records.length === 0 || latest_interaction_age_sec > 12
+      ? clamp(meaningful_moment_pressure * 0.75 + Math.max(latest_interaction_age_sec - 10, 0) * 1.1, 0, 34)
+      : 0;
   const hesitation_index =
     actionable_records.length === 0
       ? clamp(meaningful_moment_pressure * 0.8 + latest_interaction_age_sec * 0.6, 0, 36)
@@ -1015,6 +1059,15 @@ function buildInteractionTelemetrySource(
       workload_index,
       attention_stability_index,
       signal_confidence: bounded_signal_confidence,
+      risk_cues: {
+        hesitation_pressure: clampRiskCue(hesitation_index),
+        latency_trend_pressure: clampRiskCue(latency_trend_index),
+        reversal_oscillation_pressure: clampRiskCue(reversal_pressure),
+        inactivity_pressure: clampRiskCue(inactivity_pressure),
+        burstiness_pressure: clampRiskCue(burstiness_index),
+        navigation_instability_pressure: clampRiskCue(navigation_instability_index),
+        advisory_visual_attention_pressure: 0,
+      },
       degraded_mode_active: degraded_reasons.length > 0 || bounded_signal_confidence < 70,
       degraded_mode_reason:
         degraded_reasons.length > 0
@@ -1065,6 +1118,7 @@ function buildCameraCvSource(context: HumanMonitoringAdapterContext): HumanMonit
         workload_index: 22,
         attention_stability_index: 68,
         signal_confidence: 18,
+        risk_cues: emptyRiskCues(),
         degraded_mode_active: true,
         degraded_mode_reason:
           "Webcam monitoring is still initializing, so visual proxies are not yet stable enough to interpret.",
@@ -1088,6 +1142,7 @@ function buildCameraCvSource(context: HumanMonitoringAdapterContext): HumanMonit
         workload_index: 24,
         attention_stability_index: 66,
         signal_confidence: 20,
+        risk_cues: emptyRiskCues(),
         degraded_mode_active: true,
         degraded_mode_reason:
           "Webcam monitoring is enabled but still waiting for a usable bounded visual observation window.",
@@ -1165,6 +1220,12 @@ function buildCameraCvSource(context: HumanMonitoringAdapterContext): HumanMonit
     latest_kind === "stable_face" && stable_observations.length >= 2 && bounded_signal_confidence >= 68
       ? "active"
       : "degraded";
+  const advisory_visual_attention_pressure = clampRiskCue(
+    presence_penalty * 1.2 +
+      average_center_offset * 34 +
+      average_head_motion * 30 +
+      Math.max(2 - stable_observations.length, 0) * 6,
+  );
   const interpretation_note = [
     `Webcam monitoring captured ${observations.length} recent visual samples.`,
     latest_kind === "stable_face"
@@ -1188,6 +1249,10 @@ function buildCameraCvSource(context: HumanMonitoringAdapterContext): HumanMonit
       workload_index,
       attention_stability_index,
       signal_confidence: bounded_signal_confidence,
+      risk_cues: {
+        ...emptyRiskCues(),
+        advisory_visual_attention_pressure,
+      },
       degraded_mode_active: availability !== "active" || bounded_signal_confidence < 70,
       degraded_mode_reason:
         degraded_reasons.length > 0
@@ -1348,6 +1413,19 @@ export function buildLegacyRuntimePlaceholderSource(
 
   const bounded_signal_confidence = roundIndex(clamp(signal_confidence, 15, 100));
   const degraded_mode_active = bounded_signal_confidence < 70;
+  const fallbackRiskCues = {
+    hesitation_pressure: clampRiskCue(interaction_gap_penalty * 1.9),
+    latency_trend_pressure: clampRiskCue(interaction_gap_penalty * 1.4),
+    reversal_oscillation_pressure: 0,
+    inactivity_pressure: clampRiskCue(interaction_gap_penalty * 2.1),
+    burstiness_pressure: clampRiskCue(
+      params.alarm_set.active_alarm_count >= 4 && params.reasoning_snapshot.changed_since_last_tick ? 8 : 2,
+    ),
+    navigation_instability_pressure: clampRiskCue(
+      params.lane_changed ? 10 : params.reasoning_snapshot.changed_since_last_tick ? 6 : 0,
+    ),
+    advisory_visual_attention_pressure: 0,
+  };
   const interpretation_note =
     "Legacy runtime placeholder adapter active through the canonical human-monitoring pipeline. This preserves current deterministic operator-state behavior until real monitoring sources are connected.";
 
@@ -1363,6 +1441,7 @@ export function buildLegacyRuntimePlaceholderSource(
         workload_index,
         attention_stability_index,
         signal_confidence: bounded_signal_confidence,
+        risk_cues: fallbackRiskCues,
         degraded_mode_active,
         degraded_mode_reason: degraded_mode_active
           ? `Confidence reduced: ${degraded_reasons.join("; ")}.`
@@ -1376,6 +1455,7 @@ export function buildLegacyRuntimePlaceholderSource(
       workload_index,
       attention_stability_index,
       signal_confidence: bounded_signal_confidence,
+      risk_cues: fallbackRiskCues,
       degraded_mode_active,
       degraded_mode_reason: degraded_mode_active
         ? `Confidence reduced: ${degraded_reasons.join("; ")}.`

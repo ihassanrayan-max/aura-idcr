@@ -134,10 +134,10 @@ const feedwaterConfig: NumericActionValidationConfig = {
     `Hold the recovery direction and move feedwater toward ${bounded_recovery_target}% rated instead of reducing it.`,
   recommended_target: (first_response_lane) => laneRecommendedTarget(first_response_lane, "act_adjust_feedwater", 82),
   risk_context: (params, bounded_recovery_target) => {
-    const plant_severity = factorRawIndex(params.combined_risk, "plant_severity");
+    const plant_urgency = factorRawIndex(params.combined_risk, "plant_urgency");
     return `${formatSupportModeLabel(params.support_mode)} is active, combined risk is ${params.combined_risk.combined_risk_band} (${params.combined_risk.combined_risk_score.toFixed(
       1,
-    )}/100), plant severity is ${plant_severity}/100, the dominant hypothesis is ${dominantHypothesisLabel(
+    )}/100), plant urgency is ${plant_urgency}/100, the dominant hypothesis is ${dominantHypothesisLabel(
       params.reasoning_snapshot,
     )}, and the current first-response lane points to a bounded recovery target near ${bounded_recovery_target}% rated.`;
   },
@@ -146,7 +146,7 @@ const feedwaterConfig: NumericActionValidationConfig = {
     escalationAlarmIds.some((alarm_id) => params.alarm_set.active_alarm_ids.includes(alarm_id)),
   protected_precision_active: (params, bounded_recovery_target, requested_setpoint) =>
     params.support_mode === "protected_response" &&
-    factorRawIndex(params.combined_risk, "plant_severity") >= 72 &&
+    factorRawIndex(params.combined_risk, "plant_urgency") >= 72 &&
     requested_setpoint !== bounded_recovery_target,
 };
 
