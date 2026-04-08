@@ -1,5 +1,11 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import type { ScenarioControlRangeSchema, SessionMode } from "./contracts/aura";
+import type {
+  AiAfterActionReviewerBriefing,
+  AiIncidentCommanderBriefing,
+  AiWhyAssistantBriefing,
+  ScenarioControlRangeSchema,
+  SessionMode,
+} from "./contracts/aura";
 import { buildPresentationPolicy, orderPresentedLaneItems } from "./runtime/presentationPolicy";
 import { buildComparisonReportArtifact, buildSessionAfterActionReport } from "./runtime/reportArtifacts";
 import { downloadReportArtifact } from "./runtime/reportExport";
@@ -12,6 +18,7 @@ import { OperateWorkspace } from "./ui/OperateWorkspace";
 import { MetricStrip, StatusPill } from "./ui/primitives";
 import { ReviewWorkspace } from "./ui/ReviewWorkspace";
 import { TutorialOverlay } from "./ui/TutorialOverlay";
+import { useAiBriefing } from "./ui/useAiBriefing";
 import { useWebcamMonitoring } from "./ui/useWebcamMonitoring";
 import {
   getTutorialFlow,
@@ -118,6 +125,37 @@ function checkpointPauseReason(
   return undefined;
 }
 
+function aiProviderLabel(entry?: { provider?: "llm" | "deterministic_fallback"; model?: string; used_fallback?: boolean }): string | undefined {
+  if (!entry?.provider) {
+    return undefined;
+  }
+
+  if (entry.provider === "llm") {
+    return `LLM briefing${entry.model ? ` (${entry.model})` : ""}`;
+  }
+
+  return entry.used_fallback ? "Deterministic fallback" : undefined;
+}
+
+function aiFallbackNote(entry?: { used_fallback?: boolean; failure_kind?: string }): string | undefined {
+  if (!entry?.used_fallback) {
+    return undefined;
+  }
+
+  switch (entry.failure_kind) {
+    case "rate_limited":
+      return "Fallback is shown because the structured AI request was rate-limited.";
+    case "not_configured":
+      return "Fallback is shown because the server-side AI key is not configured.";
+    case "invalid_response":
+      return "Fallback is shown because the AI response failed structured validation.";
+    case "network_error":
+      return "Fallback is shown because the AI request failed before a server response was available.";
+    default:
+      return "Fallback is shown because the structured AI response was unavailable.";
+  }
+}
+
 export default function App({ store = defaultStore, autoRun = false }: AppProps) {
   const snapshot = useAuraSessionSnapshot(store);
   const [workspace, setWorkspace] = useState<WorkspaceId>("operate");
@@ -136,6 +174,11 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     store === defaultStore && !readTutorialDismissed() ? { mode: "menu" } : { mode: "closed" },
   );
   const webcamMonitoring = useWebcamMonitoring({ store, snapshot });
+  const aiBriefing = useAiBriefing({
+    store,
+    snapshot,
+    completedReview: snapshot.completed_review,
+  });
 
   const previousSnapshotRef = useRef(snapshot);
   const tutorialAutoAdvanceStepRef = useRef<string | null>(null);
@@ -372,6 +415,73 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
         explanation: pendingSupervisorOverride.validation_result.explanation,
       }
     : undefined;
+
+  const incidentCommanderEntry =
+    aiBriefing.incidentCommander.entry?.kind === "incident_commander" ? aiBriefing.incidentCommander.entry : undefined;
+  const incidentCommanderView = incidentCommanderEntry
+    ? {
+        status: incidentCommanderEntry.status,
+        stale: aiBriefing.incidentCommander.stale,
+        providerLabel: aiProviderLabel(incidentCommanderEntry),
+        fallbackNote: aiFallbackNote(incidentCommanderEntry),
+        response: incidentCommanderEntry.response as AiIncidentCommanderBriefing | undefined,
+      }
+    : undefined;
+
+  const afterActionReviewerEntry =
+    aiBriefing.afterActionReviewer.entry?.kind === "after_action_reviewer"
+      ? aiBriefing.afterActionReviewer.entry
+      : undefined;
+  const afterActionReviewerView = afterActionReviewerEntry
+    ? {
+        status: afterActionReviewerEntry.status,
+        providerLabel: aiProviderLabel(afterActionReviewerEntry),
+        fallbackNote: aiFallbackNote(afterActionReviewerEntry),
+        response: afterActionReviewerEntry.response as AiAfterActionReviewerBriefing | undefined,
+      }
+    : undefined;
+
+  const supportCurrentWhyEntry =
+    aiBriefing.whyAssistant.entries.support_current?.kind === "why_assistant"
+      ? aiBriefing.whyAssistant.entries.support_current
+      : undefined;
+  const supportAlternativeWhyEntry =
+    aiBriefing.whyAssistant.entries.support_alternative?.kind === "why_assistant"
+      ? aiBriefing.whyAssistant.entries.support_alternative
+      : undefined;
+  const validatorWhyEntry =
+    aiBriefing.whyAssistant.entries.validator_last_result?.kind === "why_assistant"
+      ? aiBriefing.whyAssistant.entries.validator_last_result
+      : undefined;
+  const whyAssistantView = {
+    supportCurrent: supportCurrentWhyEntry
+      ? {
+          status: supportCurrentWhyEntry.status,
+          stale: aiBriefing.whyAssistant.stale.support_current,
+          providerLabel: aiProviderLabel(supportCurrentWhyEntry),
+          fallbackNote: aiFallbackNote(supportCurrentWhyEntry),
+          response: supportCurrentWhyEntry.response as AiWhyAssistantBriefing | undefined,
+        }
+      : undefined,
+    supportAlternative: supportAlternativeWhyEntry
+      ? {
+          status: supportAlternativeWhyEntry.status,
+          stale: aiBriefing.whyAssistant.stale.support_alternative,
+          providerLabel: aiProviderLabel(supportAlternativeWhyEntry),
+          fallbackNote: aiFallbackNote(supportAlternativeWhyEntry),
+          response: supportAlternativeWhyEntry.response as AiWhyAssistantBriefing | undefined,
+        }
+      : undefined,
+    validator: validatorWhyEntry
+      ? {
+          status: validatorWhyEntry.status,
+          stale: aiBriefing.whyAssistant.stale.validator_last_result,
+          providerLabel: aiProviderLabel(validatorWhyEntry),
+          fallbackNote: aiFallbackNote(validatorWhyEntry),
+          response: validatorWhyEntry.response as AiWhyAssistantBriefing | undefined,
+        }
+      : undefined,
+  };
 
   function recordTutorialSignal(signal: TutorialSignal): void {
     setTutorialState((current) => {
@@ -875,12 +985,17 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           snapshot={snapshot}
           model={operateModel}
           controlValues={controlValues}
+          incidentCommander={incidentCommanderView}
+          whyAssistant={whyAssistantView}
           actionConfirmationPending={actionConfirmationPending}
           pendingConfirmation={pendingConfirmation}
           pendingSupervisorOverride={pendingSupervisorOverride}
           presentationPolicy={presentationPolicy}
           isTutorialActionAllowed={isTutorialActionAllowed}
           onToggleCluster={toggleCluster}
+          onLoadIncidentCommander={aiBriefing.loadIncidentCommander}
+          onLoadWhyAssistant={aiBriefing.loadWhyAssistant}
+          onClearWhyAssistant={aiBriefing.clearWhyAssistant}
           onRequestLaneAction={requestLaneAction}
           onChangeControlValue={(controlId, value) =>
             {
@@ -916,9 +1031,11 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           sessionRunComparison={sessionRunComparison}
           sessionReportReady={Boolean(sessionAfterActionReport)}
           comparisonReportReady={Boolean(comparisonReportArtifact)}
+          afterActionReviewer={afterActionReviewerView}
           pendingSupervisorOverrideCard={pendingSupervisorOverrideCard}
           supervisorOverrideNote={supervisorOverrideNote}
           onSupervisorOverrideNoteChange={setSupervisorOverrideNote}
+          onLoadAfterActionReviewer={aiBriefing.loadAfterActionReviewer}
           onApproveOverride={() => store.approvePendingSupervisorOverride(supervisorOverrideNote)}
           onDenyOverride={() => store.denyPendingSupervisorOverride(supervisorOverrideNote)}
           onDownloadSessionReport={() => {

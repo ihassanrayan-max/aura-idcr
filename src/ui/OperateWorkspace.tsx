@@ -1,4 +1,6 @@
 import type {
+  AiIncidentCommanderBriefing,
+  AiWhyAssistantBriefing,
   PendingActionConfirmation,
   PendingSupervisorOverride,
   ScenarioControlRangeSchema,
@@ -15,11 +17,44 @@ type OperateWorkspaceProps = {
   snapshot: SessionSnapshot;
   model: OperateWorkspaceModel;
   controlValues: Record<string, number>;
+  incidentCommander?: {
+    status: "loading" | "ready";
+    stale?: boolean;
+    providerLabel?: string;
+    fallbackNote?: string;
+    response?: AiIncidentCommanderBriefing;
+  };
+  whyAssistant: {
+    supportCurrent?: {
+      status: "loading" | "ready";
+      stale?: boolean;
+      providerLabel?: string;
+      fallbackNote?: string;
+      response?: AiWhyAssistantBriefing;
+    };
+    supportAlternative?: {
+      status: "loading" | "ready";
+      stale?: boolean;
+      providerLabel?: string;
+      fallbackNote?: string;
+      response?: AiWhyAssistantBriefing;
+    };
+    validator?: {
+      status: "loading" | "ready";
+      stale?: boolean;
+      providerLabel?: string;
+      fallbackNote?: string;
+      response?: AiWhyAssistantBriefing;
+    };
+  };
   actionConfirmationPending: boolean;
   pendingConfirmation?: PendingActionConfirmation;
   pendingSupervisorOverride?: PendingSupervisorOverride;
   presentationPolicy: ReturnType<typeof buildPresentationPolicy>;
   onToggleCluster: (clusterId: string) => void;
+  onLoadIncidentCommander: (force?: boolean) => void;
+  onLoadWhyAssistant: (subjectId: "support_current" | "support_alternative" | "validator_last_result", force?: boolean) => void;
+  onClearWhyAssistant: (subjectId: "support_current" | "support_alternative" | "validator_last_result") => void;
   onRequestLaneAction: (actionId: string, recommendedValue?: number) => void;
   onChangeControlValue: (controlId: string, value: number) => void;
   onApplyControlAction: (control: ScenarioControlRangeSchema, value: number) => void;
@@ -91,16 +126,102 @@ function EidMassBalanceOverlay(props: {
   );
 }
 
+function InlineWhyPanel(props: {
+  title: string;
+  briefing?: {
+    status: "loading" | "ready";
+    stale?: boolean;
+    providerLabel?: string;
+    fallbackNote?: string;
+    response?: AiWhyAssistantBriefing;
+  };
+  onRefresh: () => void;
+  onHide: () => void;
+  testId: string;
+}) {
+  const { title, briefing, onRefresh, onHide, testId } = props;
+
+  if (!briefing) {
+    return null;
+  }
+
+  return (
+    <article className="ai-why-panel" data-testid={testId}>
+      <div className="section-divider">
+        <div>
+          <strong>{title}</strong>
+          {briefing.response ? <p>{briefing.response.short_answer}</p> : null}
+        </div>
+        {briefing.providerLabel ? <StatusPill tone={briefing.status === "ready" ? "ok" : "neutral"}>{briefing.providerLabel}</StatusPill> : null}
+      </div>
+
+      <div className="utility-action-row">
+        <button type="button" className="ghost-button" onClick={onRefresh}>
+          {briefing.status === "loading" ? "Refreshing..." : briefing.stale ? "Refresh explanation" : "Refresh"}
+        </button>
+        <button type="button" className="ghost-button" onClick={onHide}>
+          Hide explanation
+        </button>
+      </div>
+
+      {briefing.stale ? (
+        <p className="lane-caution">This explanation is anchored to an older tick. Refresh to ground it in the latest plant state.</p>
+      ) : null}
+      {briefing.fallbackNote ? <p className="lane-caution">{briefing.fallbackNote}</p> : null}
+
+      {briefing.response ? (
+        <>
+          {briefing.response.why_bullets.length > 0 ? (
+            <div className="ai-briefing-list">
+              <span className="utility-card__label">Why</span>
+              <ul className="review-list">
+                {briefing.response.why_bullets.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {briefing.response.why_not_bullets.length > 0 ? (
+            <div className="ai-briefing-list">
+              <span className="utility-card__label">Why not</span>
+              <ul className="review-list">
+                {briefing.response.why_not_bullets.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <p className="lane-meta">{briefing.response.confidence_note}</p>
+          {briefing.response.evidence_refs.length > 0 ? (
+            <div className="pill-row">
+              {briefing.response.evidence_refs.map((ref) => (
+                <StatusPill key={ref.ref_id} tone="neutral">
+                  {ref.label}
+                </StatusPill>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </article>
+  );
+}
+
 export function OperateWorkspace(props: OperateWorkspaceProps) {
   const {
     snapshot,
     model,
     controlValues,
+    incidentCommander,
+    whyAssistant,
     actionConfirmationPending,
     pendingConfirmation,
     pendingSupervisorOverride,
     presentationPolicy,
     onToggleCluster,
+    onLoadIncidentCommander,
+    onLoadWhyAssistant,
+    onClearWhyAssistant,
     onRequestLaneAction,
     onChangeControlValue,
     onApplyControlAction,
@@ -314,6 +435,86 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
             </div>
           </article>
 
+          <article className="ai-briefing-panel" data-testid="incident-commander-panel">
+            <div className="section-divider">
+              <div>
+                <span className="utility-card__label">AI Incident Commander</span>
+                <strong>Grounded live briefing</strong>
+                <p>Compact, structured, and anchored to the current deterministic runtime state.</p>
+              </div>
+              {incidentCommander?.providerLabel ? (
+                <StatusPill tone={incidentCommander.status === "ready" ? "ok" : "neutral"}>
+                  {incidentCommander.providerLabel}
+                </StatusPill>
+              ) : null}
+            </div>
+
+            <div className="utility-action-row">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={incidentCommander?.status === "loading"}
+                onClick={() => onLoadIncidentCommander(Boolean(incidentCommander))}
+              >
+                {incidentCommander?.status === "loading"
+                  ? "Generating briefing..."
+                  : incidentCommander
+                    ? "Refresh briefing"
+                    : "Generate AI briefing"}
+              </button>
+              {incidentCommander?.stale ? <StatusPill tone="neutral">Stale live anchor</StatusPill> : null}
+            </div>
+
+            {incidentCommander?.stale ? (
+              <p className="lane-caution">This briefing is anchored to an older tick. Refresh to ground it in the latest plant state.</p>
+            ) : null}
+            {incidentCommander?.fallbackNote ? <p className="lane-caution">{incidentCommander.fallbackNote}</p> : null}
+
+            {incidentCommander?.response ? (
+              <div className="ai-briefing-grid">
+                <article className="utility-card">
+                  <span className="utility-card__label">What is happening</span>
+                  <strong>{incidentCommander.response.headline}</strong>
+                  <p>{incidentCommander.response.situation_now}</p>
+                </article>
+                <article className="utility-card">
+                  <span className="utility-card__label">What to do next</span>
+                  <strong>{incidentCommander.response.command_intent}</strong>
+                  <ul className="review-list">
+                    {incidentCommander.response.priority_actions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+                <article className="utility-card">
+                  <span className="utility-card__label">What to watch next</span>
+                  <ul className="review-list">
+                    {incidentCommander.response.watchouts.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+                <article className="utility-card">
+                  <span className="utility-card__label">Why the system believes that</span>
+                  <p>{incidentCommander.response.confidence_note}</p>
+                  <p>{incidentCommander.response.operator_authority_note}</p>
+                  {incidentCommander.response.review_handoff_needed ? (
+                    <p className="lane-caution">Review handoff is needed before the blocked action can move forward.</p>
+                  ) : null}
+                </article>
+                {incidentCommander.response.evidence_refs.length > 0 ? (
+                  <div className="pill-row">
+                    {incidentCommander.response.evidence_refs.map((ref) => (
+                      <StatusPill key={ref.ref_id} tone="neutral">
+                        {ref.label}
+                      </StatusPill>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </article>
+
           <div className="lane-guidance-grid">
             {model.laneGuidanceCards.map((card) => (
               <article key={card.id} className={cx("lane-guidance-card", `lane-guidance-card--${card.tone}`)}>
@@ -394,6 +595,22 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                 </p>
               ) : null}
               <div className="utility-action-row">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => onLoadWhyAssistant("validator_last_result", Boolean(whyAssistant.validator))}
+                >
+                  {whyAssistant.validator?.status === "loading" ? "Explaining..." : "Why this result?"}
+                </button>
+              </div>
+              <InlineWhyPanel
+                title={whyAssistant.validator?.response?.question_label ?? "Why this result?"}
+                briefing={whyAssistant.validator}
+                onRefresh={() => onLoadWhyAssistant("validator_last_result", true)}
+                onHide={() => onClearWhyAssistant("validator_last_result")}
+                testId="validator-why-panel"
+              />
+              <div className="utility-action-row">
                 <button type="button" disabled={!isTutorialActionAllowed("actions:confirm-pending")} onClick={onConfirmPendingAction}>
                   Confirm and apply action
                 </button>
@@ -427,6 +644,26 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                 <p className="lane-meta">Safer direction: {lastValidation.recommended_safe_alternative}</p>
               ) : null}
               <p className="lane-caution">{lastValidation.confidence_note}</p>
+              {!pendingConfirmation ? (
+                <>
+                  <div className="utility-action-row">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => onLoadWhyAssistant("validator_last_result", Boolean(whyAssistant.validator))}
+                    >
+                      {whyAssistant.validator?.status === "loading" ? "Explaining..." : "Why this result?"}
+                    </button>
+                  </div>
+                  <InlineWhyPanel
+                    title={whyAssistant.validator?.response?.question_label ?? "Why this result?"}
+                    briefing={whyAssistant.validator}
+                    onRefresh={() => onLoadWhyAssistant("validator_last_result", true)}
+                    onHide={() => onClearWhyAssistant("validator_last_result")}
+                    testId="validator-why-panel"
+                  />
+                </>
+              ) : null}
               <div className="pill-row">
                 <StatusPill tone={lastValidation.requires_confirmation ? "neutral" : "ok"}>
                   {lastValidation.requires_confirmation ? "Confirmation required" : "No confirmation required"}
@@ -647,6 +884,36 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                     ))}
                   </div>
                 ) : null}
+                <div className="utility-action-row">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => onLoadWhyAssistant("support_current", Boolean(whyAssistant.supportCurrent))}
+                  >
+                    {whyAssistant.supportCurrent?.status === "loading" ? "Explaining..." : "Why this posture?"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => onLoadWhyAssistant("support_alternative", Boolean(whyAssistant.supportAlternative))}
+                  >
+                    {whyAssistant.supportAlternative?.status === "loading" ? "Explaining..." : "Why not the other posture?"}
+                  </button>
+                </div>
+                <InlineWhyPanel
+                  title={whyAssistant.supportCurrent?.response?.question_label ?? "Why this posture?"}
+                  briefing={whyAssistant.supportCurrent}
+                  onRefresh={() => onLoadWhyAssistant("support_current", true)}
+                  onHide={() => onClearWhyAssistant("support_current")}
+                  testId="support-why-panel"
+                />
+                <InlineWhyPanel
+                  title={whyAssistant.supportAlternative?.response?.question_label ?? "Why not the other posture?"}
+                  briefing={whyAssistant.supportAlternative}
+                  onRefresh={() => onLoadWhyAssistant("support_alternative", true)}
+                  onHide={() => onClearWhyAssistant("support_alternative")}
+                  testId="support-why-not-panel"
+                />
               </article>
             ) : null}
 

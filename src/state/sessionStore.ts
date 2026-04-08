@@ -2,6 +2,10 @@ import { useSyncExternalStore } from "react";
 import type {
   ActionRequest,
   ActionValidationResult,
+  AiBriefingAnchorKind,
+  AiBriefingFailureKind,
+  AiBriefingKind,
+  AiBriefingWhySubjectId,
   AlarmIntelligenceSnapshot,
   CombinedRiskSnapshot,
   CompletedSessionReview,
@@ -1140,6 +1144,92 @@ export class AuraSessionStore {
     this.support_mode_runtime_state = createSupportModeRuntimeState();
     this.snapshot = this.createInitialSnapshot();
     this.emit();
+  }
+
+  private refreshEventsOnly(): void {
+    this.snapshot = {
+      ...this.snapshot,
+      events: this.logger.list(),
+    };
+    this.emit();
+  }
+
+  recordAiBriefingRequested(params: {
+    briefing_kind: AiBriefingKind;
+    subject_id?: AiBriefingWhySubjectId;
+    anchor_kind: AiBriefingAnchorKind;
+    anchor_id: string;
+    schema_version: number;
+    sim_time_sec?: number;
+  }): void {
+    this.logger.append({
+      sim_time_sec: params.sim_time_sec ?? this.snapshot.sim_time_sec,
+      event_type: "ai_briefing_requested",
+      source_module: "ai_briefing_layer",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        briefing_kind: params.briefing_kind,
+        subject_id: params.subject_id ?? null,
+        anchor_kind: params.anchor_kind,
+        anchor_id: params.anchor_id,
+        schema_version: params.schema_version,
+      },
+      trace_refs:
+        params.anchor_kind === "live_tick" ? [{ ref_type: "tick_id", ref_value: params.anchor_id }] : [],
+    });
+    this.refreshEventsOnly();
+  }
+
+  recordAiBriefingResolved(params: {
+    briefing_kind: AiBriefingKind;
+    subject_id?: AiBriefingWhySubjectId;
+    anchor_id: string;
+    used_fallback: boolean;
+    evidence_ref_ids: string[];
+    schema_version: number;
+    sim_time_sec?: number;
+  }): void {
+    this.logger.append({
+      sim_time_sec: params.sim_time_sec ?? this.snapshot.sim_time_sec,
+      event_type: "ai_briefing_resolved",
+      source_module: "ai_briefing_layer",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        briefing_kind: params.briefing_kind,
+        subject_id: params.subject_id ?? null,
+        anchor_id: params.anchor_id,
+        used_fallback: params.used_fallback,
+        evidence_ref_ids: params.evidence_ref_ids,
+        schema_version: params.schema_version,
+      },
+    });
+    this.refreshEventsOnly();
+  }
+
+  recordAiBriefingFailed(params: {
+    briefing_kind: AiBriefingKind;
+    subject_id?: AiBriefingWhySubjectId;
+    anchor_id: string;
+    failure_kind: AiBriefingFailureKind;
+    fallback_used: boolean;
+    schema_version: number;
+    sim_time_sec?: number;
+  }): void {
+    this.logger.append({
+      sim_time_sec: params.sim_time_sec ?? this.snapshot.sim_time_sec,
+      event_type: "ai_briefing_failed",
+      source_module: "ai_briefing_layer",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        briefing_kind: params.briefing_kind,
+        subject_id: params.subject_id ?? null,
+        anchor_id: params.anchor_id,
+        failure_kind: params.failure_kind,
+        fallback_used: params.fallback_used,
+        schema_version: params.schema_version,
+      },
+    });
+    this.refreshEventsOnly();
   }
 
   private actionLabelForId(action_id: string): string {

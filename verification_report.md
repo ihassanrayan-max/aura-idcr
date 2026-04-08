@@ -13,13 +13,20 @@ This document is written for the current repo state as of `2026-04-08`.
 ## 2. Current status of the AI roadmap
 
 ### Quick status
-Only the **second AI idea** has been implemented as the main new AI feature:
+The repo now includes two bounded AI-assisted seams on top of the deterministic runtime:
 
 - Implemented: **AI Counterfactual Twin Advisor**
-- Not yet implemented: **AI Incident Commander**
-- Not yet implemented: **AI After-Action Reviewer** as a standalone feature
+- Implemented: **AI Incident Commander**
+- Implemented: **AI After-Action Reviewer**
+- Implemented: **AI Why / Why-Not Assistant**
 - Not yet implemented: **AI Human Monitoring 2.0**
-- Not yet implemented: **AI Why / Why-Not Assistant**
+
+### Scope note
+This document still primarily covers the Counterfactual Twin Advisor browser protocol.
+
+For the grounded AI briefing layer browser pass, use:
+
+- [COMET_AI_BRIEFING_TEST_CRITERIA.md](./COMET_AI_BRIEFING_TEST_CRITERIA.md)
 
 ### What “implemented” means here
 The repo now includes a real AI-backed, bounded decision-support layer that:
@@ -57,7 +64,7 @@ The AI path is now integrated more safely than before:
 ### Current automated verification status
 - `npm test`: pass
 - `npm run build`: pass
-- Current suite status: `104 tests passed`
+- Current suite status: `139 tests passed`
 
 ---
 

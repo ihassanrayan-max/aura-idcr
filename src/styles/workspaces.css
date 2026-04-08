@@ -126,6 +126,8 @@
 .alarm-cluster-list,
 .alarm-raw-list,
 .advisor-branch-list,
+.ai-briefing-grid,
+.ai-briefing-list,
 .lane-list,
 .factor-list,
 .storyline-context-grid,
@@ -212,6 +214,8 @@
 }
 
 .assistance-cue,
+.ai-briefing-panel,
+.ai-why-panel,
 .lane-guidance-card,
 .support-section-card,
 .review-evidence-card {
@@ -225,6 +229,28 @@
 
 .assistance-cue {
   border-color: rgba(137, 216, 255, 0.18);
+}
+
+.ai-briefing-panel {
+  border-color: rgba(137, 216, 255, 0.24);
+}
+
+.ai-why-panel {
+  border-color: rgba(137, 216, 255, 0.22);
+  background: linear-gradient(180deg, rgba(137, 216, 255, 0.08), rgba(255, 255, 255, 0.025));
+}
+
+.ai-after-action-card {
+  border-color: rgba(137, 216, 255, 0.24);
+}
+
+.ai-briefing-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-briefing-list {
+  display: grid;
+  gap: var(--space-2);
 }
 
 .assistance-cue--priority {
@@ -475,6 +501,7 @@
   }
 
   .summary-triad,
+  .ai-briefing-grid,
   .lane-guidance-grid,
   .support-section-grid,
   .factor-list,

@@ -11,6 +11,7 @@ export type SourceModule =
   | "adaptive_orchestrator"
   | "action_validator"
   | "ai_advisor"
+  | "ai_briefing_layer"
   | "hmi"
   | "evaluation";
 export type SupportMode =
@@ -576,6 +577,100 @@ export type CounterfactualAdvisorState = {
   followup_recorded_at_sim_time_sec?: number;
 };
 
+export type AiBriefingSchemaVersion = 1;
+export type AiBriefingKind = "incident_commander" | "after_action_reviewer" | "why_assistant";
+export type AiBriefingProvider = "llm" | "deterministic_fallback";
+export type AiBriefingAnchorKind = "live_tick" | "completed_review";
+export type AiBriefingWhySubjectId = "support_current" | "support_alternative" | "validator_last_result";
+export type AiBriefingFailureKind =
+  | "rate_limited"
+  | "not_configured"
+  | "invalid_request"
+  | "invalid_response"
+  | "upstream_error"
+  | "network_error";
+
+export type AiBriefingEvidenceRefType =
+  | "tick_id"
+  | "event_id"
+  | "alarm_id"
+  | "phase_id"
+  | "hypothesis_id"
+  | "lane_item_id"
+  | "risk_factor_id"
+  | "validation_result_id"
+  | "proof_id"
+  | "milestone_id"
+  | "highlight_id";
+
+export type AiBriefingEvidenceRef = {
+  ref_id: string;
+  ref_type: AiBriefingEvidenceRefType;
+  label: string;
+  detail?: string;
+};
+
+export type AiBriefingRequestAnchor = {
+  anchor_kind: AiBriefingAnchorKind;
+  anchor_id: string;
+  session_id: string;
+  sim_time_sec: number;
+};
+
+export type AiBriefingRequest = {
+  kind: AiBriefingKind;
+  anchor: AiBriefingRequestAnchor;
+  subject_id?: AiBriefingWhySubjectId;
+  schema_version: AiBriefingSchemaVersion;
+  context: Record<string, unknown>;
+};
+
+export type AiIncidentCommanderBriefing = {
+  headline: string;
+  situation_now: string;
+  command_intent: string;
+  priority_actions: string[];
+  watchouts: string[];
+  confidence_note: string;
+  operator_authority_note: string;
+  review_handoff_needed: boolean;
+  evidence_refs: AiBriefingEvidenceRef[];
+};
+
+export type AiAfterActionReviewerBriefing = {
+  overall_assessment: string;
+  turning_points: string[];
+  adaptation_observations: string[];
+  validator_observations: string[];
+  training_takeaways: string[];
+  confidence_note: string;
+  evidence_refs: AiBriefingEvidenceRef[];
+};
+
+export type AiWhyAssistantBriefing = {
+  question_label: string;
+  short_answer: string;
+  why_bullets: string[];
+  why_not_bullets: string[];
+  confidence_note: string;
+  evidence_refs: AiBriefingEvidenceRef[];
+};
+
+export type AiBriefingResponseMap = {
+  incident_commander: AiIncidentCommanderBriefing;
+  after_action_reviewer: AiAfterActionReviewerBriefing;
+  why_assistant: AiWhyAssistantBriefing;
+};
+
+export type AiBriefingGenerationResult<K extends AiBriefingKind = AiBriefingKind> = {
+  kind: K;
+  provider: AiBriefingProvider;
+  model?: string;
+  used_fallback: boolean;
+  failure_kind?: AiBriefingFailureKind;
+  response: AiBriefingResponseMap[K];
+};
+
 export type SessionLogEventType =
   | "session_started"
   | "phase_changed"
@@ -587,6 +682,9 @@ export type SessionLogEventType =
   | "operator_state_snapshot_recorded"
   | "counterfactual_advisor_generated"
   | "counterfactual_advisor_followup_recorded"
+  | "ai_briefing_requested"
+  | "ai_briefing_resolved"
+  | "ai_briefing_failed"
   | "action_requested"
   | "action_validated"
   | "action_confirmation_recorded"

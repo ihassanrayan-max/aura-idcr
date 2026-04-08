@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  AiAfterActionReviewerBriefing,
   CompletedSessionReview,
   CounterfactualAdvisorState,
   SessionLogEvent,
@@ -55,8 +56,15 @@ function judgeRunLabel(mode: "baseline" | "adaptive"): string {
 function CompletedSessionReviewPanel(props: {
   review: CompletedSessionReview;
   canonicalEvents: SessionLogEvent[];
+  afterActionReviewer?: {
+    status: "loading" | "ready";
+    providerLabel?: string;
+    fallbackNote?: string;
+    response?: AiAfterActionReviewerBriefing;
+  };
+  onLoadAfterActionReviewer: (force?: boolean) => void;
 }) {
-  const { review, canonicalEvents } = props;
+  const { review, canonicalEvents, afterActionReviewer, onLoadAfterActionReviewer } = props;
   const [eventIndex, setEventIndex] = useState(0);
   const adaptiveEvidenceHighlights = review.highlights.filter(
     (highlight) =>
@@ -83,6 +91,89 @@ function CompletedSessionReviewPanel(props: {
 
   return (
     <div className="completed-session-review" data-testid="completed-session-review">
+      <div className="review-card ai-after-action-card" data-testid="after-action-ai-panel">
+        <div className="section-divider">
+          <div>
+            <span className="utility-card__label">AI After-Action Reviewer</span>
+            <strong>Grounded incident summary</strong>
+            <p>Manual, structured debrief grounded in the completed deterministic review.</p>
+          </div>
+          {afterActionReviewer?.providerLabel ? (
+            <StatusPill tone={afterActionReviewer.status === "ready" ? "ok" : "neutral"}>
+              {afterActionReviewer.providerLabel}
+            </StatusPill>
+          ) : null}
+        </div>
+        <div className="utility-action-row">
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={afterActionReviewer?.status === "loading"}
+            onClick={() => onLoadAfterActionReviewer(Boolean(afterActionReviewer))}
+          >
+            {afterActionReviewer?.status === "loading"
+              ? "Generating summary..."
+              : afterActionReviewer
+                ? "Refresh summary"
+                : "Generate grounded AI summary"}
+          </button>
+        </div>
+        {afterActionReviewer?.fallbackNote ? <p className="lane-caution">{afterActionReviewer.fallbackNote}</p> : null}
+        {afterActionReviewer?.response ? (
+          <div className="review-evidence-grid">
+            <article className="review-evidence-card review-evidence-card--neutral">
+              <span className="utility-card__label">Overall assessment</span>
+              <p>{afterActionReviewer.response.overall_assessment}</p>
+            </article>
+            <article className="review-evidence-card review-evidence-card--ok">
+              <span className="utility-card__label">Turning points</span>
+              <ul className="review-list">
+                {afterActionReviewer.response.turning_points.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article className="review-evidence-card review-evidence-card--ok">
+              <span className="utility-card__label">Adaptive observations</span>
+              <ul className="review-list">
+                {afterActionReviewer.response.adaptation_observations.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article className="review-evidence-card review-evidence-card--alert">
+              <span className="utility-card__label">Validator observations</span>
+              <ul className="review-list">
+                {afterActionReviewer.response.validator_observations.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article className="review-evidence-card review-evidence-card--neutral">
+              <span className="utility-card__label">Training takeaways</span>
+              <ul className="review-list">
+                {afterActionReviewer.response.training_takeaways.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article className="review-evidence-card review-evidence-card--neutral">
+              <span className="utility-card__label">Confidence note</span>
+              <p>{afterActionReviewer.response.confidence_note}</p>
+              {afterActionReviewer.response.evidence_refs.length > 0 ? (
+                <div className="pill-row">
+                  {afterActionReviewer.response.evidence_refs.map((ref) => (
+                    <StatusPill key={ref.ref_id} tone="neutral">
+                      {ref.label}
+                    </StatusPill>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          </div>
+        ) : null}
+      </div>
+
       <div className="review-card">
         <h3>Completed run summary</h3>
         <p>
@@ -374,6 +465,12 @@ type ReviewWorkspaceProps = {
   sessionRunComparison?: SessionRunComparison;
   sessionReportReady: boolean;
   comparisonReportReady: boolean;
+  afterActionReviewer?: {
+    status: "loading" | "ready";
+    providerLabel?: string;
+    fallbackNote?: string;
+    response?: AiAfterActionReviewerBriefing;
+  };
   pendingSupervisorOverrideCard?: {
     actionLabel: string;
     reasonCode: string;
@@ -382,6 +479,7 @@ type ReviewWorkspaceProps = {
   };
   supervisorOverrideNote: string;
   onSupervisorOverrideNoteChange: (value: string) => void;
+  onLoadAfterActionReviewer: (force?: boolean) => void;
   onApproveOverride: () => void;
   onDenyOverride: () => void;
   onDownloadSessionReport: () => void;
@@ -397,9 +495,11 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     sessionRunComparison,
     sessionReportReady,
     comparisonReportReady,
+    afterActionReviewer,
     pendingSupervisorOverrideCard,
     supervisorOverrideNote,
     onSupervisorOverrideNoteChange,
+    onLoadAfterActionReviewer,
     onApproveOverride,
     onDenyOverride,
     onDownloadSessionReport,
@@ -525,7 +625,12 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
           data-tutorial-target="review-completed"
         >
           {completedReview ? (
-            <CompletedSessionReviewPanel review={completedReview} canonicalEvents={canonicalEvents} />
+            <CompletedSessionReviewPanel
+              review={completedReview}
+              canonicalEvents={canonicalEvents}
+              afterActionReviewer={afterActionReviewer}
+              onLoadAfterActionReviewer={onLoadAfterActionReviewer}
+            />
           ) : (
             <EmptyState
               title="No completed run yet"

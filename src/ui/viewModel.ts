@@ -691,7 +691,7 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       },
       {
         id: "risk",
-        label: "Why this posture",
+        label: "Posture rationale",
         headline: snapshot.combined_risk.recommended_assistance_reason,
         body: snapshot.combined_risk.why_risk_is_current,
         tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),

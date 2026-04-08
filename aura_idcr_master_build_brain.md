@@ -1475,6 +1475,29 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: Codex GPT-5 grounded AI briefing completion session
+- Task worked on: Completed the bounded AI Briefing Layer from `SL_PLAN.md`, re-verified the repo, and added a browser-facing Comet test criteria file so the new AI surfaces can be checked without ambiguity
+- Status: Done
+- What changed:
+  - Finished the shared AI briefing contract and runtime slice by extending `src/contracts/aura.ts` with additive AI briefing request/response types plus canonical `ai_briefing_requested`, `ai_briefing_resolved`, and `ai_briefing_failed` event types under the new `ai_briefing_layer` source module
+  - Added the pure grounded briefing builders and deterministic fallbacks in `src/runtime/aiBriefing.ts` for `incident_commander`, `after_action_reviewer`, and `why_assistant`, keeping the deterministic snapshot/review data authoritative and ensuring structured server failures fall back cleanly instead of breaking the operator flow
+  - Added the bounded server-side path in `server/aiBriefingApi.ts`, `server/aiBriefingApi.test.ts`, `api/ai-briefing.ts`, and `vite.config.ts` with request validation, per-IP rate limiting, strict structured-output parsing, and the same local/serverless transport split already used by the counterfactual advisor path
+  - Added the UI-local fetch/cache/logging bridge in `src/ui/useAiBriefing.ts`, wired the store-side metadata logging in `src/state/sessionStore.ts`, and surfaced the new AI panels in `src/App.tsx`, `src/ui/OperateWorkspace.tsx`, `src/ui/ReviewWorkspace.tsx`, `src/ui/viewModel.ts`, and `src/styles/workspaces.css` without changing plant progression, support policy truth, validator decisions, KPI math, or completed-review generation
+  - Extended verification with `src/runtime/aiBriefing.test.ts` and `src/ui/aiBriefingLayer.test.tsx`, then re-verified the whole repo with passing `npm test` and passing `npm run build`; the suite is green at 139 passing tests
+  - Updated repo-truth docs in `README.md` and `verification_report.md` so the new AI status is described honestly, and added `COMET_AI_BRIEFING_TEST_CRITERIA.md` as the simple but detailed browser-validation handoff for Comet
+- What remains:
+  - This slice intentionally does not write AI prose into canonical exports, completed-review truth, paired-comparison truth, KPI formulas, or any plant/control-state path; AI remains on-demand, advisory, and UI-layer bounded
+  - Browser walkthrough of the new AI briefing surfaces is still recommended with Comet using `COMET_AI_BRIEFING_TEST_CRITERIA.md`, especially if a real `OPENAI_API_KEY` is available and you want to compare LLM vs deterministic fallback behavior
+  - The pre-existing Vite large-chunk warning remains because of the lazy webcam bundle; this briefing slice did not broaden that footprint
+- Blockers:
+  - None in-repo after automated verification
+- Next recommended step:
+  - Run the new Comet browser pass against the local or deployed app using `COMET_AI_BRIEFING_TEST_CRITERIA.md` and capture any UI-only issues that do not appear in the automated suite
+  - If future AI work expands beyond this slice, keep it grounded in canonical snapshot/review context and continue logging metadata only rather than promoting AI prose into source-of-truth state
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.
