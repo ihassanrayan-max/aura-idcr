@@ -1,4 +1,5 @@
 import type {
+  ComparisonProofSummary,
   CompletedSessionReview,
   CompletedSessionReviewMilestoneKind,
   SessionRunComparison,
@@ -18,7 +19,7 @@ const KPI_LOWER_IS_BETTER: Record<string, boolean> = {
   top_cause_stability_pct: false,
   harmful_actions_prevented_count: false,
   supervisor_override_approved_count: false,
-  };
+};
 
 const MILESTONE_KIND_ORDER: CompletedSessionReviewMilestoneKind[] = [
   "session_start",
@@ -30,6 +31,10 @@ const MILESTONE_KIND_ORDER: CompletedSessionReviewMilestoneKind[] = [
   "operator_action",
   "terminal_outcome",
 ];
+
+function judgeRunLabel(mode: "baseline" | "adaptive"): string {
+  return mode === "baseline" ? "Baseline run" : "AURA-assisted (adaptive) run";
+}
 
 function outcomeRank(outcome: SessionRunComparison["baseline_outcome"]): number {
   if (outcome === "success") {
@@ -85,6 +90,66 @@ function metricValueLabel(
     return unavailable_reason ? `N/A (${unavailable_reason})` : "N/A";
   }
   return `${value} ${unit}`;
+}
+
+function proofByKind(
+  review: CompletedSessionReview,
+  kind: CompletedSessionReview["proof_points"][number]["kind"],
+) {
+  return (review.proof_points ?? []).find((proof) => proof.kind === kind);
+}
+
+function monitoringProofIsLimited(proof: CompletedSessionReview["proof_points"][number] | undefined): boolean {
+  if (!proof) {
+    return true;
+  }
+
+  return /degraded|unavailable|confidence-gated|aging|stale/i.test(`${proof.label} ${proof.detail}`);
+}
+
+function buildProofSummary(params: {
+  valid: boolean;
+  baseline: CompletedSessionReview;
+  adaptive: CompletedSessionReview;
+}): ComparisonProofSummary {
+  const { valid, baseline, adaptive } = params;
+
+  if (!valid) {
+    return {
+      headline: "Proof story unavailable because these runs do not share the same scenario and version.",
+      bullets: [
+        "Run one Baseline run and one AURA-assisted (adaptive) run on the same scenario/version to build the slide-ready proof story.",
+      ],
+    };
+  }
+
+  const baselineMonitoring = proofByKind(baseline, "monitoring_status");
+  const adaptiveMonitoring = proofByKind(adaptive, "monitoring_status");
+  const baselineSupport = proofByKind(baseline, "support_transition");
+  const adaptiveSupport = proofByKind(adaptive, "support_transition");
+  const adaptiveValidator = proofByKind(adaptive, "validator_reason");
+  const adaptiveHumanAware = proofByKind(adaptive, "human_aware_adaptation");
+  const limitedRuns = ([
+    monitoringProofIsLimited(baselineMonitoring) ? judgeRunLabel("baseline") : undefined,
+    monitoringProofIsLimited(adaptiveMonitoring) ? judgeRunLabel("adaptive") : undefined,
+  ].filter(Boolean) as string[]);
+
+  return {
+    headline:
+      adaptiveSupport?.label && adaptiveSupport.label !== "Adaptive posture held steady"
+        ? "Baseline run stayed fixed while the AURA-assisted (adaptive) run visibly changed support posture."
+        : "Baseline run stayed fixed while the AURA-assisted (adaptive) run kept adaptive support reasoning available.",
+    bullets: [
+      `Monitoring posture: ${judgeRunLabel("baseline")} - ${baselineMonitoring?.label ?? "No monitoring proof captured"}. ${judgeRunLabel("adaptive")} - ${adaptiveMonitoring?.label ?? "No monitoring proof captured"}.`,
+      `Support difference: ${judgeRunLabel("baseline")} - ${baselineSupport?.label ?? "No baseline posture proof captured"}. ${judgeRunLabel("adaptive")} - ${adaptiveSupport?.label ?? adaptiveValidator?.label ?? "No adaptive posture proof captured"}.`,
+      adaptiveHumanAware
+        ? `Visible adaptive example: ${adaptiveHumanAware.detail}`
+        : "Visible adaptive example: No bounded human-aware adaptation moment met the confidence threshold in the AURA-assisted (adaptive) run.",
+      limitedRuns.length > 0
+        ? `Confidence note: ${limitedRuns.join(" and ")} stayed confidence-gated or unavailable, so the proof story keeps that limit explicit.`
+        : "Confidence note: Both runs retained active-enough monitoring posture, so the proof story can show human-side evidence without overstating it.",
+    ],
+  };
 }
 
 function buildJudgeSummary(params: {
@@ -159,7 +224,7 @@ function buildJudgeSummary(params: {
         `${d.label}: same value in both observed runs (${metricValueLabel(d.baseline_value, d.unit, d.baseline_value_status)}).`,
       );
     } else {
-      const winner = d.favors === "baseline" ? "Baseline" : "Adaptive";
+      const winner = d.favors === "baseline" ? judgeRunLabel("baseline") : judgeRunLabel("adaptive");
       metric_bullets.push(
         `${d.label}: ${winner} (${metricValueLabel(d.baseline_value, d.unit, d.baseline_value_status)} vs ${metricValueLabel(d.adaptive_value, d.unit, d.adaptive_value_status)}; delta ${d.delta === null ? "N/A" : `${d.delta >= 0 ? "+" : ""}${d.delta.toFixed(4)}`}).`,
       );
@@ -168,9 +233,9 @@ function buildJudgeSummary(params: {
 
   const headline =
     overall === "adaptive"
-      ? `On this observed pair, the adaptive run matched or exceeded the baseline run on key evaluation signals.`
+      ? `On this observed pair, the AURA-assisted (adaptive) run matched or exceeded the Baseline run on key evaluation signals.`
       : overall === "baseline"
-        ? `On this observed pair, the baseline run matched or exceeded the adaptive run on key evaluation signals.`
+        ? `On this observed pair, the Baseline run matched or exceeded the AURA-assisted (adaptive) run on key evaluation signals.`
         : overall === "mixed"
           ? `Results are mixed: each mode led on different metrics in this observed pair.`
           : `The two runs performed similarly on the summarized metrics in this observed pair.`;
@@ -228,6 +293,11 @@ export function buildSessionRunComparison(
         "Run both modes on the same scenario and version, then reset between captures.",
       ],
       judge_summary,
+      proof_summary: buildProofSummary({
+        valid: false,
+        baseline,
+        adaptive,
+      }),
     };
   }
 
@@ -275,11 +345,11 @@ export function buildSessionRunComparison(
   const interpretation_lines: string[] = [];
 
   interpretation_lines.push(
-    `Outcome: baseline ${baseline.terminal_outcome.outcome} (stabilized: ${baseline.terminal_outcome.stabilized}), adaptive ${adaptive.terminal_outcome.outcome} (stabilized: ${adaptive.terminal_outcome.stabilized}).`,
+    `Outcome: ${judgeRunLabel("baseline")} ${baseline.terminal_outcome.outcome} (stabilized: ${baseline.terminal_outcome.stabilized}), ${judgeRunLabel("adaptive")} ${adaptive.terminal_outcome.outcome} (stabilized: ${adaptive.terminal_outcome.stabilized}).`,
   );
 
   interpretation_lines.push(
-    `Completion time: baseline t+${baseline.completion_sim_time_sec}s, adaptive t+${adaptive.completion_sim_time_sec}s (delta ${adaptive.completion_sim_time_sec - baseline.completion_sim_time_sec >= 0 ? "+" : ""}${adaptive.completion_sim_time_sec - baseline.completion_sim_time_sec}s).`,
+    `Completion time: ${judgeRunLabel("baseline")} t+${baseline.completion_sim_time_sec}s, ${judgeRunLabel("adaptive")} t+${adaptive.completion_sim_time_sec}s (delta ${adaptive.completion_sim_time_sec - baseline.completion_sim_time_sec >= 0 ? "+" : ""}${adaptive.completion_sim_time_sec - baseline.completion_sim_time_sec}s).`,
   );
 
   const escB = bc.get("support_escalation") ?? 0;
@@ -297,11 +367,11 @@ export function buildSessionRunComparison(
   const demoMarkerCount = (review: CompletedSessionReview) =>
     review.key_events.filter((event) => event.event_type === "validation_demo_marker_recorded").length;
   interpretation_lines.push(
-    `Validator demo checkpoints: baseline ${demoMarkerCount(baseline)} vs adaptive ${demoMarkerCount(adaptive)}.`,
+    `Validator demo checkpoints: ${judgeRunLabel("baseline")} ${demoMarkerCount(baseline)} vs ${judgeRunLabel("adaptive")} ${demoMarkerCount(adaptive)}.`,
   );
 
   interpretation_lines.push(
-    `Key events indexed: baseline ${baseline.key_events.length}, adaptive ${adaptive.key_events.length} (bounded replay lists differ if the run paths differ).`,
+    `Key events indexed: ${judgeRunLabel("baseline")} ${baseline.key_events.length}, ${judgeRunLabel("adaptive")} ${adaptive.key_events.length} (bounded replay lists differ if the run paths differ).`,
   );
 
   const judge_summary = buildJudgeSummary({
@@ -333,5 +403,10 @@ export function buildSessionRunComparison(
     key_event_count_adaptive: adaptive.key_events.length,
     interpretation_lines,
     judge_summary,
+    proof_summary: buildProofSummary({
+      valid: true,
+      baseline,
+      adaptive,
+    }),
   };
 }

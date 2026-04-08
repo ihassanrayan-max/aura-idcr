@@ -102,8 +102,8 @@ export function buildCriticalVisibilityGuardrailState(alarm_set: AlarmSet): Crit
 
 function evaluateRawMode(params: ResolveSupportModePolicyParams, guardrails: CriticalVisibilityGuardrailState): EvaluatedMode {
   const combined_risk_score = params.combined_risk.combined_risk_score;
-  const plant_severity = factorRawIndex(params.combined_risk, "plant_severity");
-  const diagnosis_uncertainty = factorRawIndex(params.combined_risk, "diagnosis_uncertainty");
+  const plant_urgency = factorRawIndex(params.combined_risk, "plant_urgency");
+  const storyline_pressure = factorRawIndex(params.combined_risk, "storyline_procedure_pressure");
   const attention_instability = Math.max(0, 100 - params.operator_state.attention_stability_index);
   const degraded_confidence = params.operator_state.degraded_mode_active || params.operator_state.signal_confidence < 70;
   const escalation_marker_active =
@@ -112,17 +112,22 @@ function evaluateRawMode(params: ResolveSupportModePolicyParams, guardrails: Cri
   const reasoning_unstable =
     params.reasoning_snapshot.changed_since_last_tick ||
     params.reasoning_snapshot.stable_for_ticks < 2 ||
-    diagnosis_uncertainty >= 45;
+    storyline_pressure >= 55;
+  const recommended_mode = params.combined_risk.recommended_assistance_mode;
+  const recommended_reason = params.combined_risk.recommended_assistance_reason;
 
   const protected_reasons: string[] = [];
-  if (escalation_marker_active) {
+  if (recommended_mode === "protected_response") {
+    protected_reasons.push(recommended_reason);
+  }
+  if (escalation_marker_active && !protected_reasons.includes("critical escalation markers are active")) {
     protected_reasons.push("critical escalation markers are active");
   }
   if (combined_risk_score >= 70) {
     protected_reasons.push(`combined risk is ${combined_risk_score.toFixed(1)}/100`);
   }
-  if (plant_severity >= 72) {
-    protected_reasons.push(`plant severity reached ${plant_severity}/100`);
+  if (plant_urgency >= 72) {
+    protected_reasons.push(`plant urgency reached ${plant_urgency}/100`);
   }
   if (guardrails.pinned_alarm_ids.length >= 3 && combined_risk_score >= 62) {
     protected_reasons.push("multiple critical alarms remain active while overall risk stays elevated");
@@ -139,6 +144,9 @@ function evaluateRawMode(params: ResolveSupportModePolicyParams, guardrails: Cri
   }
 
   const guided_reasons: string[] = [];
+  if (recommended_mode === "guided_support") {
+    guided_reasons.push(recommended_reason);
+  }
   if (combined_risk_score >= 45) {
     guided_reasons.push(`combined risk is ${params.combined_risk.combined_risk_band}`);
   }
@@ -169,10 +177,8 @@ function evaluateRawMode(params: ResolveSupportModePolicyParams, guardrails: Cri
   }
 
   return {
-    mode: "monitoring_support",
-    reasons: [
-      "combined risk, workload, and reasoning ambiguity remain inside the monitoring band",
-    ],
+    mode: recommended_mode,
+    reasons: [recommended_reason],
   };
 }
 
@@ -182,18 +188,18 @@ function alarm_setHasAny(alarm_set: AlarmSet, alarm_ids: readonly string[]): boo
 
 function canDownshiftFromProtected(params: ResolveSupportModePolicyParams, guardrails: CriticalVisibilityGuardrailState): boolean {
   const combined_risk_score = params.combined_risk.combined_risk_score;
-  const plant_severity = factorRawIndex(params.combined_risk, "plant_severity");
+  const plant_urgency = factorRawIndex(params.combined_risk, "plant_urgency");
   return (
     !Boolean(params.plant_state.reactor_trip_active) &&
     !alarm_setHasAny(params.alarm_set, protectedResponseAlarmIds) &&
     combined_risk_score < 60 &&
-    plant_severity < 68 &&
+    plant_urgency < 68 &&
     guardrails.pinned_alarm_ids.length < 3
   );
 }
 
 function canDownshiftToMonitoring(params: ResolveSupportModePolicyParams): boolean {
-  const diagnosis_uncertainty = factorRawIndex(params.combined_risk, "diagnosis_uncertainty");
+  const storyline_pressure = factorRawIndex(params.combined_risk, "storyline_procedure_pressure");
   const attention_instability = Math.max(0, 100 - params.operator_state.attention_stability_index);
   return (
     params.combined_risk.combined_risk_score < 38 &&
@@ -202,7 +208,7 @@ function canDownshiftToMonitoring(params: ResolveSupportModePolicyParams): boole
     !params.operator_state.degraded_mode_active &&
     !params.reasoning_snapshot.changed_since_last_tick &&
     params.reasoning_snapshot.stable_for_ticks >= 2 &&
-    diagnosis_uncertainty < 40
+    storyline_pressure < 40
   );
 }
 

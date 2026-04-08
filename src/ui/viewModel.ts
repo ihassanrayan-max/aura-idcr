@@ -17,8 +17,35 @@ import {
   validationBadgeTone,
 } from "./format";
 import type { MetricItemModel, StatusPillModel } from "./primitives";
+import type { SupportSectionId } from "../runtime/presentationPolicy";
 
 export type WorkspaceId = "operate" | "review";
+
+export type OperateAssistanceCueModel = {
+  eyebrow: string;
+  headline: string;
+  body: string;
+  tone: StatusTone;
+  pills: StatusPillModel[];
+};
+
+export type OperateGuidanceCardModel = {
+  id: string;
+  label: string;
+  headline: string;
+  body: string;
+  tone: StatusTone;
+};
+
+export type OperateSupportSectionModel = {
+  id: SupportSectionId;
+  label: string;
+  headline: string;
+  body: string;
+  tone: StatusTone;
+  meta?: string;
+  pills?: StatusPillModel[];
+};
 
 export type OperateWorkspaceModel = {
   orientationCards: Array<{
@@ -89,11 +116,12 @@ export type OperateWorkspaceModel = {
     emphasis: boolean;
     badges: StatusPillModel[];
   }>;
+  assistanceCue: OperateAssistanceCueModel;
+  laneGuidanceCards: OperateGuidanceCardModel[];
   supportMetrics: MetricItemModel[];
   supportPills: StatusPillModel[];
-  supportNotes: Array<{ label: string; body: string }>;
+  supportSections: OperateSupportSectionModel[];
   topFactors: Array<{ id: string; label: string; contribution: string; detail: string }>;
-  supportCaution?: string;
   reviewHint: string;
 };
 
@@ -112,6 +140,63 @@ export type ReviewWorkspaceModel = {
   comparisonSummary: string;
 };
 
+function supportModeTone(mode: SessionSnapshot["support_mode"]): StatusTone {
+  switch (mode) {
+    case "monitoring_support":
+      return "ok";
+    case "guided_support":
+      return "neutral";
+    case "protected_response":
+      return "alert";
+  }
+}
+
+function buildSupportAlignmentNote(snapshot: SessionSnapshot, activeLabel: string, recommendedLabel: string): string {
+  if (snapshot.session_mode === "baseline") {
+    return snapshot.combined_risk.recommended_assistance_mode === "monitoring_support"
+      ? "Baseline session keeps Monitoring Support only; adaptive escalation is intentionally off."
+      : `Baseline session keeps ${activeLabel} only even though the live risk picture would otherwise recommend ${recommendedLabel}.`;
+  }
+
+  if (snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode) {
+    return `${activeLabel} matches the current risk recommendation.`;
+  }
+
+  return `${recommendedLabel} is recommended, but ${activeLabel} remains active while bounded dwell logic avoids mode chatter.`;
+}
+
+function buildSupportTransitionHeadline(snapshot: SessionSnapshot): string {
+  if (snapshot.session_mode === "baseline") {
+    return "Baseline posture stays intentionally fixed.";
+  }
+
+  if (snapshot.support_policy.mode_change_summary !== "No support-mode change this tick.") {
+    return "Posture changed this tick.";
+  }
+
+  if (snapshot.support_mode !== snapshot.combined_risk.recommended_assistance_mode) {
+    return "Posture is holding while the recommendation settles.";
+  }
+
+  return "Posture held steady this tick.";
+}
+
+function buildOperatorControlNote(snapshot: SessionSnapshot): string {
+  if (snapshot.pending_supervisor_override?.request_status === "requested") {
+    return "Operator authority is preserved, but one blocked action is paused until Review records a bounded supervisor decision.";
+  }
+
+  if (snapshot.pending_action_confirmation) {
+    return "Operator authority is preserved; the current action only proceeds if the operator explicitly confirms it.";
+  }
+
+  if (snapshot.last_validation_result?.outcome === "hard_prevent") {
+    return "Operator authority is preserved, but the last blocked action remains prevented because the validator marked it as a bounded high-risk move.";
+  }
+
+  return "Operator authority is preserved. Lane guidance remains advisory, and validation only adds friction when a bounded higher-risk action needs confirmation or review.";
+}
+
 type BuildOperateWorkspaceModelParams = {
   snapshot: SessionSnapshot;
   actionLabels: Record<string, string>;
@@ -129,6 +214,18 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
   const pinnedCriticalAlarms = snapshot.alarm_set.active_alarms.filter((alarm) => pinnedCriticalAlarmIds.has(alarm.alarm_id));
   const dominantHypothesis = snapshot.reasoning_snapshot.ranked_hypotheses[0];
   const nextLaneItem = presentedLaneItems[0];
+  const activeSupportLabel = formatSupportModeLabel(snapshot.support_mode);
+  const recommendedSupportLabel = formatSupportModeLabel(snapshot.combined_risk.recommended_assistance_mode);
+  const activeSupportTone = supportModeTone(snapshot.support_mode);
+  const recommendedSupportTone = supportModeTone(snapshot.combined_risk.recommended_assistance_mode);
+  const supportAlignmentNote = buildSupportAlignmentNote(snapshot, activeSupportLabel, recommendedSupportLabel);
+  const operatorControlNote = buildOperatorControlNote(snapshot);
+  const supportBehaviorSummary = snapshot.support_policy.support_behavior_changes.join(" ");
+  const confidenceBody =
+    snapshot.support_refinement.degraded_confidence_caution ||
+    snapshot.combined_risk.confidence_caveat ||
+    snapshot.support_policy.degraded_confidence_effect;
+  const transitionHeadline = buildSupportTransitionHeadline(snapshot);
 
   let nextHeadline = "Continue monitoring";
   let nextBody = "No operator action is being pushed right now. Stay with critical variables and grouped alarms.";
@@ -177,7 +274,7 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         headline: snapshot.support_refinement.watch_now_summary,
         body: matterBody,
         tone: pinnedCriticalAlarms.length > 0 ? "alert" : "neutral",
-        meta: `Combined risk ${snapshot.combined_risk.combined_risk_band}`,
+        meta: `Active posture ${activeSupportLabel}`,
       },
       {
         id: "next",
@@ -294,12 +391,16 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
     })),
     laneBadges: [
       {
-        label: `Focus ${snapshot.support_refinement.current_support_focus}`,
-        tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+        label: `Active ${activeSupportLabel}`,
+        tone: activeSupportTone,
       },
       {
-        label: `Watch next ${snapshot.support_refinement.watch_now_summary}`,
-        tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+        label:
+          snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode
+            ? "Posture aligned with risk"
+            : `Recommend ${recommendedSupportLabel}`,
+        tone:
+          snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode ? "ok" : recommendedSupportTone,
       },
       {
         label: snapshot.pending_action_confirmation ? "Validation pending confirmation" : "Validation inline and active",
@@ -337,25 +438,99 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
           ]
         : [],
     })),
+    assistanceCue: {
+      eyebrow: "Assistance posture",
+      headline: snapshot.session_mode === "baseline" ? "Baseline run keeps monitoring only." : `${activeSupportLabel} is active now.`,
+      body: `${supportAlignmentNote} ${snapshot.support_refinement.watch_now_summary}`,
+      tone: activeSupportTone,
+      pills: [
+        {
+          label: snapshot.session_mode === "baseline" ? "Baseline posture locked" : "Adaptive posture active",
+          tone: snapshot.session_mode === "baseline" ? "ok" : activeSupportTone,
+        },
+        {
+          label:
+            snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode
+              ? "Risk and active posture aligned"
+              : `Risk recommends ${recommendedSupportLabel}`,
+          tone:
+            snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode ? "ok" : recommendedSupportTone,
+        },
+        {
+          label: "Critical cues stay pinned",
+          tone: "ok",
+        },
+      ],
+    },
+    laneGuidanceCards: [
+      {
+        id: "watch",
+        label: "What now",
+        headline: snapshot.support_refinement.watch_now_summary,
+        body: snapshot.support_refinement.current_support_focus,
+        tone: activeSupportTone,
+      },
+      {
+        id: "effect",
+        label: "Mode effect",
+        headline: snapshot.support_policy.support_behavior_changes[0] ?? "Support stays bounded inside the current shell.",
+        body:
+          snapshot.support_policy.support_behavior_changes.slice(1).join(" ") ||
+          snapshot.support_policy.current_mode_reason,
+        tone: activeSupportTone,
+      },
+    ],
     supportMetrics: [
-      { label: "Combined risk", value: `${snapshot.combined_risk.combined_risk_score.toFixed(1)}/100`, caption: snapshot.combined_risk.combined_risk_band },
-      { label: "Assistance mode", value: formatSupportModeLabel(snapshot.support_mode) },
-      { label: "Workload", value: `${snapshot.operator_state.workload_index}/100` },
-      { label: "Attention stability", value: `${snapshot.operator_state.attention_stability_index}/100` },
-      { label: "Signal confidence", value: `${snapshot.operator_state.signal_confidence}/100` },
+      {
+        label: "Active posture",
+        value: activeSupportLabel,
+        caption:
+          snapshot.session_mode === "baseline"
+            ? "Baseline posture stays fixed"
+            : snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode
+              ? "Aligned with current risk recommendation"
+              : "Held by bounded mode policy",
+        tone: activeSupportTone,
+      },
+      {
+        label: "Risk recommendation",
+        value: recommendedSupportLabel,
+        caption: snapshot.combined_risk.recommended_assistance_reason,
+        tone: recommendedSupportTone,
+      },
+      {
+        label: "Combined risk",
+        value: `${snapshot.combined_risk.combined_risk_score.toFixed(1)}/100`,
+        caption: `${snapshot.combined_risk.combined_risk_band} | fusion ${snapshot.combined_risk.fusion_confidence.toFixed(1)}/100`,
+        tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+      },
+      {
+        label: "Operator load",
+        value: `${snapshot.operator_state.workload_index}/100`,
+        caption: `Attention stability ${snapshot.operator_state.attention_stability_index}/100`,
+      },
+      {
+        label: "Signal confidence",
+        value: `${snapshot.operator_state.signal_confidence}/100`,
+        caption: `Human influence ${snapshot.combined_risk.human_influence_scale.toFixed(2)}`,
+      },
     ],
     supportPills: [
       {
-        label: `Degraded mode ${snapshot.operator_state.degraded_mode_active ? "active" : "clear"}`,
-        tone: snapshot.operator_state.degraded_mode_active ? "alert" : "ok",
+        label: snapshot.session_mode === "baseline" ? "Baseline session" : "Adaptive session",
+        tone: snapshot.session_mode === "baseline" ? "ok" : activeSupportTone,
       },
       {
         label: "Critical visibility guardrails active",
         tone: "ok",
       },
       {
-        label: "Rule-based storyline active",
+        label: "Operator authority retained",
         tone: "ok",
+      },
+      {
+        label: `Degraded mode ${snapshot.operator_state.degraded_mode_active ? "active" : "clear"}`,
+        tone: snapshot.operator_state.degraded_mode_active ? "alert" : "ok",
       },
       {
         label:
@@ -365,22 +540,89 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         tone: snapshot.last_validation_result ? validationBadgeTone(snapshot.last_validation_result.outcome) : "neutral",
       },
     ],
-    supportNotes: [
+    supportSections: [
       {
-        label: "Mode effect now",
-        body: snapshot.support_policy.support_behavior_changes.join(" "),
+        id: "mode",
+        label: "Active posture",
+        headline: `${activeSupportLabel} is active now.`,
+        body: snapshot.support_policy.current_mode_reason,
+        tone: activeSupportTone,
+        meta: supportAlignmentNote,
+        pills: [
+          {
+            label: `Active ${activeSupportLabel}`,
+            tone: activeSupportTone,
+          },
+          {
+            label: `Recommend ${recommendedSupportLabel}`,
+            tone: recommendedSupportTone,
+          },
+        ],
       },
       {
-        label: "Why risk is here now",
-        body: snapshot.combined_risk.why_risk_is_current,
+        id: "watch",
+        label: "What now",
+        headline: snapshot.support_refinement.watch_now_summary,
+        body: snapshot.support_refinement.current_support_focus,
+        tone: activeSupportTone,
+        meta: snapshot.support_refinement.summary_explanation,
       },
       {
-        label: "Confidence caveat",
-        body: snapshot.support_refinement.degraded_confidence_caution ?? snapshot.combined_risk.confidence_caveat,
+        id: "effect",
+        label: "Mode effect",
+        headline: snapshot.support_policy.support_behavior_changes[0] ?? "Support stays bounded inside the current shell.",
+        body: supportBehaviorSummary,
+        tone: activeSupportTone,
+        meta: snapshot.support_policy.current_mode_reason,
       },
       {
+        id: "focus",
+        label: "Focus",
+        headline: snapshot.support_refinement.current_support_focus,
+        body: snapshot.support_refinement.summary_explanation,
+        tone: activeSupportTone,
+      },
+      {
+        id: "guardrails",
+        label: "Guardrails",
+        headline: "Critical variables and pinned alarms stay surfaced.",
+        body: snapshot.support_policy.critical_visibility.summary,
+        tone: "ok",
+      },
+      {
+        id: "confidence",
+        label: "Confidence",
+        headline: `Fusion confidence ${snapshot.combined_risk.fusion_confidence.toFixed(1)}/100.`,
+        body: confidenceBody,
+        tone: snapshot.operator_state.degraded_mode_active ? "alert" : "neutral",
+        meta: snapshot.support_policy.degraded_confidence_effect,
+      },
+      {
+        id: "operator",
+        label: "Operator still controls",
+        headline: "Operator authority stays with you.",
+        body: operatorControlNote,
+        tone: "ok",
+        meta: snapshot.support_refinement.operator_context_note,
+      },
+      {
+        id: "transition",
         label: "What changed",
-        body: snapshot.combined_risk.what_changed,
+        headline: transitionHeadline,
+        body: `${snapshot.combined_risk.what_changed} ${snapshot.support_policy.transition_reason}`.trim(),
+        tone: snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode ? "neutral" : recommendedSupportTone,
+        meta: snapshot.support_policy.mode_change_summary,
+      },
+      {
+        id: "risk",
+        label: "Why this posture",
+        headline: snapshot.combined_risk.recommended_assistance_reason,
+        body: snapshot.combined_risk.why_risk_is_current,
+        tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+        meta:
+          snapshot.combined_risk.top_contributing_factors.length > 0
+            ? `Top drivers: ${snapshot.combined_risk.top_contributing_factors.slice(0, 2).join(" and ")}.`
+            : undefined,
       },
     ],
     topFactors: snapshot.combined_risk.factor_breakdown.slice(0, 3).map((factor) => ({
@@ -389,7 +631,6 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       contribution: `+${factor.contribution.toFixed(1)}`,
       detail: factor.detail,
     })),
-    supportCaution: snapshot.support_refinement.degraded_confidence_caution,
     reviewHint:
       pendingSupervisorOverride?.request_status === "requested"
         ? "Supervisor review is active. Open Review to approve or deny the blocked action."
@@ -422,7 +663,7 @@ export function buildReviewWorkspaceModel(params: BuildReviewWorkspaceModelParam
       payloadText: JSON.stringify(event.payload, null, 2),
     })),
     comparisonHint: comparisonCaptureHint
-      ? "Capture the other session mode on this scenario, then reset and complete the run to unlock the paired comparison."
+      ? "Capture the other session mode on this scenario, then reset and complete the run to unlock the Baseline run vs AURA-assisted (adaptive) run comparison."
       : undefined,
     oversightSummary: snapshot.pending_supervisor_override?.request_status === "requested"
       ? "A supervisor decision is currently blocking a high-risk action."
@@ -433,7 +674,7 @@ export function buildReviewWorkspaceModel(params: BuildReviewWorkspaceModelParam
         )}.`
       : "Complete a run to unlock the bounded after-action review and KPI evidence.",
     comparisonSummary: sessionRunComparison
-      ? `Comparison is ready for baseline ${sessionRunComparison.baseline_session_id} vs adaptive ${sessionRunComparison.adaptive_session_id}.`
-      : "Comparison and export stay empty until both baseline and adaptive runs are completed on the same scenario and version.",
+      ? `Comparison is ready for Baseline run ${sessionRunComparison.baseline_session_id} vs AURA-assisted (adaptive) run ${sessionRunComparison.adaptive_session_id}.`
+      : "Comparison and export stay empty until both Baseline and AURA-assisted (adaptive) runs are completed on the same scenario and version.",
   };
 }

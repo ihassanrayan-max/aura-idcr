@@ -79,6 +79,26 @@ function makeReview(session_id: string, session_mode: "baseline" | "adaptive"): 
         detail: "SUCCESS at t+180s.",
       },
     ],
+    proof_points: [
+      {
+        proof_id: `proof_monitoring_${session_id}`,
+        kind: "monitoring_status",
+        label: session_mode === "baseline" ? "Monitoring degraded" : "Monitoring active",
+        detail:
+          session_mode === "baseline"
+            ? "Monitoring stayed degraded with placeholder-only evidence."
+            : "Monitoring stayed active with live interaction evidence.",
+      },
+      {
+        proof_id: `proof_support_${session_id}`,
+        kind: "support_transition",
+        label: session_mode === "baseline" ? "Baseline posture fixed" : "Support shifted to Guided Support",
+        detail:
+          session_mode === "baseline"
+            ? "Baseline run kept Monitoring Support fixed."
+            : "Adaptive run shifted from Monitoring Support to Guided Support.",
+      },
+    ],
   };
 }
 
@@ -90,6 +110,8 @@ describe("report artifacts", () => {
 
     expect(reportA).toEqual(reportB);
     expect(reportA.provenance.derived_from).toBe("CompletedSessionReview");
+    expect(reportA.proof_points).toEqual(review.proof_points);
+    expect(reportA.summary_block.notable_points.join(" ")).toMatch(/Monitoring/);
     expect(buildReportFilename(reportA)).toContain("after_action.json");
   });
 
@@ -130,6 +152,7 @@ describe("report artifacts", () => {
 
     expect(artifactA).toEqual(artifactB);
     expect(artifactA.provenance.derived_from).toBe("SessionRunComparison");
+    expect(artifactA.proof_summary).toEqual(comparison.proof_summary);
     expect(buildReportFilename(artifactA)).toContain("comparison.json");
     expect(artifactA.interpretation_lines.join(" ")).toMatch(/Validator demo checkpoints/i);
     expect(artifactA.milestone_kind_counts.find((row) => row.kind === "supervisor_override")).toBeDefined();

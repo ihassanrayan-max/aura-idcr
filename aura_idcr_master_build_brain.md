@@ -1225,6 +1225,185 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Authenticate Vercel MCP or use a normal Vercel login/link flow, then deploy the repo as a Vite static app with `main` already containing the current tutorial fixes
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 Packet 1 Prompt A human-monitoring foundation session
+- Task worked on: Added the human-monitoring architectural foundation scaffold on branch `ai-integration` without changing the deterministic plant/scenario demo flow
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` with additive human-monitoring source, availability, confidence, rolling-window, and snapshot contracts plus the new `human_monitoring_snapshot_recorded` canonical log event and `human_monitoring` session snapshot field
+  - Added `src/runtime/humanMonitoring.ts` as the new module boundary for future multi-source human monitoring, including aggregate availability/degraded semantics and a temporary `legacy_runtime_placeholder` adapter that preserves current operator-state behavior without claiming live sensing exists
+  - Kept `src/runtime/operatorState.ts` as the downstream interpretation layer, but routed it through the new human-monitoring foundation so Prompt B can later replace the placeholder adapter with real sources cleanly
+  - Updated `src/state/sessionStore.ts` so startup and each tick now publish a human-monitoring snapshot into runtime state and canonical logs before the existing operator-state snapshot, while leaving plant progression, reasoning, validator behavior, and support-mode behavior unchanged
+  - Extended `src/runtime/sessionReview.ts` so completed-run artifacts now have a canonical place for human-monitoring evidence in key events and highlights
+  - Added focused verification in `src/runtime/humanMonitoring.test.ts`, updated `src/runtime/operatorState.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx`, and re-verified with `npm test` and `npm run build`
+- What remains:
+  - No real interaction telemetry heuristics, webcam/CV ingestion, HPSN-Lite fusion, or adaptive UI behavior changes were added in this Prompt A slice
+  - The current operator-state outputs still come from the temporary legacy compatibility adapter and are intentionally waiting for Prompt B to plug in actual monitoring sources
+- Blockers:
+  - None in the repo after verification
+- Next recommended step:
+  - Prompt B can now add real human-monitoring inputs by implementing new source adapters against `src/runtime/humanMonitoring.ts` and switching the foundation away from the temporary legacy placeholder path in controlled slices
+
+---
+
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 Packet 1 Prompt B human-monitoring hardening session
+- Task worked on: Finished Packet 1 by hardening the human-monitoring foundation into a source-ready canonical pipeline without adding real telemetry heuristics
+- Status: Done
+- What changed:
+  - Reworked `src/runtime/humanMonitoring.ts` from a snapshot helper into the canonical monitoring evaluator with explicit source-adapter contracts, runtime window state, freshness semantics, aggregate contribution rules, and bounded rolling-window metadata while keeping the existing legacy placeholder as the default registered adapter
+  - Extended `src/contracts/aura.ts` so human-monitoring snapshots now carry explicit freshness, source timing/staleness fields, contributing-source counts, and a generic `interpretation_input` bridge for downstream operator-state interpretation instead of the old placeholder-only compatibility shape
+  - Updated `src/runtime/operatorState.ts` and `src/state/sessionStore.ts` so operator-state outputs, state snapshots, and canonical logs are all derived from the same `evaluateHumanMonitoring(...)` path; the store no longer builds placeholder monitoring data ad hoc outside the foundation
+  - Tightened `src/runtime/sessionReview.ts` so review artifacts now summarize canonical monitoring freshness and contributing-source posture rather than only placeholder mode text
+  - Added focused verification in `src/runtime/humanMonitoring.test.ts`, `src/runtime/operatorState.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx` covering deterministic placeholder compatibility, unavailable handling, stale-source degradation, multi-source readiness, and aligned state/log/review behavior through the canonical monitoring path
+  - Re-verified the slice with `npm test`, `npm run build`, local dev-server startup on `http://127.0.0.1:4173`, and headless browser screenshots after `agent-browser` was found to be unavailable on this machine
+- What remains:
+  - No real interaction telemetry heuristics, webcam/CV ingestion, HPSN-Lite fusion, or adaptive UI mode changes were added in this Prompt B slice
+  - The only production monitoring adapter still active is the bounded legacy placeholder adapter, now routed through the canonical source pipeline so Packet 2 can attach real interaction telemetry without architectural rework
+  - Temporary `.tmp-edge*` browser-profile folders are being kept locally for now as verification artifacts only; before project closeout they must be deleted from the local workspace, removed from git tracking/history if ever committed, and confirmed absent from the remote repository
+- Blockers:
+  - The `agent-browser` CLI requested by the verification skill is not installed in this environment, so runtime/browser proof used the already-approved headless Edge screenshot flow instead
+- Next recommended step:
+  - Packet 2 can now add real interaction-telemetry source adapters inside `src/runtime/humanMonitoring.ts` and let the existing canonical evaluator feed `operatorState`, logging, review, and downstream reasoning unchanged
+  - Keep reminding future sessions that `.tmp-edge*` is temporary verification residue and must be cleaned out of local + remote repo state before final delivery
+
+---
+
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 2 interaction telemetry monitoring session
+- Task worked on: Implemented the first real human-monitoring source by adding interaction telemetry through the canonical monitoring pipeline without disturbing the deterministic plant/scenario demo backbone
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` with additive interaction-telemetry event/workspace/UI-region record types so practical operator interaction evidence can be represented cleanly without widening the public monitoring snapshot shape
+  - Updated `src/runtime/humanMonitoring.ts` so `HumanMonitoringRuntimeState` now owns a bounded interaction-telemetry buffer with suppression control for tutorial flow, added record/coalescing helpers, and registered a real `interaction_telemetry` source adapter beside the legacy placeholder adapter
+  - Implemented stable, bounded, non-medical interaction heuristics inside `src/runtime/humanMonitoring.ts` for hesitation pressure, interaction latency trend, reversal/oscillation pressure, inactivity during meaningful moments, burst/confusion pressure, and navigation instability, all mapped into the existing canonical `interpretation_input`
+  - Updated `src/state/sessionStore.ts` so action requests, confirmations, confirmation dismissals, supervisor-review requests/decisions, and App-originated workspace/runtime/manual-adjustment interactions all feed the same session-local telemetry buffer while `sessionStore` continues deriving operator-state only through `evaluateHumanMonitoring(...)`
+  - Updated `src/App.tsx` to record workspace switches, runtime controls, alarm-cluster inspection, and manual slider adjustments through new store telemetry hooks while suppressing tutorial-only interactions so onboarding does not pollute monitoring evidence
+  - Tightened `src/runtime/sessionReview.ts` so completed-run human-monitoring highlights now explicitly call out when interaction telemetry contributed live evidence during the run even if the final snapshot later degraded back to placeholder fallback after inactivity
+  - Added focused verification in `src/runtime/humanMonitoring.test.ts`, updated `src/runtime/sessionReview.test.ts`, and extended `src/state/sessionStore.test.tsx` for live interaction contribution, sparse/stale degradation, UI-driven telemetry capture, canonical log alignment, and review-artifact evidence
+- What remains:
+  - Packet 2 still intentionally does not add webcam/CV ingestion, HPSN-Lite plant+human fusion, adaptive UI mode switching, or any broader frontend redesign
+  - The legacy placeholder adapter remains in place as the bounded fallback when real interaction evidence is sparse or stale; Packet 3 should treat that as expected compatibility behavior rather than as unfinished wiring
+  - Final snapshots often return to `placeholder_compatibility` after long post-action inactivity because the interaction source is correctly allowed to age/stale; later fusion/reasoning work should use the canonical freshness/degraded semantics rather than assuming live telemetry stays current forever
+- Blockers:
+  - `agent-browser` is still unavailable in this environment, so browser verification continued to use the existing approved headless Edge screenshot path
+  - A direct `tsx` deterministic verification script hit a sandbox `spawn EPERM` on `esbuild`; rerunning that check outside the sandbox succeeded and confirmed all three deterministic scenarios still complete successfully with live interaction telemetry contribution during the run
+- Next recommended step:
+  - Packet 3 can now build plant+human fusion and higher-level reasoning on top of the canonical monitoring freshness/source semantics without reworking the Packet 2 telemetry path
+  - If future operator-behavior packets need richer focus/navigation evidence, extend the same session-local interaction telemetry buffer instead of creating downstream ad hoc monitoring logic
+
+---
+
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 3 webcam monitoring session
+- Task worked on: Implemented a thin, opt-in webcam / CV proxy source through the canonical human-monitoring pipeline without bypassing the existing evaluator or disturbing deterministic scenario flow
+- Status: Done
+- What changed:
+  - Updated `src/runtime/humanMonitoring.ts` so `HumanMonitoringRuntimeState` now owns bounded webcam/CV runtime state alongside interaction telemetry, added manual enable/disable, lifecycle/unavailable handling, bounded visual observations, refresh-transition helpers, and registered a real `camera_cv` adapter beside the existing placeholder and interaction sources
+  - Implemented modest advisory webcam heuristics only: stable face presence, weak/no-face handling, multiple-face ambiguity, coarse face centering, and head-motion stability proxies, all mapped into the canonical `interpretation_input` with bounded confidence so webcam evidence cannot dominate the existing monitoring picture
+  - Updated `src/state/sessionStore.ts` so webcam lifecycle and observation changes can trigger a monitoring-only canonical refresh that republishes `human_monitoring` and `operator_state` snapshots/logs without recomputing plant progression, combined risk, support mode, validator state, or scenario outcomes outside the normal tick path
+  - Added `src/ui/useWebcamMonitoring.ts` and wired `src/App.tsx` with a minimal command-bar enable/disable control plus a compact advisory webcam status indicator/detail line, keeping the UI change narrow and avoiding any preview panel or broader layout redesign
+  - Added the local MediaPipe dependency and local assets for the webcam path: `@mediapipe/tasks-vision`, copied package WASM files into `public/mediapipe/`, and stored the BlazeFace short-range model in `public/models/` so the webcam path stays lazy-loaded and local-only rather than CDN/cloud-backed
+  - Updated `src/runtime/sessionReview.ts` so review/key-event summaries now acknowledge live webcam contribution alongside interaction telemetry when it occurred during a run
+  - Extended verification in `src/runtime/humanMonitoring.test.ts`, `src/state/sessionStore.test.tsx`, `src/runtime/sessionReview.test.ts`, and new `src/ui/useWebcamMonitoring.test.tsx` to cover default disconnected behavior, stable webcam contribution, stale aging, permission denial, unsupported environments, monitoring-only refresh behavior, and cleanup on disable
+- What remains:
+  - Packet 3 still intentionally does not add richer plant+human fusion policy, UI-mode switching driven by webcam output, gaze estimation, fatigue claims, emotion detection, worker/off-main-thread processing, or any server/cloud CV path
+  - Webcam enablement currently persists for the active tab session only and restarts locally on session reset; no cross-reload persistence or settings system was added in this packet
+  - The build now emits a Vite chunk-size warning because the lazy MediaPipe bundle is substantial, but the build still passes and the webcam path is already code-split behind explicit manual enable
+- Blockers:
+  - None in-repo after verification
+- Next recommended step:
+  - Future plant+human fusion work should continue to use the canonical freshness/degraded semantics already published by `human_monitoring` rather than introducing webcam-specific downstream logic
+  - If later packets need more performance headroom, the safest follow-up is worker/off-main-thread CV execution or more aggressive asset/code-splitting, not a redesign of the monitoring contracts
+
+---
+
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 4 HPSN-Lite fusion completion session
+- Task worked on: Finished Packet 4 by replacing the legacy combined-risk math with bounded HPSN-Lite plant+human fusion on the canonical monitoring backbone and wiring the richer recommendation metadata through support, review, and existing Operate text
+- Status: Done
+- What changed:
+  - Added `Packet4_PLAN.md` as the checked-in implementation plan for this packet and extended `src/contracts/aura.ts` additively with `risk_cues`, the new HPSN-Lite risk factor families, and richer `CombinedRiskSnapshot` metadata including `risk_model_id`, plant/human indices, fusion confidence, human influence scaling, and the risk-layer assistance recommendation
+  - Updated `src/runtime/humanMonitoring.ts` so interaction telemetry, the legacy placeholder fallback, and the advisory webcam source all publish bounded additive `risk_cues`, allowing Packet 4 fusion to use the canonical monitoring evaluator instead of inventing a parallel downstream monitoring path
+  - Replaced the previous risk computation in `src/runtime/combinedRisk.ts` with a bounded HPSN-Lite fusion model covering plant urgency, alarm escalation pressure, storyline/procedure pressure, phase/time pressure, human workload pressure, attention instability, interaction friction, and human-confidence penalty with fixed contribution caps, human-side confidence gating, one-sentence explanation text, and damped human-only dropoff behavior when plant/context stay steady
+  - Updated `src/state/sessionStore.ts` so canonical combined-risk publication now receives `human_monitoring`, `first_response_lane`, the active scenario phase, phase elapsed time, and scenario expected duration while preserving the required publication order `human_monitoring -> operator_state -> combined_risk` and keeping monitoring-only webcam refreshes bounded to monitoring/operator republish only
+  - Tightened `src/runtime/supportModePolicy.ts`, `src/runtime/actionValidator.ts`, `src/runtime/sessionReview.ts`, and `src/ui/viewModel.ts` so the risk-layer recommendation is visible downstream, support-mode dwell/guardrail behavior still controls the active posture, validator factor lookups use the new ids, completed review artifacts expose richer risk context, and the existing Operate support card shows fusion confidence, recommendation, and degraded-confidence posture without a layout redesign
+  - Extended verification in `src/runtime/combinedRisk.test.ts`, `src/runtime/humanMonitoring.test.ts`, `src/runtime/supportModePolicy.test.ts`, `src/runtime/supportRefinement.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx`, then re-verified with `npm test` and `npm run build`; the repo is green at 116 passing tests and still includes deterministic Scenario A/B/C progression coverage in the passing store suite
+- What remains:
+  - Packet 4 intentionally does not add a new `risk_state`, new UI regions, probabilistic or ML-driven plant progression, stronger visible adaptive UI changes, or any webcam-specific downstream fusion logic beyond the advisory attention cue already folded into the canonical risk layer
+  - The Vite production build still emits a large-chunk warning for the existing lazy MediaPipe bundle, but this packet did not broaden the webcam footprint and the build remains passing
+- Blockers:
+  - None in-repo after verification
+- Next recommended step:
+  - Packet 5 can now build stronger adaptive presentation behavior or evaluator/reporting polish on top of the richer canonical risk recommendation metadata without replacing the Packet 4 fusion model
+  - If future work needs additional human-side evidence, extend `risk_cues` through the canonical monitoring pipeline rather than adding ad hoc downstream factors
+
+---
+
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 5 adaptive legibility session
+- Task worked on: Implemented Packet 5 as a bounded presentation-layer legibility pass so adaptive posture, watch-now guidance, operator authority, and review proof are visibly readable on top of the existing canonical Packet 4 outputs
+- Status: Done
+- What changed:
+  - Updated `src/ui/viewModel.ts` with a UI-local Packet 5 assistance-legibility model derived only from the current canonical snapshots, adding an explicit assistance cue, lane-guidance cards, reordered support sections, and clearer active-vs-recommended posture wording without introducing a new store path, contract, or adaptation state
+  - Reworked `src/ui/OperateWorkspace.tsx` so the Next Actions region now shows a visible posture cue plus watch-now/mode-effect guidance, and the Support Posture region now renders ordered posture cards driven by `presentationPolicy.support_section_order` instead of a compact note dump while keeping critical variables, pinned alarms, validator banners, and manual controls in their existing bounded regions
+  - Added restrained Packet 5 styling in `src/styles/workspaces.css` for posture cue hierarchy, mode-sensitive support cards, validator-priority emphasis, and review evidence cards using the existing engineering palette and without broad shell redesign or decorative dependency churn
+  - Updated `src/ui/ReviewWorkspace.tsx` so completed-run Review now surfaces canonical adaptive proof more explicitly through an `Adaptive support evidence` panel that promotes the already-generated assistance, human-monitoring, and intervention highlights instead of requiring raw payload inspection
+  - Extended verification in `src/state/sessionStore.test.tsx` and `src/runtime/presentationPolicy.test.ts` so the repo now proves Packet 5 posture legibility renders in Operate, baseline stays calm/non-adaptive, protected-response emphasis remains bounded without hiding core regions, Review surfaces adaptive proof directly, and guided support still drives the intended support-section ordering
+  - Re-verified with passing `npm test` and `npm run build`; the repo is green at 117 passing tests and the existing Vite chunk-size warning for the lazy webcam bundle remains unchanged
+- What remains:
+  - Packet 5 intentionally does not change `humanMonitoring`, `combinedRisk`, validator decision logic, session-store publication order, canonical logging, or scenario progression
+  - No new contracts, event types, review artifacts, or adaptive animations were added; this packet stays strictly in derived view models, existing workspaces, CSS, and render tests
+  - The lazy MediaPipe/webcam bundle still triggers the pre-existing Vite large-chunk warning, but Packet 5 did not broaden that footprint and the production build still passes
+- Blockers:
+  - None in-repo after verification
+- Next recommended step:
+  - Packet 6 can build demo/report polish on top of the new Review evidence prominence and the clearer Operate posture language without reworking the canonical monitoring, fusion, or support-policy pipeline
+  - If future UI polish extends adaptive emphasis further, keep it derived from `combined_risk`, `support_policy`, `support_refinement`, and `presentationPolicy` rather than introducing a parallel adaptation layer
+
+---
+
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 6 demo evidence and reporting session
+- Task worked on: Implemented Packet 6 as a bounded proof-story/reporting pass over the existing canonical review, comparison, export, and Review workspace flow
+- Status: Done
+- What changed:
+  - Added `Packet6_PLAN.md` as the checked-in implementation plan for this slice and extended `src/contracts/aura.ts` additively with `ReviewProofPoint`, `proof_points` on completed/exported single-run artifacts, and `proof_summary` on paired comparison/export artifacts without changing the existing canonical log chain or schema versioning strategy
+  - Updated `src/state/sessionStore.ts` so `reasoning_snapshot_published` now carries the already-computed canonical explanation strings `why_risk_is_current` and `what_changed`, letting Packet 6 derive slide-ready proof language from canonical events instead of inventing a parallel report stream
+  - Reworked `src/runtime/sessionReview.ts` so completed-run reviews now deterministically derive bounded proof points for monitoring posture, operator-state shifts, support posture, validator rationale, and human-aware adaptation moments directly from canonical events, while the bounded replay list now guarantees inclusion of proof-point source events, milestone anchors, terminal events, and the override/demo chain that judges need to inspect
+  - Updated `src/runtime/sessionComparison.ts` and `src/runtime/reportArtifacts.ts` so paired runs now produce a judge-facing `proof_summary`, exported after-action artifacts carry proof points, exported comparison artifacts carry the proof summary, and `summary_block.notable_points` prefers proof content over generic highlight slices; judge-facing copy now uses `Baseline run` and `AURA-assisted (adaptive) run` while internal ids remain `baseline` / `adaptive`
+  - Updated `src/ui/ReviewWorkspace.tsx` and `src/ui/viewModel.ts` so Review now shows a clickable `Human-aware proof trail` card on completed runs, a `Why the AURA-assisted run was different` card on paired comparisons, and clearer judge-facing comparison copy without disturbing Operate or the existing KPI/export/replay surfaces
+  - Extended verification in `src/runtime/sessionReview.test.ts`, `src/runtime/sessionComparison.test.ts`, `src/runtime/reportArtifacts.test.ts`, and `src/state/sessionStore.test.tsx` for deterministic proof generation, replay-source inclusion, honest degraded/unavailable monitoring treatment, proof-summary generation, export artifact coverage, rendered proof cards, preserved export controls, and a real adaptive human-aware proof moment on the canonical Scenario C validation path
+  - Re-verified with passing `npm test`, passing `npm run build`, local dev-server startup on `http://127.0.0.1:4173`, and desktop/mobile headless Edge screenshots after confirming that the requested `agent-browser` CLI is still unavailable in this environment
+- What remains:
+  - Packet 6 intentionally does not change `humanMonitoring`, webcam heuristics, combined-risk math, KPI formulas, report export transport, Operate layout, or any plant/scenario determinism
+  - Webcam observability/debug polish remains deferred to a later isolated packet; this slice only consumes the existing canonical monitoring outputs honestly and confidence-gates the proof story when monitoring is degraded or unavailable
+  - The pre-existing Vite large-chunk warning for the lazy webcam bundle remains unchanged; Packet 6 did not broaden that footprint
+- Blockers:
+  - The `agent-browser` CLI requested by the browser-verification skill is still unavailable on this machine, so runtime verification again used the already-approved headless Edge screenshot fallback plus an HTTP 200 check against the local Vite server
+- Next recommended step:
+  - A later isolated webcam observability/debug packet can improve operator-facing inspection of webcam lifecycle, freshness, and fallback posture without touching Packet 6’s proof/report contracts
+  - If future demo polish extends the proof story, keep it derived from canonical `completed_review`, `sessionRunComparison`, and exported artifacts rather than adding ad hoc reporting state
+
+---
+
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 README truth and AI-gap assessment session
+- Task worked on: Audited the in-repo implementation against the current project framing, rewrote `README.md` to match actual shipped behavior, and documented the present AI/ML boundary honestly for final demo/report use
+- Status: Done
+- What changed:
+  - Replaced the older minimal README with a fuller, professional project overview that now reflects the real runtime surfaces, scenario set, operator/review flow, reporting/export path, and actual implemented subsystems in `src/runtime`, `src/state`, and `src/ui`
+  - Added a direct `AI / ML Status` section to `README.md` clarifying that the current repo is primarily a deterministic, rule-based adaptive decision-support prototype and that the only true ML component presently wired in-repo is the optional local webcam/CV path using MediaPipe/BlazeFace assets
+  - Added explicit honesty language in `README.md` distinguishing what is implemented now versus what is not present, including no custom-trained model, no LLM integration, no generative explanation layer, and no autonomous plant-control AI
+- What remains:
+  - The repo still does not contain a stronger AI-native subsystem beyond the bounded local webcam/CV path; if the final deliverable must make a clearer AI claim, that requires an additional implementation slice rather than more documentation
+  - The README now tells the truth, but final demo narration/report wording should also follow that same framing so the project is not overclaimed verbally
+- Blockers:
+  - None for the documentation correction itself
+- Next recommended step:
+  - If time allows, implement one tightly scoped AI addition that fits the existing architecture and can be defended honestly, rather than trying to relabel the existing rule-based logic as something it is not
+  - Keep future README/report/demo wording aligned with the actual codebase unless and until a new AI subsystem is added and verified
+
 ---
 
 ## 26) Final reminder to all future agents
