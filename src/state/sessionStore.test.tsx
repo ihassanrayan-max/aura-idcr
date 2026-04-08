@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import App from "../App";
 import { AuraSessionStore } from "./sessionStore";
@@ -72,6 +72,10 @@ function advanceUntil(
 
 function openReviewWorkspace(): void {
   fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
+}
+
+function openHumanMonitoringWorkspace(): void {
+  fireEvent.click(screen.getByRole("tab", { name: /Human Monitoring/i }));
 }
 
 function openTutorialGuideMenu(): void {
@@ -228,6 +232,135 @@ describe("AuraSessionStore", () => {
 
     expect(screen.getByText("00:05")).toBeInTheDocument();
     expect(screen.getByText(/Operator Orientation/i)).toBeInTheDocument();
+  });
+
+  it("renders an isolated human monitoring workspace with the Phase 1 inspection sections", () => {
+    const store = new AuraSessionStore({ session_index: 133, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    openHumanMonitoringWorkspace();
+
+    expect(screen.getByTestId("human-monitoring-workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Human Monitoring 2.0/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Source Status/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Webcam \/ CV Observability/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Interaction Telemetry Observability/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Extracted Features/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Fused Interpretation Input/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Final Output State/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Advisory Meaning \/ System Impact/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("operate-workspace")).not.toBeInTheDocument();
+  });
+
+  it("shows unavailable webcam handling honestly inside the human monitoring workspace", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockRejectedValue({ name: "NotAllowedError" }),
+      },
+    });
+
+    const store = new AuraSessionStore({ session_index: 134, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+    openHumanMonitoringWorkspace();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Enable webcam monitoring/i })[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Webcam unavailable/i).length).toBeGreaterThan(0);
+      expect(
+        store.getSnapshot().human_monitoring.sources.find((source) => source.source_kind === "camera_cv")?.availability,
+      ).toBe("unavailable");
+    });
+  });
+
+  it("surfaces stale and degraded monitoring signals in the isolated workspace", () => {
+    const store = new AuraSessionStore({ session_index: 135, tick_duration_sec: 5 });
+
+    act(() => {
+      store.setCameraCvIntent(true);
+      store.updateCameraCvLifecycle({
+        lifecycle_status: "active",
+        status_note: "Camera active before stale visibility test.",
+        clear_observations: true,
+      });
+      store.recordCameraCvObservation({
+        observation_kind: "stable_face",
+        face_count: 1,
+        strongest_face_confidence: 82,
+        face_center_offset: 0.1,
+        head_motion_delta: 0.05,
+        face_area_ratio: 0.14,
+        note: "stable face observed for stale visibility test",
+      });
+      store.advanceTick();
+      store.advanceTick();
+      store.advanceTick();
+      store.advanceTick();
+    });
+
+    render(<App store={store} autoRun={false} />);
+    openHumanMonitoringWorkspace();
+
+    expect(screen.getByText(/camera_cv is stale/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Freshness stale/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Degraded state active/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders interpretability panels from live monitoring contributors instead of a mock-only view", () => {
+    const store = new AuraSessionStore({ session_index: 136, tick_duration_sec: 5 });
+
+    act(() => {
+      store.recordInteractionTelemetry({
+        event_kind: "workspace_switch",
+        ui_region: "workspace_switcher",
+        workspace: "review",
+        target_id: "review",
+        detail: "Switched to review for interpretability test.",
+      });
+      store.recordInteractionTelemetry({
+        event_kind: "manual_control_adjustment",
+        ui_region: "plant_mimic",
+        workspace: "operate",
+        target_id: "control_feedwater_demand",
+        requested_value: 74,
+        detail: "Adjusted feedwater demand for interpretability test.",
+      });
+      store.recordInteractionTelemetry({
+        event_kind: "action_request",
+        ui_region: "procedure_lane",
+        workspace: "operate",
+        target_id: "act_adjust_feedwater",
+        requested_value: 74,
+        detail: "Requested feedwater correction for interpretability test.",
+      });
+      store.advanceTick();
+    });
+
+    render(<App store={store} autoRun={false} />);
+    openHumanMonitoringWorkspace();
+
+    expect(screen.getAllByText(/Interaction telemetry/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Provenance canonical source pipeline/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Recent UI actions, run controls, and workspace switches appear here as the real interaction telemetry feed\./i),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Latency trend/i).length).toBeGreaterThan(0);
+  });
+
+  it("keeps the human monitoring workspace linked to live runtime updates", () => {
+    const store = new AuraSessionStore({ session_index: 137, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    openHumanMonitoringWorkspace();
+    expect(screen.getByText(/No recent interaction records/i)).toBeInTheDocument();
+
+    act(() => {
+      store.advanceTick();
+    });
+
+    expect(screen.getAllByText(/Workspace switched to monitoring\./i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/No recent interaction records/i)).not.toBeInTheDocument();
   });
 
   it("generates a bounded counterfactual advisor preview without mutating the live session", async () => {

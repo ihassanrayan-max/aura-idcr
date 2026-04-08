@@ -1498,6 +1498,28 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Human Monitoring 2.0 Phase 1 session
+- Task worked on: Implemented the isolated Human Monitoring 2.0 Phase 1 inspection workspace on top of the real runtime/store path
+- Status: Done
+- What changed:
+  - Added additive Human Monitoring inspection contracts in `src/contracts/aura.ts` so the UI can inspect recent interaction telemetry, recent webcam/CV observations, and per-source latest bounded feature windows without changing the existing canonical operator-state or combined-risk truth path
+  - Updated `src/state/sessionStore.ts` to publish `human_monitoring_inspection` alongside the existing `human_monitoring` snapshot during initial load, live ticks, and monitoring-only webcam refreshes, keeping the workspace connected to the real session runtime rather than a mock inspector
+  - Added a dedicated `Human Monitoring` workspace in `src/ui/HumanMonitoringWorkspace.tsx`, wired through `src/App.tsx` and `src/ui/viewModel.ts`, with clearly separated sections for source status, webcam/CV observability, interaction telemetry observability, extracted features, fused interpretation input, final output state, and advisory/system impact
+  - Extended `src/ui/useWebcamMonitoring.ts` with a bounded live preview ref so the new workspace can show the local webcam region when available without turning the whole feature into a camera demo or changing Operate layout
+  - Added focused Phase 1 verification in `src/state/sessionStore.test.tsx` for isolated workspace rendering, unavailable-webcam handling, stale/degraded signal visibility, interpretability panels, and live runtime linkage; the repo remains green with passing `npm test`
+  - Added restrained Human Monitoring workspace styling in `src/styles/workspaces.css` using the existing engineering palette and existing shell primitives rather than a new visual system
+- What remains:
+  - Phase 1 intentionally does not change the default Operate layout beyond adding the extra workspace tab; the new surface is isolated first, per scope
+  - Phase 2 should decide how much of this inspector graduates into Operate, which monitor-derived cues deserve stronger adaptive presentation, whether additional human-side evidence beyond the current placeholder/interaction/webcam set is justified, and which explanation paths should become operator-facing versus evaluator-only
+  - Phase 2 can also harden the webcam inspector further if needed, but should keep the bounded advisory framing and avoid generic emotion/medical claims
+- Blockers:
+  - None in-repo after implementation; Vitest still prints JSDOM `HTMLMediaElement.pause()` warnings during webcam-hook cleanup, but the suite passes and those warnings do not indicate failing logic
+- Next recommended step:
+  - Use this isolated workspace as the inspection authority for Human Monitoring 2.0, then open a scoped Phase 2 decision on selective Operate integration, stronger downstream adaptation legibility, and any additional bounded source features only if the human explicitly prioritizes them
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

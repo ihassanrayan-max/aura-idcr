@@ -38,6 +38,50 @@
   grid-area: support;
 }
 
+.monitoring-grid {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  grid-template-areas:
+    "summary summary"
+    "sources webcam"
+    "telemetry webcam"
+    "features fused"
+    "output impact";
+}
+
+.monitoring-summary {
+  grid-area: summary;
+}
+
+.monitoring-sources {
+  grid-area: sources;
+}
+
+.monitoring-webcam {
+  grid-area: webcam;
+}
+
+.monitoring-telemetry {
+  grid-area: telemetry;
+}
+
+.monitoring-features {
+  grid-area: features;
+}
+
+.monitoring-fused {
+  grid-area: fused;
+}
+
+.monitoring-output {
+  grid-area: output;
+}
+
+.monitoring-impact {
+  grid-area: impact;
+}
+
 .summary-triad {
   display: grid;
   gap: var(--space-3);
@@ -116,7 +160,8 @@
 .utility-card,
 .factor-card,
 .event-card,
-.evidence-card {
+.evidence-card,
+.monitoring-card {
   padding: var(--space-4);
   border-radius: var(--radius-md);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
@@ -140,9 +185,83 @@
 .lane-guidance-grid,
 .support-layout,
 .support-section-grid,
-.review-evidence-grid {
+.review-evidence-grid,
+.monitoring-card-grid,
+.monitoring-kv-grid {
   display: grid;
   gap: var(--space-3);
+}
+
+.monitoring-card-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.monitoring-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.monitoring-card--ok {
+  border-color: rgba(138, 216, 183, 0.22);
+}
+
+.monitoring-card--neutral {
+  border-color: rgba(255, 201, 120, 0.24);
+}
+
+.monitoring-card--alert {
+  border-color: rgba(255, 108, 99, 0.26);
+}
+
+.monitoring-card--summary {
+  margin-top: var(--space-3);
+}
+
+.monitoring-preview-shell,
+.monitoring-preview-sidebar {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.monitoring-preview-shell {
+  align-content: start;
+}
+
+.monitoring-preview-frame {
+  min-height: 220px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(137, 216, 255, 0.18);
+  background:
+    linear-gradient(180deg, rgba(12, 20, 27, 0.92), rgba(7, 12, 18, 0.98)),
+    radial-gradient(circle at top, rgba(137, 216, 255, 0.12), transparent 55%);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.monitoring-preview-video {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  object-fit: cover;
+  display: block;
+}
+
+.monitoring-kv-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.monitoring-kv {
+  display: grid;
+  gap: 0.2rem;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.monitoring-kv span {
+  color: var(--text-2);
+  font-size: 0.78rem;
 }
 
 .alarm-cluster {
@@ -500,6 +619,19 @@
       "storyline";
   }
 
+  .monitoring-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "summary"
+      "sources"
+      "webcam"
+      "telemetry"
+      "features"
+      "fused"
+      "output"
+      "impact";
+  }
+
   .summary-triad,
   .ai-briefing-grid,
   .lane-guidance-grid,
@@ -510,6 +642,8 @@
   .comparison-run-grid,
   .oversight-grid,
   .review-evidence-grid,
+  .monitoring-card-grid,
+  .monitoring-kv-grid,
   .tutorial-copy-grid {
     grid-template-columns: 1fr;
   }

@@ -13,6 +13,9 @@ import type {
   CounterfactualBranchAction,
   CounterfactualBranchId,
   CounterfactualBranchResult,
+  CameraCvLifecycleStatus,
+  HumanMonitoringInspectionSnapshot,
+  HumanMonitoringSourceFeatureSnapshot,
   InteractionTelemetryEventKind,
   InteractionTelemetryUiRegion,
   InteractionTelemetryWorkspace,
@@ -67,7 +70,6 @@ import {
 } from "../runtime/plantTwin";
 import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
 import {
-  type CameraCvLifecycleStatus,
   createHumanMonitoringRuntimeState,
   evaluateHumanMonitoring,
   recordCameraCvObservation,
@@ -252,6 +254,65 @@ function summarizeHumanMonitoring(human_monitoring: HumanMonitoringSnapshot) {
           interpretation_note: human_monitoring.interpretation_input.interpretation_note,
         }
       : undefined,
+  };
+}
+
+function summarizeSourceFeatureSnapshot(
+  features:
+    | {
+        workload_index: number;
+        attention_stability_index: number;
+        signal_confidence: number;
+        risk_cues: HumanMonitoringSourceFeatureSnapshot["risk_cues"];
+        degraded_mode_active: boolean;
+        degraded_mode_reason: string;
+        observation_window_ticks: number;
+        interpretation_note: string;
+        provenance?: HumanMonitoringSourceFeatureSnapshot["provenance"];
+      }
+    | undefined,
+): HumanMonitoringSourceFeatureSnapshot | undefined {
+  if (!features) {
+    return undefined;
+  }
+
+  return {
+    workload_index: features.workload_index,
+    attention_stability_index: features.attention_stability_index,
+    signal_confidence: features.signal_confidence,
+    risk_cues: features.risk_cues,
+    degraded_mode_active: features.degraded_mode_active,
+    degraded_mode_reason: features.degraded_mode_reason,
+    observation_window_ticks: features.observation_window_ticks,
+    interpretation_note: features.interpretation_note,
+    provenance: features.provenance ?? "canonical_source_pipeline",
+  };
+}
+
+function buildHumanMonitoringInspectionSnapshot(params: {
+  human_monitoring: HumanMonitoringSnapshot;
+  runtime_state: HumanMonitoringRuntimeState;
+}): HumanMonitoringInspectionSnapshot {
+  return {
+    sources: params.human_monitoring.sources.map((source) => ({
+      source_id: source.source_id,
+      source_kind: source.source_kind,
+      latest_features: summarizeSourceFeatureSnapshot(
+        params.runtime_state.sources[source.source_id]?.latest_reading?.interpretation_input,
+      ),
+    })),
+    interaction_telemetry: {
+      suppressed: params.runtime_state.interaction_telemetry.suppressed,
+      recent_records: params.runtime_state.interaction_telemetry.records.slice(-12),
+    },
+    camera_cv: {
+      intent_enabled: params.runtime_state.camera_cv.intent_enabled,
+      lifecycle_status: params.runtime_state.camera_cv.lifecycle_status,
+      unavailable_reason: params.runtime_state.camera_cv.unavailable_reason,
+      status_note: params.runtime_state.camera_cv.status_note,
+      last_refresh_bucket: params.runtime_state.camera_cv.last_refresh_bucket,
+      recent_observations: params.runtime_state.camera_cv.observations.slice(-8),
+    },
   };
 }
 
@@ -647,6 +708,10 @@ export class AuraSessionStore {
     });
     this.human_monitoring_runtime_state = phase3_state.human_monitoring_runtime_state;
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
+    const human_monitoring_inspection = buildHumanMonitoringInspectionSnapshot({
+      human_monitoring: phase3_state.human_monitoring,
+      runtime_state: this.human_monitoring_runtime_state,
+    });
     const human_monitoring_event = this.logger.append({
       sim_time_sec: 0,
       event_type: "human_monitoring_snapshot_recorded",
@@ -741,6 +806,7 @@ export class AuraSessionStore {
       alarm_intelligence: phase3_state.alarm_intelligence,
       reasoning_snapshot: phase3_state.reasoning_snapshot,
       human_monitoring: phase3_state.human_monitoring,
+      human_monitoring_inspection,
       operator_state: phase3_state.operator_state,
       combined_risk: phase3_state.combined_risk,
       first_response_lane: phase3_state.first_response_lane,
@@ -780,6 +846,10 @@ export class AuraSessionStore {
     });
 
     this.human_monitoring_runtime_state = human_monitoring_result.runtime_state;
+    const human_monitoring_inspection = buildHumanMonitoringInspectionSnapshot({
+      human_monitoring: human_monitoring_result.snapshot,
+      runtime_state: this.human_monitoring_runtime_state,
+    });
 
     const human_monitoring_event = this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -808,6 +878,7 @@ export class AuraSessionStore {
     this.snapshot = {
       ...this.snapshot,
       human_monitoring: human_monitoring_result.snapshot,
+      human_monitoring_inspection,
       operator_state,
       events: this.logger.list(),
       plant_tick: {
@@ -2070,6 +2141,10 @@ export class AuraSessionStore {
     });
     this.human_monitoring_runtime_state = phase3_state.human_monitoring_runtime_state;
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
+    const human_monitoring_inspection = buildHumanMonitoringInspectionSnapshot({
+      human_monitoring: phase3_state.human_monitoring,
+      runtime_state: this.human_monitoring_runtime_state,
+    });
 
     const plant_tick: PlantTick = {
       tick_id: next_tick_id,
@@ -2346,6 +2421,7 @@ export class AuraSessionStore {
       alarm_intelligence: phase3_state.alarm_intelligence,
       reasoning_snapshot: phase3_state.reasoning_snapshot,
       human_monitoring: phase3_state.human_monitoring,
+      human_monitoring_inspection,
       operator_state: phase3_state.operator_state,
       combined_risk: phase3_state.combined_risk,
       support_mode: phase3_state.support_mode,

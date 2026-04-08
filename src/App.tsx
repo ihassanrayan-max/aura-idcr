@@ -14,6 +14,7 @@ import { formatSupportModeLabel } from "./runtime/supportModePolicy";
 import type { AuraSessionStore } from "./state/sessionStore";
 import { createDefaultSessionStore, useAuraSessionSnapshot } from "./state/sessionStore";
 import { formatClock, riskBadgeTone } from "./ui/format";
+import { HumanMonitoringWorkspace } from "./ui/HumanMonitoringWorkspace";
 import { OperateWorkspace } from "./ui/OperateWorkspace";
 import { MetricStrip, StatusPill } from "./ui/primitives";
 import { ReviewWorkspace } from "./ui/ReviewWorkspace";
@@ -27,7 +28,12 @@ import {
   type TutorialPathId,
   type TutorialSignal,
 } from "./ui/tutorial";
-import { buildOperateWorkspaceModel, buildReviewWorkspaceModel, type WorkspaceId } from "./ui/viewModel";
+import {
+  buildHumanMonitoringWorkspaceModel,
+  buildOperateWorkspaceModel,
+  buildReviewWorkspaceModel,
+  type WorkspaceId,
+} from "./ui/viewModel";
 
 type AppProps = {
   store?: AuraSessionStore;
@@ -346,6 +352,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
       }),
     [comparisonCaptureHint, sessionRunComparison, snapshot],
   );
+  const monitoringModel = useMemo(
+    () =>
+      buildHumanMonitoringWorkspaceModel({
+        snapshot,
+      }),
+    [snapshot],
+  );
 
   const tutorialFlow = tutorialState.mode === "running" ? getTutorialFlow(tutorialState.pathId) : undefined;
   const tutorialStep =
@@ -507,13 +520,16 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   }
 
   function openWorkspace(nextWorkspace: WorkspaceId): void {
-    if (!isTutorialActionAllowed(nextWorkspace === "review" ? "workspace:review" : "workspace:operate")) {
+    if (
+      nextWorkspace !== "monitoring" &&
+      !isTutorialActionAllowed(nextWorkspace === "review" ? "workspace:review" : "workspace:operate")
+    ) {
       return;
     }
 
     if (nextWorkspace === "review") {
       recordTutorialSignal("workspace-review-opened");
-    } else {
+    } else if (nextWorkspace === "operate") {
       recordTutorialSignal("workspace-operate-opened");
     }
 
@@ -871,6 +887,16 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
             <button
               type="button"
               role="tab"
+              aria-selected={workspace === "monitoring"}
+              className={workspace === "monitoring" ? "workspace-switch__button is-active" : "workspace-switch__button"}
+              disabled={tutorialState.mode === "running"}
+              onClick={() => openWorkspace("monitoring")}
+            >
+              Human Monitoring
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={workspace === "review"}
               className={workspace === "review" ? "workspace-switch__button is-active" : "workspace-switch__button"}
               disabled={!isTutorialActionAllowed("workspace:review")}
@@ -1022,6 +1048,8 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           onRequestSupervisorOverrideReview={() => store.requestSupervisorOverrideReview()}
           onOpenReview={() => openWorkspace("review")}
         />
+      ) : workspace === "monitoring" ? (
+        <HumanMonitoringWorkspace model={monitoringModel} webcamMonitoring={webcamMonitoring} />
       ) : (
         <ReviewWorkspace
           model={reviewModel}

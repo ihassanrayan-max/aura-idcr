@@ -1,6 +1,9 @@
 import type {
   AlarmIntelligenceSnapshot,
   AlarmSet,
+  CameraCvLifecycleStatus,
+  CameraCvObservation,
+  CameraCvObservationKind,
   ExecutedAction,
   InteractionTelemetryEventKind,
   InteractionTelemetryRecord,
@@ -60,32 +63,6 @@ export type InteractionTelemetryRuntimeState = {
   next_sequence: number;
   records: InteractionTelemetryRecord[];
   suppressed: boolean;
-};
-
-export type CameraCvLifecycleStatus =
-  | "off"
-  | "initializing"
-  | "active"
-  | "degraded"
-  | "unavailable";
-
-export type CameraCvObservationKind =
-  | "stable_face"
-  | "weak_face"
-  | "no_face"
-  | "multiple_faces";
-
-export type CameraCvObservation = {
-  observation_id: string;
-  sim_time_sec: number;
-  tick_index: number;
-  observation_kind: CameraCvObservationKind;
-  face_count: number;
-  strongest_face_confidence: number;
-  face_center_offset: number;
-  head_motion_delta: number;
-  face_area_ratio: number;
-  note: string;
 };
 
 export type CameraCvRuntimeState = {

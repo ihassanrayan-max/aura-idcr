@@ -223,7 +223,7 @@ export type ActionRequest = {
   reason_note?: string;
 };
 
-export type InteractionTelemetryWorkspace = "operate" | "review";
+export type InteractionTelemetryWorkspace = "operate" | "monitoring" | "review";
 
 export type InteractionTelemetryUiRegion =
   | ActionRequest["ui_region"]
@@ -352,6 +352,32 @@ export type HumanMonitoringSourceAvailability =
 
 export type HumanMonitoringFreshnessStatus = "current" | "aging" | "stale" | "no_observations";
 
+export type CameraCvLifecycleStatus =
+  | "off"
+  | "initializing"
+  | "active"
+  | "degraded"
+  | "unavailable";
+
+export type CameraCvObservationKind =
+  | "stable_face"
+  | "weak_face"
+  | "no_face"
+  | "multiple_faces";
+
+export type CameraCvObservation = {
+  observation_id: string;
+  sim_time_sec: number;
+  tick_index: number;
+  observation_kind: CameraCvObservationKind;
+  face_count: number;
+  strongest_face_confidence: number;
+  face_center_offset: number;
+  head_motion_delta: number;
+  face_area_ratio: number;
+  note: string;
+};
+
 export type HumanMonitoringRiskCues = {
   hesitation_pressure: number;
   latency_trend_pressure: number;
@@ -373,6 +399,31 @@ export type HumanMonitoringInterpretationInput = {
   contributing_source_ids: string[];
   provenance: "legacy_runtime_placeholder" | "canonical_source_pipeline";
   interpretation_note: string;
+};
+
+export type HumanMonitoringSourceFeatureSnapshot = Omit<
+  HumanMonitoringInterpretationInput,
+  "contributing_source_ids"
+>;
+
+export type HumanMonitoringInspectionSnapshot = {
+  sources: Array<{
+    source_id: string;
+    source_kind: HumanMonitoringSourceKind;
+    latest_features?: HumanMonitoringSourceFeatureSnapshot;
+  }>;
+  interaction_telemetry: {
+    suppressed: boolean;
+    recent_records: InteractionTelemetryRecord[];
+  };
+  camera_cv: {
+    intent_enabled: boolean;
+    lifecycle_status: CameraCvLifecycleStatus;
+    unavailable_reason?: string;
+    status_note: string;
+    last_refresh_bucket?: string;
+    recent_observations: CameraCvObservation[];
+  };
 };
 
 export type HumanMonitoringSourceSnapshot = {
@@ -998,6 +1049,7 @@ export type SessionSnapshot = {
   alarm_intelligence: AlarmIntelligenceSnapshot;
   reasoning_snapshot: ReasoningSnapshot;
   human_monitoring: HumanMonitoringSnapshot;
+  human_monitoring_inspection?: HumanMonitoringInspectionSnapshot;
   operator_state: OperatorStateSnapshot;
   combined_risk: CombinedRiskSnapshot;
   first_response_lane: FirstResponseLane;

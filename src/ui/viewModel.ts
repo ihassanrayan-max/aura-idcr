@@ -19,7 +19,7 @@ import {
 import type { MetricItemModel, StatusPillModel } from "./primitives";
 import type { SupportSectionId } from "../runtime/presentationPolicy";
 
-export type WorkspaceId = "operate" | "review";
+export type WorkspaceId = "operate" | "monitoring" | "review";
 
 export type OperateAssistanceCueModel = {
   eyebrow: string;
@@ -140,6 +140,76 @@ export type OperateWorkspaceModel = {
   supportSections: OperateSupportSectionModel[];
   topFactors: Array<{ id: string; label: string; contribution: string; detail: string }>;
   reviewHint: string;
+};
+
+export type HumanMonitoringWorkspaceModel = {
+  summaryMetrics: MetricItemModel[];
+  summaryPills: StatusPillModel[];
+  summaryHeadline: string;
+  summaryBody: string;
+  sourceCards: Array<{
+    id: string;
+    title: string;
+    tone: StatusTone;
+    summary: string;
+    detail: string;
+    metrics: MetricItemModel[];
+    pills: StatusPillModel[];
+  }>;
+  webcam: {
+    statusPills: StatusPillModel[];
+    summary: string;
+    detail: string;
+    metrics: MetricItemModel[];
+    observationCards: Array<{
+      id: string;
+      title: string;
+      detail: string;
+      metrics: MetricItemModel[];
+    }>;
+  };
+  interactionTelemetry: {
+    statusPills: StatusPillModel[];
+    summary: string;
+    detail: string;
+    metrics: MetricItemModel[];
+    recordCards: Array<{
+      id: string;
+      title: string;
+      detail: string;
+      pills: StatusPillModel[];
+    }>;
+  };
+  extractedFeatures: Array<{
+    id: string;
+    title: string;
+    tone: StatusTone;
+    summary: string;
+    metrics: MetricItemModel[];
+    riskCues: Array<{ label: string; value: string }>;
+    note: string;
+  }>;
+  fusedInterpretation?: {
+    summary: string;
+    detail: string;
+    metrics: MetricItemModel[];
+    riskCues: Array<{ label: string; value: string }>;
+    pills: StatusPillModel[];
+  };
+  finalOutput: {
+    summary: string;
+    detail: string;
+    metrics: MetricItemModel[];
+    pills: StatusPillModel[];
+  };
+  downstreamImpact: {
+    summary: string;
+    detail: string;
+    metrics: MetricItemModel[];
+    pills: StatusPillModel[];
+    implications: Array<{ label: string; body: string }>;
+    factors: Array<{ id: string; label: string; detail: string }>;
+  };
 };
 
 export type ReviewWorkspaceModel = {
@@ -713,6 +783,534 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         : snapshot.completed_review
           ? `Completed run evidence is ready in Review for session ${snapshot.completed_review.session_id}.`
           : "Open Review for live oversight, completed-run evidence, and comparison/export when ready.",
+  };
+}
+
+function monitoringSourceLabel(sourceKind: SessionSnapshot["human_monitoring"]["sources"][number]["source_kind"]): string {
+  switch (sourceKind) {
+    case "legacy_runtime_placeholder":
+      return "Legacy runtime placeholder";
+    case "interaction_telemetry":
+      return "Interaction telemetry";
+    case "camera_cv":
+      return "Webcam / CV";
+    case "manual_annotation":
+      return "Manual annotation";
+  }
+}
+
+function monitoringModeLabel(mode: SessionSnapshot["human_monitoring"]["mode"]): string {
+  switch (mode) {
+    case "placeholder_compatibility":
+      return "Placeholder compatibility";
+    case "live_sources":
+      return "Live sources";
+    case "degraded":
+      return "Degraded";
+    case "unavailable":
+      return "Unavailable";
+  }
+}
+
+function freshnessTone(
+  freshnessStatus: SessionSnapshot["human_monitoring"]["freshness_status"],
+): StatusTone {
+  switch (freshnessStatus) {
+    case "current":
+      return "ok";
+    case "aging":
+    case "no_observations":
+      return "neutral";
+    case "stale":
+      return "alert";
+  }
+}
+
+function availabilityTone(
+  availability: SessionSnapshot["human_monitoring"]["sources"][number]["availability"],
+): StatusTone {
+  switch (availability) {
+    case "active":
+      return "ok";
+    case "degraded":
+    case "not_connected":
+      return "neutral";
+    case "unavailable":
+      return "alert";
+  }
+}
+
+function lifecycleTone(
+  lifecycleStatus: NonNullable<SessionSnapshot["human_monitoring_inspection"]>["camera_cv"]["lifecycle_status"],
+): StatusTone {
+  switch (lifecycleStatus) {
+    case "active":
+      return "ok";
+    case "degraded":
+    case "initializing":
+    case "off":
+      return "neutral";
+    case "unavailable":
+      return "alert";
+  }
+}
+
+function sourceOverallTone(source: SessionSnapshot["human_monitoring"]["sources"][number]): StatusTone {
+  if (source.freshness_status === "stale") {
+    return "alert";
+  }
+
+  if (source.availability === "active" && source.contributes_to_aggregate) {
+    return "ok";
+  }
+
+  return availabilityTone(source.availability);
+}
+
+function cueLabel(cueId: keyof NonNullable<SessionSnapshot["human_monitoring"]["interpretation_input"]>["risk_cues"]): string {
+  switch (cueId) {
+    case "hesitation_pressure":
+      return "Hesitation";
+    case "latency_trend_pressure":
+      return "Latency trend";
+    case "reversal_oscillation_pressure":
+      return "Reversal / oscillation";
+    case "inactivity_pressure":
+      return "Inactivity";
+    case "burstiness_pressure":
+      return "Burstiness";
+    case "navigation_instability_pressure":
+      return "Navigation instability";
+    case "advisory_visual_attention_pressure":
+      return "Visual attention proxy";
+  }
+}
+
+function buildRiskCueRows(
+  riskCues: NonNullable<SessionSnapshot["human_monitoring"]["interpretation_input"]>["risk_cues"],
+): Array<{ label: string; value: string }> {
+  return (Object.keys(riskCues) as Array<keyof typeof riskCues>).map((cueId) => ({
+    label: cueLabel(cueId),
+    value: `${riskCues[cueId]}/100`,
+  }));
+}
+
+type BuildHumanMonitoringWorkspaceModelParams = {
+  snapshot: SessionSnapshot;
+};
+
+export function buildHumanMonitoringWorkspaceModel(
+  params: BuildHumanMonitoringWorkspaceModelParams,
+): HumanMonitoringWorkspaceModel {
+  const { snapshot } = params;
+  const inspection: NonNullable<SessionSnapshot["human_monitoring_inspection"]> =
+    snapshot.human_monitoring_inspection ?? {
+    sources: snapshot.human_monitoring.sources.map((source) => ({
+      source_id: source.source_id,
+      source_kind: source.source_kind,
+      latest_features: undefined,
+    })),
+    interaction_telemetry: {
+      suppressed: false,
+      recent_records: [],
+    },
+    camera_cv: {
+      intent_enabled: false,
+      lifecycle_status: "off" as const,
+      unavailable_reason: undefined,
+      status_note: "Webcam monitoring is off until manually enabled.",
+      last_refresh_bucket: "off",
+      recent_observations: [],
+    },
+  };
+  const inspectionSourceById = new Map(inspection.sources.map((source) => [source.source_id, source]));
+  const interactionRecords = [...inspection.interaction_telemetry.recent_records].reverse();
+  const cameraObservations = [...inspection.camera_cv.recent_observations].reverse();
+  const latestCameraObservation = cameraObservations[0];
+  const contributorLabels =
+    snapshot.human_monitoring.interpretation_input?.contributing_source_ids.map((sourceId) => {
+      const source = snapshot.human_monitoring.sources.find((candidate) => candidate.source_id === sourceId);
+      return source ? monitoringSourceLabel(source.source_kind) : sourceId;
+    }) ?? [];
+  const extractedFeatureEntries = snapshot.human_monitoring.sources.flatMap((source) => {
+    const latestFeatures = inspectionSourceById.get(source.source_id)?.latest_features;
+    return latestFeatures ? [{ source, latestFeatures }] : [];
+  });
+
+  return {
+    summaryMetrics: [
+      {
+        label: "Monitoring mode",
+        value: monitoringModeLabel(snapshot.human_monitoring.mode),
+        caption: `Freshness ${snapshot.human_monitoring.freshness_status}`,
+        tone: freshnessTone(snapshot.human_monitoring.freshness_status),
+      },
+      {
+        label: "Aggregate confidence",
+        value: `${snapshot.human_monitoring.aggregate_confidence}/100`,
+        caption: `${snapshot.human_monitoring.contributing_source_count} contributing source(s)`,
+        tone: snapshot.human_monitoring.degraded_state_active ? "alert" : "ok",
+      },
+      {
+        label: "Operator workload",
+        value: `${snapshot.operator_state.workload_index}/100`,
+        caption: `Attention ${snapshot.operator_state.attention_stability_index}/100`,
+        tone: snapshot.operator_state.degraded_mode_active ? "neutral" : "ok",
+      },
+      {
+        label: "Downstream support",
+        value: formatSupportModeLabel(snapshot.support_mode),
+        caption: `Recommended ${formatSupportModeLabel(snapshot.combined_risk.recommended_assistance_mode)}`,
+        tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+      },
+    ],
+    summaryPills: [
+      {
+        label: `Freshness ${snapshot.human_monitoring.freshness_status}`,
+        tone: freshnessTone(snapshot.human_monitoring.freshness_status),
+      },
+      {
+        label: snapshot.human_monitoring.degraded_state_active ? "Degraded state active" : "Degraded state clear",
+        tone: snapshot.human_monitoring.degraded_state_active ? "alert" : "ok",
+      },
+      {
+        label: inspection.interaction_telemetry.suppressed ? "Telemetry capture suppressed" : "Telemetry capture live",
+        tone: inspection.interaction_telemetry.suppressed ? "neutral" : "ok",
+      },
+    ],
+    summaryHeadline: snapshot.human_monitoring.status_summary,
+    summaryBody: snapshot.human_monitoring.degraded_state_active
+      ? snapshot.human_monitoring.degraded_state_reason
+      : "Monitoring is currently publishing a bounded, inspectable advisory picture into the runtime.",
+    sourceCards: snapshot.human_monitoring.sources.map((source) => {
+      const latestFeatures = inspectionSourceById.get(source.source_id)?.latest_features;
+      return {
+        id: source.source_id,
+        title: monitoringSourceLabel(source.source_kind),
+        tone: sourceOverallTone(source),
+        summary: source.status_note,
+        detail: latestFeatures?.degraded_mode_active
+          ? latestFeatures.degraded_mode_reason
+          : source.contributes_to_aggregate
+            ? "This source is currently contributing to the fused interpretation."
+            : "This source is currently present for inspection but not contributing to the fused interpretation.",
+        metrics: [
+          {
+            label: "Availability",
+            value: source.availability.replace(/_/g, " "),
+            caption: `Freshness ${source.freshness_status}`,
+            tone: availabilityTone(source.availability),
+          },
+          {
+            label: "Confidence",
+            value: `${source.confidence}/100`,
+            caption:
+              typeof source.latest_observation_age_sec === "number"
+                ? `Latest sample age ${source.latest_observation_age_sec}s`
+                : "No current sample age available",
+          },
+          {
+            label: "Window",
+            value: `${source.sample_count_in_window} sample(s)`,
+            caption: `${source.window_duration_sec}s across ${source.window_tick_span} tick(s)`,
+          },
+        ],
+        pills: [
+          {
+            label: source.contributes_to_aggregate ? "Contributing" : "Not contributing",
+            tone: source.contributes_to_aggregate ? "ok" : "neutral",
+          },
+          {
+            label:
+              source.source_kind === "legacy_runtime_placeholder"
+                ? "Fallback compatibility path"
+                : "Live-source path",
+            tone: source.source_kind === "legacy_runtime_placeholder" ? "neutral" : "ok",
+          },
+        ],
+      };
+    }),
+    webcam: {
+      statusPills: [
+        {
+          label: `Lifecycle ${inspection.camera_cv.lifecycle_status.replace(/_/g, " ")}`,
+          tone: lifecycleTone(inspection.camera_cv.lifecycle_status),
+        },
+        {
+          label: inspection.camera_cv.intent_enabled ? "Intent enabled" : "Intent off",
+          tone: inspection.camera_cv.intent_enabled ? "ok" : "neutral",
+        },
+        {
+          label: latestCameraObservation
+            ? `Latest ${latestCameraObservation.observation_kind.replace(/_/g, " ")}`
+            : "No observation yet",
+          tone: latestCameraObservation ? lifecycleTone(inspection.camera_cv.lifecycle_status) : "neutral",
+        },
+      ],
+      summary: inspection.camera_cv.status_note,
+      detail: inspection.camera_cv.unavailable_reason
+        ? `Unavailable reason: ${inspection.camera_cv.unavailable_reason.replace(/_/g, " ")}.`
+        : latestCameraObservation
+          ? `Latest bounded visual observation arrived at t+${formatClock(latestCameraObservation.sim_time_sec)}.`
+          : "No bounded visual observation has been captured yet.",
+      metrics: [
+        {
+          label: "Observation window",
+          value: `${inspection.camera_cv.recent_observations.length} sample(s)`,
+          caption: `Refresh bucket ${inspection.camera_cv.last_refresh_bucket ?? "unknown"}`,
+        },
+        {
+          label: "Latest confidence",
+          value: latestCameraObservation
+            ? `${Math.round(latestCameraObservation.strongest_face_confidence)}/100`
+            : "N/A",
+          caption: latestCameraObservation
+            ? `Face count ${latestCameraObservation.face_count}`
+            : "Awaiting observation",
+          tone: latestCameraObservation ? lifecycleTone(inspection.camera_cv.lifecycle_status) : "neutral",
+        },
+      ],
+      observationCards: cameraObservations.map((observation) => ({
+        id: observation.observation_id,
+        title: `${observation.observation_kind.replace(/_/g, " ")} at t+${formatClock(observation.sim_time_sec)}`,
+        detail: observation.note,
+        metrics: [
+          {
+            label: "Face confidence",
+            value: `${Math.round(observation.strongest_face_confidence)}/100`,
+            caption: `Faces ${observation.face_count}`,
+          },
+          {
+            label: "Center offset",
+            value: observation.face_center_offset.toFixed(2),
+            caption: `Head motion ${observation.head_motion_delta.toFixed(2)}`,
+          },
+          {
+            label: "Face area",
+            value: observation.face_area_ratio.toFixed(2),
+            caption: `Tick ${observation.tick_index}`,
+          },
+        ],
+      })),
+    },
+    interactionTelemetry: {
+      statusPills: [
+        {
+          label: inspection.interaction_telemetry.suppressed ? "Suppressed" : "Capturing",
+          tone: inspection.interaction_telemetry.suppressed ? "neutral" : "ok",
+        },
+        {
+          label: `${inspection.interaction_telemetry.recent_records.length} recent event(s)`,
+          tone: inspection.interaction_telemetry.recent_records.length > 0 ? "ok" : "neutral",
+        },
+      ],
+      summary:
+        interactionRecords[0]?.detail ??
+        "Recent UI actions, run controls, and workspace switches appear here as the real interaction telemetry feed.",
+      detail:
+        interactionRecords[0]
+          ? `Latest interaction arrived at t+${formatClock(interactionRecords[0].sim_time_sec)} from ${interactionRecords[0].ui_region.replace(/_/g, " ")}.`
+          : "No recent interaction telemetry is currently in the bounded window.",
+      metrics: [
+        {
+          label: "Recent records",
+          value: String(inspection.interaction_telemetry.recent_records.length),
+          caption: interactionRecords[0]
+            ? `Latest tick ${interactionRecords[0].tick_index}`
+            : "Window empty",
+        },
+        {
+          label: "Workspace touches",
+          value: String(
+            new Set(
+              inspection.interaction_telemetry.recent_records
+                .map((record) => record.workspace)
+                .filter((workspace): workspace is NonNullable<typeof workspace> => Boolean(workspace)),
+            ).size,
+          ),
+          caption: "Operate / monitoring / review coverage",
+        },
+      ],
+      recordCards: interactionRecords.map((record) => ({
+        id: record.interaction_id,
+        title: `${record.event_kind.replace(/_/g, " ")} at t+${formatClock(record.sim_time_sec)}`,
+        detail:
+          record.detail ??
+          `${record.ui_region.replace(/_/g, " ")}${record.target_id ? ` targeted ${record.target_id}` : ""}.`,
+        pills: [
+          {
+            label: record.ui_region.replace(/_/g, " "),
+            tone: "neutral",
+          },
+          ...(record.workspace
+            ? [
+                {
+                  label: `${record.workspace} workspace`,
+                  tone: "ok" as const,
+                },
+              ]
+            : []),
+          ...(typeof record.requested_value === "number"
+            ? [
+                {
+                  label: `Value ${record.requested_value}`,
+                  tone: "neutral" as const,
+                },
+              ]
+            : []),
+        ],
+      })),
+    },
+    extractedFeatures: extractedFeatureEntries.map(({ source, latestFeatures }) => ({
+        id: source.source_id,
+        title: monitoringSourceLabel(source.source_kind),
+        tone: latestFeatures.degraded_mode_active ? "neutral" : sourceOverallTone(source),
+        summary: `${monitoringSourceLabel(source.source_kind)} is producing bounded feature values for the live inspection surface.`,
+        metrics: [
+          {
+            label: "Workload",
+            value: `${latestFeatures.workload_index}/100`,
+            caption: `Attention ${latestFeatures.attention_stability_index}/100`,
+          },
+          {
+            label: "Signal confidence",
+            value: `${latestFeatures.signal_confidence}/100`,
+            caption: `Window ${latestFeatures.observation_window_ticks} tick(s)`,
+            tone: latestFeatures.degraded_mode_active ? "neutral" : "ok",
+          },
+        ],
+        riskCues: buildRiskCueRows(latestFeatures.risk_cues),
+        note: latestFeatures.interpretation_note,
+      })),
+    fusedInterpretation: snapshot.human_monitoring.interpretation_input
+      ? {
+          summary: snapshot.human_monitoring.interpretation_input.interpretation_note,
+          detail: snapshot.human_monitoring.interpretation_input.degraded_mode_active
+            ? snapshot.human_monitoring.interpretation_input.degraded_mode_reason
+            : "The fused interpretation is currently confident enough to inform downstream support logic.",
+          metrics: [
+            {
+              label: "Workload index",
+              value: `${snapshot.human_monitoring.interpretation_input.workload_index}/100`,
+              caption: `Attention ${snapshot.human_monitoring.interpretation_input.attention_stability_index}/100`,
+            },
+            {
+              label: "Fused confidence",
+              value: `${snapshot.human_monitoring.interpretation_input.signal_confidence}/100`,
+              caption: `${snapshot.human_monitoring.interpretation_input.observation_window_ticks} tick(s)`,
+              tone: snapshot.human_monitoring.interpretation_input.degraded_mode_active ? "neutral" : "ok",
+            },
+          ],
+          riskCues: buildRiskCueRows(snapshot.human_monitoring.interpretation_input.risk_cues),
+          pills: [
+            {
+              label: `Provenance ${snapshot.human_monitoring.interpretation_input.provenance.replace(/_/g, " ")}`,
+              tone:
+                snapshot.human_monitoring.interpretation_input.provenance === "canonical_source_pipeline"
+                  ? "ok"
+                  : "neutral",
+            },
+            ...contributorLabels.map((label) => ({
+              label,
+              tone: "neutral" as const,
+            })),
+          ],
+        }
+      : undefined,
+    finalOutput: {
+      summary: `Operator-state output is publishing workload ${snapshot.operator_state.workload_index}/100, attention ${snapshot.operator_state.attention_stability_index}/100, and signal confidence ${snapshot.operator_state.signal_confidence}/100.`,
+      detail: snapshot.operator_state.degraded_mode_active
+        ? snapshot.operator_state.degraded_mode_reason
+        : "Final output state is currently stable enough for advisory use.",
+      metrics: [
+        {
+          label: "Human-monitoring mode",
+          value: monitoringModeLabel(snapshot.human_monitoring.mode),
+          caption: `Aggregate confidence ${snapshot.human_monitoring.aggregate_confidence}/100`,
+          tone: freshnessTone(snapshot.human_monitoring.freshness_status),
+        },
+        {
+          label: "Operator output",
+          value: `${snapshot.operator_state.workload_index}/100`,
+          caption: `Attention ${snapshot.operator_state.attention_stability_index}/100`,
+        },
+        {
+          label: "Output confidence",
+          value: `${snapshot.operator_state.signal_confidence}/100`,
+          caption: `${snapshot.operator_state.observation_window_ticks} tick(s)`,
+          tone: snapshot.operator_state.degraded_mode_active ? "alert" : "ok",
+        },
+      ],
+      pills: [
+        {
+          label: snapshot.operator_state.degraded_mode_active ? "Output degraded" : "Output current",
+          tone: snapshot.operator_state.degraded_mode_active ? "alert" : "ok",
+        },
+        {
+          label: `Freshness ${snapshot.human_monitoring.freshness_status}`,
+          tone: freshnessTone(snapshot.human_monitoring.freshness_status),
+        },
+      ],
+    },
+    downstreamImpact: {
+      summary: snapshot.combined_risk.recommended_assistance_reason,
+      detail: snapshot.combined_risk.why_risk_is_current,
+      metrics: [
+        {
+          label: "Human pressure",
+          value: `${snapshot.combined_risk.human_pressure_index}/100`,
+          caption: `Human influence ${snapshot.combined_risk.human_influence_scale.toFixed(2)}`,
+        },
+        {
+          label: "Combined risk",
+          value: `${snapshot.combined_risk.combined_risk_score.toFixed(1)}/100`,
+          caption: snapshot.combined_risk.combined_risk_band,
+          tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+        },
+        {
+          label: "Active support",
+          value: formatSupportModeLabel(snapshot.support_mode),
+          caption: `Recommended ${formatSupportModeLabel(snapshot.combined_risk.recommended_assistance_mode)}`,
+          tone: supportModeTone(snapshot.support_mode),
+        },
+      ],
+      pills: [
+        {
+          label: `Risk band ${snapshot.combined_risk.combined_risk_band}`,
+          tone: riskBadgeTone(snapshot.combined_risk.combined_risk_band),
+        },
+        {
+          label: snapshot.session_mode === "baseline" ? "Baseline gating active" : "Adaptive gating active",
+          tone: snapshot.session_mode === "baseline" ? "neutral" : "ok",
+        },
+      ],
+      implications: [
+        {
+          label: "Support posture meaning",
+          body: snapshot.support_policy.current_mode_reason,
+        },
+        {
+          label: "Watch-now emphasis",
+          body: snapshot.support_refinement.watch_now_summary,
+        },
+        {
+          label: "Degraded/fallback effect",
+          body:
+            snapshot.support_policy.degraded_confidence_effect ||
+            snapshot.support_refinement.degraded_confidence_caution ||
+            "No extra degraded-confidence caution is active right now.",
+        },
+        {
+          label: "Critical visibility guardrail",
+          body: snapshot.support_policy.critical_visibility.summary,
+        },
+      ],
+      factors: snapshot.combined_risk.factor_breakdown.slice(0, 4).map((factor) => ({
+        id: factor.factor_id,
+        label: factor.label,
+        detail: factor.detail,
+      })),
+    },
   };
 }
 

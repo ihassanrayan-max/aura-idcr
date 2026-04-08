@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { SessionSnapshot } from "../contracts/aura";
 import type { AuraSessionStore } from "../state/sessionStore";
 import type { StatusTone } from "./format";
@@ -38,6 +38,17 @@ type ControllerState = {
   detector?: DetectorLike;
   timer?: number;
   last_face?: FaceMetrics;
+};
+
+export type WebcamMonitoringController = {
+  desiredEnabled: boolean;
+  buttonLabel: string;
+  statusLabel: string;
+  statusTone: StatusTone;
+  statusDetail: string;
+  toggle: () => void;
+  disabled: boolean;
+  previewRef: RefObject<HTMLVideoElement | null>;
 };
 
 const SAMPLE_INTERVAL_MS = 1000;
@@ -107,6 +118,31 @@ function stopController(controller: ControllerState | null): void {
     controller.video.pause();
     controller.video.srcObject = null;
   }
+}
+
+function clearPreview(video: HTMLVideoElement | null): void {
+  if (!video) {
+    return;
+  }
+
+  video.pause();
+  video.srcObject = null;
+}
+
+function attachPreview(video: HTMLVideoElement | null, stream?: MediaStream): void {
+  if (!video) {
+    return;
+  }
+
+  if (!stream) {
+    clearPreview(video);
+    return;
+  }
+
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  void video.play().catch(() => undefined);
 }
 
 function mediaUnavailableReason(error: unknown): {
@@ -262,12 +298,25 @@ export function useWebcamMonitoring(params: UseWebcamMonitoringParams) {
   const { store, snapshot } = params;
   const [desiredEnabled, setDesiredEnabled] = useState(false);
   const controllerRef = useRef<ControllerState | null>(null);
+  const previewRef = useRef<HTMLVideoElement | null>(null);
   const cameraSource = currentCameraSource(snapshot);
+
+  useEffect(() => {
+    attachPreview(previewRef.current, controllerRef.current?.stream);
+    if (!desiredEnabled) {
+      clearPreview(previewRef.current);
+    }
+
+    return () => {
+      clearPreview(previewRef.current);
+    };
+  }, [desiredEnabled, snapshot.session_id, cameraSource?.availability, cameraSource?.status_note]);
 
   useEffect(() => {
     if (!desiredEnabled) {
       stopController(controllerRef.current);
       controllerRef.current = null;
+      clearPreview(previewRef.current);
       store.setCameraCvIntent(false);
       return;
     }
@@ -347,6 +396,7 @@ export function useWebcamMonitoring(params: UseWebcamMonitoringParams) {
 
       if (cancelled) {
         stopController(controller);
+        clearPreview(previewRef.current);
         return;
       }
 
@@ -356,6 +406,7 @@ export function useWebcamMonitoring(params: UseWebcamMonitoringParams) {
       video.playsInline = true;
       video.srcObject = controller.stream;
       controller.video = video;
+      attachPreview(previewRef.current, controller.stream);
 
       try {
         await video.play();
@@ -429,6 +480,7 @@ export function useWebcamMonitoring(params: UseWebcamMonitoringParams) {
     return () => {
       cancelled = true;
       stopController(controller);
+      clearPreview(previewRef.current);
       if (controllerRef.current === controller) {
         controllerRef.current = null;
       }
@@ -447,5 +499,6 @@ export function useWebcamMonitoring(params: UseWebcamMonitoringParams) {
         : "Webcam monitoring is off until manually enabled."),
     toggle: () => setDesiredEnabled((value) => !value),
     disabled: Boolean(snapshot.outcome),
+    previewRef,
   };
 }
