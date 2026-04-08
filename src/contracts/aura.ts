@@ -6,6 +6,7 @@ export type SourceModule =
   | "scenario_engine"
   | "plant_twin"
   | "alarm_intelligence"
+  | "human_monitoring"
   | "reasoning_layer"
   | "adaptive_orchestrator"
   | "action_validator"
@@ -296,6 +297,64 @@ export type ReasoningSnapshot = {
   expected_root_cause_aligned: boolean;
 };
 
+export type HumanMonitoringMode =
+  | "placeholder_compatibility"
+  | "live_sources"
+  | "degraded"
+  | "unavailable";
+
+export type HumanMonitoringSourceKind =
+  | "legacy_runtime_placeholder"
+  | "interaction_telemetry"
+  | "camera_cv"
+  | "manual_annotation";
+
+export type HumanMonitoringSourceAvailability =
+  | "active"
+  | "degraded"
+  | "unavailable"
+  | "not_connected";
+
+export type HumanMonitoringCompatibilityObservation = {
+  workload_index: number;
+  attention_stability_index: number;
+  signal_confidence: number;
+  degraded_mode_active: boolean;
+  degraded_mode_reason: string;
+  observation_window_ticks: number;
+  provenance: "legacy_runtime_placeholder";
+  compatibility_note: string;
+};
+
+export type HumanMonitoringSourceSnapshot = {
+  source_id: string;
+  source_kind: HumanMonitoringSourceKind;
+  availability: HumanMonitoringSourceAvailability;
+  confidence: number;
+  status_note: string;
+  last_observation_sim_time_sec?: number;
+  oldest_observation_sim_time_sec?: number;
+  window_tick_span: number;
+  sample_count_in_window: number;
+};
+
+export type HumanMonitoringSnapshot = {
+  snapshot_id: string;
+  mode: HumanMonitoringMode;
+  aggregate_confidence: number;
+  degraded_state_active: boolean;
+  degraded_state_reason: string;
+  status_summary: string;
+  latest_observation_sim_time_sec?: number;
+  oldest_observation_sim_time_sec?: number;
+  window_tick_span: number;
+  window_duration_sec: number;
+  connected_source_count: number;
+  active_source_count: number;
+  sources: HumanMonitoringSourceSnapshot[];
+  compatibility_observation?: HumanMonitoringCompatibilityObservation;
+};
+
 export type OperatorStateSnapshot = {
   workload_index: number;
   attention_stability_index: number;
@@ -395,6 +454,7 @@ export type SessionLogEventType =
   | "phase_changed"
   | "plant_tick_recorded"
   | "alarm_set_updated"
+  | "human_monitoring_snapshot_recorded"
   | "reasoning_snapshot_published"
   | "support_mode_changed"
   | "operator_state_snapshot_recorded"
@@ -499,6 +559,7 @@ export type CompletedSessionReviewMilestone = {
 
 export type CompletedSessionReviewHighlightKind =
   | "storyline"
+  | "human_monitoring"
   | "assistance"
   | "intervention"
   | "workload"
@@ -682,6 +743,7 @@ export type SessionSnapshot = {
   alarm_set: AlarmSet;
   alarm_intelligence: AlarmIntelligenceSnapshot;
   reasoning_snapshot: ReasoningSnapshot;
+  human_monitoring: HumanMonitoringSnapshot;
   operator_state: OperatorStateSnapshot;
   combined_risk: CombinedRiskSnapshot;
   first_response_lane: FirstResponseLane;

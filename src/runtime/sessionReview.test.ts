@@ -86,6 +86,8 @@ describe("buildCompletedSessionReview", () => {
     expect(ka.milestones.map((m) => m.kind)).toContain("session_start");
     expect(ka.milestones.map((m) => m.kind)).toContain("terminal_outcome");
     expect(ka.highlights.some((h) => h.kind === "outcome")).toBe(true);
+    expect(ka.key_events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
+    expect(ka.highlights.some((highlight) => highlight.kind === "human_monitoring")).toBe(true);
   });
 
   it("always includes terminal key events at the end of the key timeline", () => {

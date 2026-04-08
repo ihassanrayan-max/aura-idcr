@@ -9,6 +9,7 @@ import type {
   PendingSupervisorOverride,
   ExecutedAction,
   FirstResponseLane,
+  HumanMonitoringSnapshot,
   LoggedAlarmState,
   OperatorStateSnapshot,
   PlantTick,
@@ -54,6 +55,10 @@ import {
   type PlantTwinInternalState,
 } from "../runtime/plantTwin";
 import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
+import {
+  buildHumanMonitoringSnapshot,
+  buildLegacyRuntimePlaceholderSource,
+} from "../runtime/humanMonitoring";
 import { buildOperatorStateSnapshot } from "../runtime/operatorState";
 import { buildFirstResponseLane } from "../runtime/procedureLane";
 import { buildReasoningSnapshot, createReasoningRuntimeState, type ReasoningRuntimeState } from "../runtime/reasoningEngine";
@@ -137,6 +142,46 @@ function summarizeSupportPolicy(support_policy: SupportPolicySnapshot) {
     pinned_alarm_ids: support_policy.critical_visibility.pinned_alarm_ids,
     always_visible_alarm_ids: support_policy.critical_visibility.always_visible_alarm_ids,
     critical_variable_ids: support_policy.critical_visibility.critical_variable_ids,
+  };
+}
+
+function summarizeHumanMonitoring(human_monitoring: HumanMonitoringSnapshot) {
+  return {
+    snapshot_id: human_monitoring.snapshot_id,
+    mode: human_monitoring.mode,
+    aggregate_confidence: human_monitoring.aggregate_confidence,
+    degraded_state_active: human_monitoring.degraded_state_active,
+    degraded_state_reason: human_monitoring.degraded_state_reason,
+    status_summary: human_monitoring.status_summary,
+    latest_observation_sim_time_sec: human_monitoring.latest_observation_sim_time_sec,
+    oldest_observation_sim_time_sec: human_monitoring.oldest_observation_sim_time_sec,
+    window_tick_span: human_monitoring.window_tick_span,
+    window_duration_sec: human_monitoring.window_duration_sec,
+    connected_source_count: human_monitoring.connected_source_count,
+    active_source_count: human_monitoring.active_source_count,
+    sources: human_monitoring.sources.map((source) => ({
+      source_id: source.source_id,
+      source_kind: source.source_kind,
+      availability: source.availability,
+      confidence: source.confidence,
+      status_note: source.status_note,
+      last_observation_sim_time_sec: source.last_observation_sim_time_sec,
+      oldest_observation_sim_time_sec: source.oldest_observation_sim_time_sec,
+      window_tick_span: source.window_tick_span,
+      sample_count_in_window: source.sample_count_in_window,
+    })),
+    compatibility_observation: human_monitoring.compatibility_observation
+      ? {
+          workload_index: human_monitoring.compatibility_observation.workload_index,
+          attention_stability_index: human_monitoring.compatibility_observation.attention_stability_index,
+          signal_confidence: human_monitoring.compatibility_observation.signal_confidence,
+          degraded_mode_active: human_monitoring.compatibility_observation.degraded_mode_active,
+          degraded_mode_reason: human_monitoring.compatibility_observation.degraded_mode_reason,
+          observation_window_ticks: human_monitoring.compatibility_observation.observation_window_ticks,
+          provenance: human_monitoring.compatibility_observation.provenance,
+          compatibility_note: human_monitoring.compatibility_observation.compatibility_note,
+        }
+      : undefined,
   };
 }
 
@@ -293,6 +338,7 @@ export class AuraSessionStore {
     alarm_intelligence: AlarmIntelligenceSnapshot;
     reasoning_snapshot: ReasoningSnapshot;
     first_response_lane: FirstResponseLane;
+    human_monitoring: HumanMonitoringSnapshot;
     operator_state: OperatorStateSnapshot;
     combined_risk: CombinedRiskSnapshot;
     support_mode: SupportMode;
@@ -314,15 +360,26 @@ export class AuraSessionStore {
           phase2_state.reasoning_snapshot.dominant_hypothesis_id
       : false;
 
-    const operator_state = buildOperatorStateSnapshot({
+    const legacy_placeholder = buildLegacyRuntimePlaceholderSource({
       sim_time_sec: params.sim_time_sec,
       tick_index: params.tick_index,
+      tick_duration_sec: this.tick_duration_sec,
       plant_state: params.plant_state,
       alarm_set: params.alarm_set,
       alarm_intelligence: phase2_state.alarm_intelligence,
       reasoning_snapshot: phase2_state.reasoning_snapshot,
       executed_actions: params.executed_actions,
       lane_changed,
+    });
+    const human_monitoring = buildHumanMonitoringSnapshot({
+      sim_time_sec: params.sim_time_sec,
+      tick_index: params.tick_index,
+      tick_duration_sec: this.tick_duration_sec,
+      sources: [legacy_placeholder.source],
+      compatibility_observation: legacy_placeholder.compatibility_observation,
+    });
+    const operator_state = buildOperatorStateSnapshot({
+      human_monitoring,
     });
 
     const combined_risk = buildCombinedRiskSnapshot({
@@ -360,6 +417,7 @@ export class AuraSessionStore {
     return {
       ...phase2_state,
       first_response_lane: support_refinement_result.first_response_lane,
+      human_monitoring,
       operator_state,
       combined_risk,
       support_mode: support_mode_result.support_mode,
@@ -480,6 +538,14 @@ export class AuraSessionStore {
       executed_actions: [],
     });
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
+    const human_monitoring_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "human_monitoring_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: initial_phase.phase_id,
+      payload: summarizeHumanMonitoring(phase3_state.human_monitoring),
+      trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
+    });
     const operator_state_event = this.logger.append({
       sim_time_sec: 0,
       event_type: "operator_state_snapshot_recorded",
@@ -548,6 +614,7 @@ export class AuraSessionStore {
           phase_changed_event.event_id,
           plant_tick_event.event_id,
           alarm_event.event_id,
+          human_monitoring_event.event_id,
           operator_state_event.event_id,
           reasoning_event.event_id,
         ],
@@ -555,6 +622,7 @@ export class AuraSessionStore {
       alarm_set: initial_alarm_eval.alarm_set,
       alarm_intelligence: phase3_state.alarm_intelligence,
       reasoning_snapshot: phase3_state.reasoning_snapshot,
+      human_monitoring: phase3_state.human_monitoring,
       operator_state: phase3_state.operator_state,
       combined_risk: phase3_state.combined_risk,
       first_response_lane: phase3_state.first_response_lane,
@@ -1353,6 +1421,14 @@ export class AuraSessionStore {
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
     });
+    const human_monitoring_event = this.logger.append({
+      sim_time_sec,
+      event_type: "human_monitoring_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: current_phase.phase_id,
+      payload: summarizeHumanMonitoring(phase3_state.human_monitoring),
+      trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+    });
     const operator_state_event = this.logger.append({
       sim_time_sec,
       event_type: "operator_state_snapshot_recorded",
@@ -1542,13 +1618,20 @@ export class AuraSessionStore {
       tick_index: this.snapshot.tick_index + 1,
       plant_tick: {
         ...plant_tick,
-        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id, operator_state_event.event_id, reasoning_event.event_id]
+        source_event_ids: [
+          plant_tick_event.event_id,
+          alarm_event.event_id,
+          human_monitoring_event.event_id,
+          operator_state_event.event_id,
+          reasoning_event.event_id,
+        ]
           .concat(support_mode_event_id ? [support_mode_event_id] : [])
           .concat(diagnosis_event_id ? [diagnosis_event_id] : []),
       },
       alarm_set: alarm_evaluation.alarm_set,
       alarm_intelligence: phase3_state.alarm_intelligence,
       reasoning_snapshot: phase3_state.reasoning_snapshot,
+      human_monitoring: phase3_state.human_monitoring,
       operator_state: phase3_state.operator_state,
       combined_risk: phase3_state.combined_risk,
       support_mode: phase3_state.support_mode,

@@ -1225,6 +1225,25 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Authenticate Vercel MCP or use a normal Vercel login/link flow, then deploy the repo as a Vite static app with `main` already containing the current tutorial fixes
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 Packet 1 Prompt A human-monitoring foundation session
+- Task worked on: Added the human-monitoring architectural foundation scaffold on branch `ai-integration` without changing the deterministic plant/scenario demo flow
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` with additive human-monitoring source, availability, confidence, rolling-window, and snapshot contracts plus the new `human_monitoring_snapshot_recorded` canonical log event and `human_monitoring` session snapshot field
+  - Added `src/runtime/humanMonitoring.ts` as the new module boundary for future multi-source human monitoring, including aggregate availability/degraded semantics and a temporary `legacy_runtime_placeholder` adapter that preserves current operator-state behavior without claiming live sensing exists
+  - Kept `src/runtime/operatorState.ts` as the downstream interpretation layer, but routed it through the new human-monitoring foundation so Prompt B can later replace the placeholder adapter with real sources cleanly
+  - Updated `src/state/sessionStore.ts` so startup and each tick now publish a human-monitoring snapshot into runtime state and canonical logs before the existing operator-state snapshot, while leaving plant progression, reasoning, validator behavior, and support-mode behavior unchanged
+  - Extended `src/runtime/sessionReview.ts` so completed-run artifacts now have a canonical place for human-monitoring evidence in key events and highlights
+  - Added focused verification in `src/runtime/humanMonitoring.test.ts`, updated `src/runtime/operatorState.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx`, and re-verified with `npm test` and `npm run build`
+- What remains:
+  - No real interaction telemetry heuristics, webcam/CV ingestion, HPSN-Lite fusion, or adaptive UI behavior changes were added in this Prompt A slice
+  - The current operator-state outputs still come from the temporary legacy compatibility adapter and are intentionally waiting for Prompt B to plug in actual monitoring sources
+- Blockers:
+  - None in the repo after verification
+- Next recommended step:
+  - Prompt B can now add real human-monitoring inputs by implementing new source adapters against `src/runtime/humanMonitoring.ts` and switching the foundation away from the temporary legacy placeholder path in controlled slices
+
 ---
 
 ## 26) Final reminder to all future agents

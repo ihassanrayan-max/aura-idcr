@@ -91,6 +91,25 @@ function summarizeStore(store: AuraSessionStore) {
     alarm_cards: snapshot.alarm_intelligence.visible_alarm_card_count,
     dominant_hypothesis_id: snapshot.reasoning_snapshot.dominant_hypothesis_id,
     stable_for_ticks: snapshot.reasoning_snapshot.stable_for_ticks,
+    human_monitoring: {
+      snapshot_id: snapshot.human_monitoring.snapshot_id,
+      mode: snapshot.human_monitoring.mode,
+      aggregate_confidence: snapshot.human_monitoring.aggregate_confidence,
+      degraded_state_active: snapshot.human_monitoring.degraded_state_active,
+      degraded_state_reason: snapshot.human_monitoring.degraded_state_reason,
+      status_summary: snapshot.human_monitoring.status_summary,
+      window_tick_span: snapshot.human_monitoring.window_tick_span,
+      window_duration_sec: snapshot.human_monitoring.window_duration_sec,
+      connected_source_count: snapshot.human_monitoring.connected_source_count,
+      active_source_count: snapshot.human_monitoring.active_source_count,
+      sources: snapshot.human_monitoring.sources.map((source) => ({
+        source_id: source.source_id,
+        source_kind: source.source_kind,
+        availability: source.availability,
+        confidence: source.confidence,
+      })),
+      compatibility_observation: snapshot.human_monitoring.compatibility_observation,
+    },
     operator_state: snapshot.operator_state,
     combined_risk: {
       combined_risk_score: snapshot.combined_risk.combined_risk_score,
@@ -204,6 +223,7 @@ describe("AuraSessionStore", () => {
     expect(eventTypes).toContain("phase_changed");
     expect(eventTypes).toContain("plant_tick_recorded");
     expect(eventTypes).toContain("alarm_set_updated");
+    expect(eventTypes).toContain("human_monitoring_snapshot_recorded");
     expect(eventTypes).toContain("action_requested");
     expect(eventTypes).toContain("action_validated");
     expect(eventTypes).toContain("operator_action_applied");
@@ -485,26 +505,39 @@ describe("AuraSessionStore", () => {
   it("records deterministic degraded mode early and recovers confidence after a successful correction", () => {
     const initialStore = new AuraSessionStore({ session_index: 16, tick_duration_sec: 5 });
     const initialOperatorState = initialStore.getSnapshot().operator_state;
+    const initialHumanMonitoring = initialStore.getSnapshot().human_monitoring;
     const successfulStore = runSuccessfulSession();
     const finalOperatorState = successfulStore.getSnapshot().operator_state;
+    const finalHumanMonitoring = successfulStore.getSnapshot().human_monitoring;
 
     expect(initialOperatorState.degraded_mode_active).toBe(true);
     expect(initialOperatorState.signal_confidence).toBeLessThan(70);
     expect(initialOperatorState.degraded_mode_reason).toMatch(/short observation window/i);
+    expect(initialHumanMonitoring.mode).toBe("placeholder_compatibility");
+    expect(initialHumanMonitoring.degraded_state_active).toBe(true);
 
     expect(finalOperatorState.degraded_mode_active).toBe(false);
     expect(finalOperatorState.signal_confidence).toBeGreaterThanOrEqual(70);
     expect(finalOperatorState.workload_index).toBeGreaterThanOrEqual(0);
     expect(finalOperatorState.workload_index).toBeLessThanOrEqual(100);
+    expect(finalHumanMonitoring.mode).toBe("placeholder_compatibility");
+    expect(finalHumanMonitoring.connected_source_count).toBe(1);
   });
 
   it("publishes inspectable combined-risk outputs alongside the Phase 2 reasoning snapshot", () => {
     const snapshot = runSuccessfulSession().getSnapshot();
     const reasoningEvents = snapshot.events.filter((event) => event.event_type === "reasoning_snapshot_published");
+    const monitoringEvents = snapshot.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded");
     const operatorEvents = snapshot.events.filter((event) => event.event_type === "operator_state_snapshot_recorded");
+    const lastMonitoringPayload = monitoringEvents[monitoringEvents.length - 1]?.payload as Record<string, unknown>;
     const lastReasoningPayload = reasoningEvents[reasoningEvents.length - 1]?.payload as Record<string, unknown>;
     const lastOperatorPayload = operatorEvents[operatorEvents.length - 1]?.payload as Record<string, unknown>;
 
+    expect(monitoringEvents.length).toBeGreaterThan(0);
+    expect(lastMonitoringPayload.mode).toBe(snapshot.human_monitoring.mode);
+    expect(lastMonitoringPayload.aggregate_confidence).toBe(snapshot.human_monitoring.aggregate_confidence);
+    expect(lastMonitoringPayload.connected_source_count).toBe(snapshot.human_monitoring.connected_source_count);
+    expect(lastMonitoringPayload.sources).toBeDefined();
     expect(operatorEvents.length).toBeGreaterThan(0);
     expect(lastOperatorPayload.workload_index).toBe(snapshot.operator_state.workload_index);
     expect(lastOperatorPayload.attention_stability_index).toBe(snapshot.operator_state.attention_stability_index);
@@ -528,6 +561,24 @@ describe("AuraSessionStore", () => {
     expect(lastReasoningPayload.wording_style).toBe(snapshot.support_refinement.wording_style);
     expect(lastReasoningPayload.support_mode).toBe(snapshot.support_mode);
     expect(lastReasoningPayload.current_mode_reason).toBe(snapshot.support_policy.current_mode_reason);
+  });
+
+  it("keeps the human-monitoring foundation wired into snapshot and log state on startup and tick advance", () => {
+    const store = new AuraSessionStore({ session_index: 301, tick_duration_sec: 5 });
+    const initialSnapshot = store.getSnapshot();
+
+    expect(initialSnapshot.human_monitoring.mode).toBe("placeholder_compatibility");
+    expect(initialSnapshot.human_monitoring.sources).toHaveLength(1);
+    expect(initialSnapshot.events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
+
+    store.advanceTick();
+    const nextSnapshot = store.getSnapshot();
+    const latestMonitoringEvent = [...nextSnapshot.events]
+      .reverse()
+      .find((event) => event.event_type === "human_monitoring_snapshot_recorded");
+
+    expect(nextSnapshot.human_monitoring.snapshot_id).toBe("hm_t0001");
+    expect(nextSnapshot.plant_tick.source_event_ids).toContain(latestMonitoringEvent?.event_id);
   });
 
   it("logs a replay-inspectable support-mode transition when the scenario escalates", () => {

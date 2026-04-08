@@ -1,4 +1,5 @@
 import type { AlarmIntelligenceSnapshot, AlarmSet, ExecutedAction, PlantStateSnapshot, ReasoningSnapshot } from "../contracts/aura";
+import { buildHumanMonitoringSnapshot, buildLegacyRuntimePlaceholderSource } from "./humanMonitoring";
 import { buildOperatorStateSnapshot } from "./operatorState";
 
 const basePlantState: PlantStateSnapshot = {
@@ -128,9 +129,10 @@ function buildExecutedAction(sim_time_sec: number): ExecutedAction {
 
 describe("buildOperatorStateSnapshot", () => {
   it("deterministically enters degraded mode when the observation window and interaction evidence are thin", () => {
-    const input = {
+    const placeholder = buildLegacyRuntimePlaceholderSource({
       sim_time_sec: 0,
       tick_index: 0,
+      tick_duration_sec: 5,
       plant_state: { ...basePlantState, alarm_load_count: 0, active_alarm_cluster_count: 0 },
       alarm_set: buildAlarmSet(0),
       alarm_intelligence: buildAlarmIntelligence(0),
@@ -141,10 +143,17 @@ describe("buildOperatorStateSnapshot", () => {
       }),
       executed_actions: [] as ExecutedAction[],
       lane_changed: false,
-    };
+    });
+    const monitoring = buildHumanMonitoringSnapshot({
+      sim_time_sec: 0,
+      tick_index: 0,
+      tick_duration_sec: 5,
+      sources: [placeholder.source],
+      compatibility_observation: placeholder.compatibility_observation,
+    });
 
-    const first = buildOperatorStateSnapshot(input);
-    const second = buildOperatorStateSnapshot(input);
+    const first = buildOperatorStateSnapshot({ human_monitoring: monitoring });
+    const second = buildOperatorStateSnapshot({ human_monitoring: monitoring });
 
     expect(first).toEqual(second);
     expect(first.degraded_mode_active).toBe(true);
@@ -154,18 +163,26 @@ describe("buildOperatorStateSnapshot", () => {
   });
 
   it("recovers nominal confidence deterministically once history and interaction evidence exist", () => {
-    const input = {
+    const placeholder = buildLegacyRuntimePlaceholderSource({
       sim_time_sec: 55,
       tick_index: 8,
+      tick_duration_sec: 5,
       plant_state: basePlantState,
       alarm_set: buildAlarmSet(3),
       alarm_intelligence: buildAlarmIntelligence(3),
       reasoning_snapshot: buildReasoningSnapshot(),
       executed_actions: [buildExecutedAction(35)],
       lane_changed: false,
-    };
+    });
+    const monitoring = buildHumanMonitoringSnapshot({
+      sim_time_sec: 55,
+      tick_index: 8,
+      tick_duration_sec: 5,
+      sources: [placeholder.source],
+      compatibility_observation: placeholder.compatibility_observation,
+    });
 
-    const snapshot = buildOperatorStateSnapshot(input);
+    const snapshot = buildOperatorStateSnapshot({ human_monitoring: monitoring });
 
     expect(snapshot.degraded_mode_active).toBe(false);
     expect(snapshot.signal_confidence).toBeGreaterThanOrEqual(70);
@@ -173,5 +190,20 @@ describe("buildOperatorStateSnapshot", () => {
     expect(snapshot.workload_index).toBeLessThanOrEqual(100);
     expect(snapshot.attention_stability_index).toBeGreaterThanOrEqual(0);
     expect(snapshot.attention_stability_index).toBeLessThanOrEqual(100);
+  });
+
+  it("falls back cleanly when no compatibility observation is available", () => {
+    const monitoring = buildHumanMonitoringSnapshot({
+      sim_time_sec: 30,
+      tick_index: 6,
+      tick_duration_sec: 5,
+      sources: [],
+    });
+
+    const snapshot = buildOperatorStateSnapshot({ human_monitoring: monitoring });
+
+    expect(snapshot.degraded_mode_active).toBe(true);
+    expect(snapshot.signal_confidence).toBe(0);
+    expect(snapshot.degraded_mode_reason).toMatch(/unavailable/i);
   });
 });

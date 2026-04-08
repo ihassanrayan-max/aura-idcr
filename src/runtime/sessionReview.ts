@@ -22,6 +22,7 @@ export type BuildCompletedSessionReviewParams = {
 const KEY_EVENT_TYPES: ReadonlySet<SessionLogEventType> = new Set([
   "session_started",
   "phase_changed",
+  "human_monitoring_snapshot_recorded",
   "diagnosis_committed",
   "support_mode_changed",
   "action_requested",
@@ -73,6 +74,18 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
       return {
         title: "Phase changed",
         summary: toPhase ? `Now in ${toPhase}${fromPhase ? ` (from ${fromPhase})` : ""}.` : "Scenario phase updated.",
+      };
+    }
+    case "human_monitoring_snapshot_recorded": {
+      const mode = typeof p.mode === "string" ? p.mode : "";
+      const status = typeof p.status_summary === "string" ? p.status_summary : "";
+      const connected = typeof p.connected_source_count === "number" ? p.connected_source_count : 0;
+      return {
+        title: "Human-monitoring snapshot recorded",
+        summary:
+          [mode && `Mode: ${mode}.`, `Connected sources: ${connected}.`, status]
+            .filter(Boolean)
+            .join(" ") || "Human-monitoring foundation snapshot recorded.",
       };
     }
     case "diagnosis_committed": {
@@ -347,6 +360,20 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
         support.length === 1
           ? `One assistance transition recorded${to ? ` (now ${to})` : ""}.`
           : `${support.length} assistance transitions; final mode${to ? `: ${to}` : " recorded"}.`,
+    });
+  }
+
+  const latestMonitoring = [...events].reverse().find((e) => e.event_type === "human_monitoring_snapshot_recorded");
+  if (latestMonitoring) {
+    const p = latestMonitoring.payload;
+    const mode = typeof p.mode === "string" ? p.mode : "unavailable";
+    const connected = typeof p.connected_source_count === "number" ? p.connected_source_count : 0;
+    const status = typeof p.status_summary === "string" ? p.status_summary : "";
+    highlights.push({
+      highlight_id: `hl_monitoring_${latestMonitoring.event_id}`,
+      kind: "human_monitoring",
+      label: "Human-monitoring posture",
+      detail: `Mode ${mode}; connected sources ${connected}. ${status}`.trim(),
     });
   }
 
