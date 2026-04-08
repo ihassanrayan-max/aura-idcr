@@ -639,6 +639,23 @@ export type CompletedSessionReviewHighlight = {
   detail: string;
 };
 
+export type ReviewProofPointKind =
+  | "monitoring_status"
+  | "human_indicator_shift"
+  | "support_transition"
+  | "validator_reason"
+  | "human_aware_adaptation";
+
+export type ReviewProofPoint = {
+  proof_id: string;
+  kind: ReviewProofPointKind;
+  label: string;
+  detail: string;
+  sim_time_sec?: number;
+  source_event_id?: string;
+  tick_id?: string;
+};
+
 export type CompletedSessionReview = {
   schema_version: CompletedSessionReviewSchemaVersion;
   session_id: string;
@@ -652,6 +669,7 @@ export type CompletedSessionReview = {
   key_events: CompletedSessionReviewEvent[];
   milestones: CompletedSessionReviewMilestone[];
   highlights: CompletedSessionReviewHighlight[];
+  proof_points: ReviewProofPoint[];
 };
 
 /** Phase 5 Slice C: deterministic comparison of one baseline and one adaptive completed review. */
@@ -695,6 +713,11 @@ export type SessionRunComparisonJudgeSummary = {
   why_it_matters: string;
 };
 
+export type ComparisonProofSummary = {
+  headline: string;
+  bullets: string[];
+};
+
 export type SessionRunComparison = {
   schema_version: SessionRunComparisonSchemaVersion;
   comparison_id: string;
@@ -716,6 +739,7 @@ export type SessionRunComparison = {
   key_event_count_adaptive: number;
   interpretation_lines: string[];
   judge_summary: SessionRunComparisonJudgeSummary;
+  proof_summary: ComparisonProofSummary;
 };
 
 export type ReportProvenance = {
@@ -750,6 +774,7 @@ export type SessionAfterActionReport = {
   kpi_summary: KpiSummary;
   milestones: CompletedSessionReviewMilestone[];
   highlights: CompletedSessionReviewHighlight[];
+  proof_points: ReviewProofPoint[];
   timeline: CompletedSessionReviewEvent[];
   provenance: ReportProvenance;
 };
@@ -776,6 +801,7 @@ export type ComparisonReportArtifact = {
     completion_sim_time_sec: number;
   };
   judge_summary: SessionRunComparisonJudgeSummary;
+  proof_summary: ComparisonProofSummary;
   kpi_rows: SessionRunComparisonKpiDelta[];
   milestone_kind_counts: SessionRunComparisonMilestoneKindCount[];
   interpretation_lines: string[];

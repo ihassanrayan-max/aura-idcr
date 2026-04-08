@@ -663,7 +663,7 @@ export function buildReviewWorkspaceModel(params: BuildReviewWorkspaceModelParam
       payloadText: JSON.stringify(event.payload, null, 2),
     })),
     comparisonHint: comparisonCaptureHint
-      ? "Capture the other session mode on this scenario, then reset and complete the run to unlock the paired comparison."
+      ? "Capture the other session mode on this scenario, then reset and complete the run to unlock the Baseline run vs AURA-assisted (adaptive) run comparison."
       : undefined,
     oversightSummary: snapshot.pending_supervisor_override?.request_status === "requested"
       ? "A supervisor decision is currently blocking a high-risk action."
@@ -674,7 +674,7 @@ export function buildReviewWorkspaceModel(params: BuildReviewWorkspaceModelParam
         )}.`
       : "Complete a run to unlock the bounded after-action review and KPI evidence.",
     comparisonSummary: sessionRunComparison
-      ? `Comparison is ready for baseline ${sessionRunComparison.baseline_session_id} vs adaptive ${sessionRunComparison.adaptive_session_id}.`
-      : "Comparison and export stay empty until both baseline and adaptive runs are completed on the same scenario and version.",
+      ? `Comparison is ready for Baseline run ${sessionRunComparison.baseline_session_id} vs AURA-assisted (adaptive) run ${sessionRunComparison.adaptive_session_id}.`
+      : "Comparison and export stay empty until both Baseline and AURA-assisted (adaptive) runs are completed on the same scenario and version.",
   };
 }

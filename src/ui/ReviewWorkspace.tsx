@@ -30,6 +30,23 @@ function reviewEvidenceTone(kind: CompletedSessionReview["highlights"][number]["
   }
 }
 
+function reviewProofTone(kind: CompletedSessionReview["proof_points"][number]["kind"]): "ok" | "neutral" | "alert" {
+  switch (kind) {
+    case "monitoring_status":
+    case "human_indicator_shift":
+      return "neutral";
+    case "support_transition":
+    case "human_aware_adaptation":
+      return "ok";
+    case "validator_reason":
+      return "alert";
+  }
+}
+
+function judgeRunLabel(mode: "baseline" | "adaptive"): string {
+  return mode === "baseline" ? "Baseline run" : "AURA-assisted (adaptive) run";
+}
+
 function CompletedSessionReviewPanel(props: {
   review: CompletedSessionReview;
   canonicalEvents: SessionLogEvent[];
@@ -65,7 +82,7 @@ function CompletedSessionReviewPanel(props: {
         <h3>Completed run summary</h3>
         <p>
           <strong>{review.scenario_title}</strong> | {review.scenario_id} v{review.scenario_version} | session{" "}
-          <code>{review.session_id}</code> | mode <strong>{review.session_mode}</strong>
+          <code>{review.session_id}</code> | mode <strong>{judgeRunLabel(review.session_mode)}</strong>
         </p>
         <p>
           Outcome <StatusPill tone="alert">{review.terminal_outcome.outcome}</StatusPill> at t+
@@ -115,6 +132,34 @@ function CompletedSessionReviewPanel(props: {
               <p>{highlight.detail}</p>
             </article>
           ))}
+        </div>
+      </div>
+
+      <div className="review-card" data-testid="proof-trail-panel">
+        <h3>Human-aware proof trail</h3>
+        <p>These Packet 6 proof points stay tied to canonical events so the replay can jump straight to the supporting moment.</p>
+        <div className="review-evidence-grid">
+          {review.proof_points.map((proof) => {
+            const linkedEventIndex =
+              proof.source_event_id !== undefined
+                ? keyEvents.findIndex((event) => event.source_event_id === proof.source_event_id)
+                : -1;
+            return (
+              <article
+                key={proof.proof_id}
+                className={`review-evidence-card review-evidence-card--${reviewProofTone(proof.kind)}`}
+              >
+                <span className="utility-card__label">{proof.kind.replace(/_/g, " ")}</span>
+                <strong>{proof.label}</strong>
+                <p>{proof.detail}</p>
+                {linkedEventIndex >= 0 ? (
+                  <button type="button" className="ghost-button" onClick={() => setEventIndex(linkedEventIndex)}>
+                    Jump to replay event
+                  </button>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       </div>
 
@@ -186,7 +231,7 @@ function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
   return (
     <div className="session-run-comparison" data-testid="session-run-comparison">
       <div className="review-card">
-        <h3>Baseline vs adaptive comparison</h3>
+        <h3>Baseline vs AURA-assisted comparison</h3>
         <p>
           <strong>{comparison.scenario_title}</strong> | {comparison.scenario_id} v{comparison.scenario_version}
         </p>
@@ -197,7 +242,14 @@ function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
         <h3>Judge-facing summary</h3>
         <p className="judge-headline">{comparison.judge_summary.headline}</p>
         <p>
-          Overall observed advantage <strong>{comparison.judge_summary.overall_favors}</strong>
+          Overall observed advantage{" "}
+          <strong>
+            {comparison.judge_summary.overall_favors === "baseline"
+              ? judgeRunLabel("baseline")
+              : comparison.judge_summary.overall_favors === "adaptive"
+                ? judgeRunLabel("adaptive")
+                : comparison.judge_summary.overall_favors}
+          </strong>
         </p>
         <ul className="review-list">
           {comparison.judge_summary.metric_bullets.map((line, index) => (
@@ -219,7 +271,7 @@ function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
           </p>
         </article>
         <article className="review-card">
-          <span className="utility-card__label">Adaptive run</span>
+          <span className="utility-card__label">AURA-assisted (adaptive) run</span>
           <p>
             <code>{comparison.adaptive_session_id}</code>
           </p>
@@ -232,6 +284,16 @@ function SessionComparisonPanel(props: { comparison: SessionRunComparison }) {
 
       {comparison.valid ? (
         <>
+          <div className="review-card">
+            <h3>Why the AURA-assisted run was different</h3>
+            <p className="judge-headline">{comparison.proof_summary.headline}</p>
+            <ul className="review-list" data-testid="comparison-proof-summary">
+              {comparison.proof_summary.bullets.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          </div>
+
           <div className="review-card">
             <h3>KPI deltas (adaptive - baseline)</h3>
             <table className="comparison-table">
@@ -453,7 +515,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
             <article className="review-card">
               <span className="utility-card__label">Comparison report</span>
               <strong>{comparisonReportReady ? "Ready" : "Waiting for paired runs"}</strong>
-              <p>{comparisonReportReady ? "Both baseline and adaptive runs are captured for this scenario." : "Capture one baseline and one adaptive completed run on the same scenario/version."}</p>
+              <p>{comparisonReportReady ? "Both Baseline and AURA-assisted (adaptive) runs are captured for this scenario." : "Capture one Baseline and one AURA-assisted (adaptive) completed run on the same scenario/version."}</p>
               <button
                 type="button"
                 className="ghost-button"

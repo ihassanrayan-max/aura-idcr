@@ -1363,6 +1363,30 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 6 demo evidence and reporting session
+- Task worked on: Implemented Packet 6 as a bounded proof-story/reporting pass over the existing canonical review, comparison, export, and Review workspace flow
+- Status: Done
+- What changed:
+  - Added `Packet6_PLAN.md` as the checked-in implementation plan for this slice and extended `src/contracts/aura.ts` additively with `ReviewProofPoint`, `proof_points` on completed/exported single-run artifacts, and `proof_summary` on paired comparison/export artifacts without changing the existing canonical log chain or schema versioning strategy
+  - Updated `src/state/sessionStore.ts` so `reasoning_snapshot_published` now carries the already-computed canonical explanation strings `why_risk_is_current` and `what_changed`, letting Packet 6 derive slide-ready proof language from canonical events instead of inventing a parallel report stream
+  - Reworked `src/runtime/sessionReview.ts` so completed-run reviews now deterministically derive bounded proof points for monitoring posture, operator-state shifts, support posture, validator rationale, and human-aware adaptation moments directly from canonical events, while the bounded replay list now guarantees inclusion of proof-point source events, milestone anchors, terminal events, and the override/demo chain that judges need to inspect
+  - Updated `src/runtime/sessionComparison.ts` and `src/runtime/reportArtifacts.ts` so paired runs now produce a judge-facing `proof_summary`, exported after-action artifacts carry proof points, exported comparison artifacts carry the proof summary, and `summary_block.notable_points` prefers proof content over generic highlight slices; judge-facing copy now uses `Baseline run` and `AURA-assisted (adaptive) run` while internal ids remain `baseline` / `adaptive`
+  - Updated `src/ui/ReviewWorkspace.tsx` and `src/ui/viewModel.ts` so Review now shows a clickable `Human-aware proof trail` card on completed runs, a `Why the AURA-assisted run was different` card on paired comparisons, and clearer judge-facing comparison copy without disturbing Operate or the existing KPI/export/replay surfaces
+  - Extended verification in `src/runtime/sessionReview.test.ts`, `src/runtime/sessionComparison.test.ts`, `src/runtime/reportArtifacts.test.ts`, and `src/state/sessionStore.test.tsx` for deterministic proof generation, replay-source inclusion, honest degraded/unavailable monitoring treatment, proof-summary generation, export artifact coverage, rendered proof cards, preserved export controls, and a real adaptive human-aware proof moment on the canonical Scenario C validation path
+  - Re-verified with passing `npm test`, passing `npm run build`, local dev-server startup on `http://127.0.0.1:4173`, and desktop/mobile headless Edge screenshots after confirming that the requested `agent-browser` CLI is still unavailable in this environment
+- What remains:
+  - Packet 6 intentionally does not change `humanMonitoring`, webcam heuristics, combined-risk math, KPI formulas, report export transport, Operate layout, or any plant/scenario determinism
+  - Webcam observability/debug polish remains deferred to a later isolated packet; this slice only consumes the existing canonical monitoring outputs honestly and confidence-gates the proof story when monitoring is degraded or unavailable
+  - The pre-existing Vite large-chunk warning for the lazy webcam bundle remains unchanged; Packet 6 did not broaden that footprint
+- Blockers:
+  - The `agent-browser` CLI requested by the browser-verification skill is still unavailable on this machine, so runtime verification again used the already-approved headless Edge screenshot fallback plus an HTTP 200 check against the local Vite server
+- Next recommended step:
+  - A later isolated webcam observability/debug packet can improve operator-facing inspection of webcam lifecycle, freshness, and fallback posture without touching Packet 6’s proof/report contracts
+  - If future demo polish extends the proof story, keep it derived from canonical `completed_review`, `sessionRunComparison`, and exported artifacts rather than adding ad hoc reporting state
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

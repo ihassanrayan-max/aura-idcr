@@ -946,9 +946,11 @@ describe("AuraSessionStore", () => {
     expect(screen.getByTestId("completed-session-review")).toBeInTheDocument();
     expect(screen.getByTestId("kpi-summary-block")).toBeInTheDocument();
     expect(screen.getByTestId("adaptive-evidence-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("proof-trail-panel")).toBeInTheDocument();
     expect(screen.getByText(/Adaptive support evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/Human-aware proof trail/i)).toBeInTheDocument();
     expect(screen.getByText(/Assistance trajectory/i)).toBeInTheDocument();
-    expect(screen.getByText(/Human-monitoring posture/i)).toBeInTheDocument();
+    expect(screen.getByText(/Monitoring active|Monitoring degraded|Monitoring unavailable/i)).toBeInTheDocument();
     expect(screen.getByText(/Completed run summary/i)).toBeInTheDocument();
   });
 
@@ -1034,6 +1036,45 @@ describe("AuraSessionStore", () => {
     openReviewWorkspace();
     expect(screen.getByTestId("session-run-comparison")).toBeInTheDocument();
     expect(screen.getByText(/Judge-facing summary/i)).toBeInTheDocument();
+    expect(screen.getByTestId("comparison-proof-summary")).toBeInTheDocument();
+    expect(screen.getByText(/Why the AURA-assisted run was different/i)).toBeInTheDocument();
+  });
+
+  it("captures a bounded human-aware proof moment when canonical adaptive evidence supports it", () => {
+    const store = new AuraSessionStore({
+      session_index: 244,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+      session_mode: "baseline",
+    });
+
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive", scenario_id: "scn_main_steam_isolation_upset" });
+
+    advanceUntil(
+      store,
+      (snapshot) =>
+        Number(snapshot.plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+        Number(snapshot.plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN"),
+      40,
+    );
+
+    store.requestAction({
+      action_id: "act_adjust_isolation_condenser",
+      requested_value: 48,
+      ui_region: "plant_mimic",
+      reason_note: "Packet 6 human-aware proof test",
+    });
+    store.runUntilComplete(100);
+
+    const snapshot = store.getSnapshot();
+    const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
+    const adaptiveReview = snapshot.evaluation_capture?.[captureKey]?.adaptive_completed;
+
+    expect(adaptiveReview).toBeDefined();
+    expect(adaptiveReview?.proof_points.some((proof) => proof.kind === "human_aware_adaptation")).toBe(true);
   });
 
   it("applies next-run scenario and session mode together on reset", () => {
