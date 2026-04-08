@@ -1,5 +1,0 @@
-2026/04/07-03:19:02.251 6cac Creating DB C:\Users\hassan\Documents\aura-idcr\.tmp-edge-0ddad746-94b2-4e63-aa54-1aebcfd747f2\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/04/07-03:19:02.267 6cac Reusing MANIFEST C:\Users\hassan\Documents\aura-idcr\.tmp-edge-0ddad746-94b2-4e63-aa54-1aebcfd747f2\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/04/07-03:19:02.301 b234 Level-0 table #5: started
-2026/04/07-03:19:02.304 b234 Level-0 table #5: 682105 bytes OK
-2026/04/07-03:19:02.306 b234 Delete type=0 #3

@@ -1,5 +1,0 @@
-2026/04/08-00:07:05.685 ba68 Creating DB C:\Users\hassan\Documents\aura-idcr\.tmp-edge-5cf0ecef-482b-4715-82e3-51ba6ebdf40c\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/04/08-00:07:05.759 ba68 Reusing MANIFEST C:\Users\hassan\Documents\aura-idcr\.tmp-edge-5cf0ecef-482b-4715-82e3-51ba6ebdf40c\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/04/08-00:07:06.077 cecc Level-0 table #5: started
-2026/04/08-00:07:06.084 cecc Level-0 table #5: 682105 bytes OK
-2026/04/08-00:07:06.085 cecc Delete type=0 #3
