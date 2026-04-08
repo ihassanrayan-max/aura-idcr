@@ -1209,6 +1209,22 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Hold scope unless the human explicitly requests another bounded tutorial regression fix or polish pass
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 Vercel deployment readiness prep session
+- Task worked on: Checked Vercel deployment readiness and prepared the repo for a normal Vercel deployment when MCP auth is unavailable
+- Status: Partial
+- What changed:
+  - Confirmed the repo is a static Vite + React build with no detected `import.meta.env`, `process.env`, or `VITE_` runtime env dependencies in `src/`
+  - Added `.vercelignore` to exclude `.git`, `node_modules`, `dist`, and the tracked `.tmp-edge*` browser-temp directories from manual/CLI uploads so deployment payloads stay clean
+  - Verified that no local `.vercel/project.json` link file exists in the repo, so project/account selection still needs to happen in Vercel during the first linked deploy
+- What remains:
+  - Vercel MCP is present in this environment but not authenticated, so project inspection and direct deployment through MCP could not be completed in-session
+  - The actual deploy still needs to be done manually through the Vercel dashboard or an authenticated local Vercel CLI session
+- Blockers:
+  - `vercel/list_teams` returned `Auth required`, so no account/project inspection or deploy action was possible through MCP from this session
+- Next recommended step:
+  - Authenticate Vercel MCP or use a normal Vercel login/link flow, then deploy the repo as a Vite static app with `main` already containing the current tutorial fixes
+
 ---
 
 ## 26) Final reminder to all future agents
