@@ -86,6 +86,22 @@ describe("buildCompletedSessionReview", () => {
     expect(ka.milestones.map((m) => m.kind)).toContain("session_start");
     expect(ka.milestones.map((m) => m.kind)).toContain("terminal_outcome");
     expect(ka.highlights.some((h) => h.kind === "outcome")).toBe(true);
+    expect(ka.key_events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
+    expect(ka.key_events.some((event) => event.event_type === "reasoning_snapshot_published")).toBe(true);
+    expect(ka.highlights.some((highlight) => highlight.kind === "human_monitoring")).toBe(true);
+    expect(ka.proof_points.some((proof) => proof.kind === "monitoring_status")).toBe(true);
+    expect(ka.proof_points.some((proof) => proof.kind === "support_transition")).toBe(true);
+    expect(
+      ka.key_events.find((event) => event.event_type === "human_monitoring_snapshot_recorded")?.summary,
+    ).toMatch(/Contributing sources:/i);
+    expect(
+      ka.key_events.find((event) => event.event_type === "reasoning_snapshot_published")?.summary,
+    ).toMatch(/Recommended posture:/i);
+    expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(/freshness/i);
+    expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(
+      /live monitoring sources contributed evidence during the run/i,
+    );
+    expect(ka.highlights.find((highlight) => highlight.kind === "assistance")?.detail).toMatch(/Fusion confidence/i);
   });
 
   it("always includes terminal key events at the end of the key timeline", () => {
@@ -106,6 +122,11 @@ describe("buildCompletedSessionReview", () => {
     const types = review.key_events.map((e) => e.event_type);
     const lastThree = types.slice(-3);
     expect(lastThree).toEqual(["scenario_outcome_recorded", "session_ended", "kpi_summary_generated"]);
+    for (const proof of review.proof_points) {
+      if (proof.source_event_id) {
+        expect(review.key_events.some((event) => event.source_event_id === proof.source_event_id)).toBe(true);
+      }
+    }
   });
 
   it("matches KPI summary passed in (same as computeKpiSummary output)", () => {
@@ -155,5 +176,43 @@ describe("buildCompletedSessionReview", () => {
     expect(review.highlights.find((highlight) => highlight.kind === "intervention")?.detail).toMatch(
       /Supervisor overrides applied: 1/i,
     );
+  });
+
+  it("represents degraded or unavailable monitoring honestly and omits unsupported human-aware proof", () => {
+    const snapshot = runSuccessfulSession().getSnapshot();
+    const events = snapshot.events.map((event) =>
+      event.event_type === "human_monitoring_snapshot_recorded"
+        ? {
+            ...event,
+            payload: {
+              ...event.payload,
+              mode: "unavailable",
+              freshness_status: "no_observations",
+              aggregate_confidence: 0,
+              connected_source_count: 0,
+              contributing_source_count: 0,
+              status_summary: "No live monitoring sources were available.",
+              sources: [],
+            },
+          }
+        : event,
+    );
+
+    const review = buildCompletedSessionReview({
+      session_id: snapshot.session_id,
+      session_mode: snapshot.session_mode,
+      scenario: {
+        scenario_id: snapshot.scenario.scenario_id,
+        version: snapshot.scenario.version,
+        title: snapshot.scenario.title,
+      },
+      outcome: snapshot.outcome!,
+      kpi_summary: snapshot.kpi_summary!,
+      events,
+    });
+
+    expect(review.proof_points.find((proof) => proof.kind === "monitoring_status")?.label).toMatch(/unavailable|degraded/i);
+    expect(review.proof_points.find((proof) => proof.kind === "monitoring_status")?.detail).toMatch(/No live monitoring sources were available/i);
+    expect(review.proof_points.some((proof) => proof.kind === "human_aware_adaptation")).toBe(false);
   });
 });

@@ -6,6 +6,7 @@ export type SourceModule =
   | "scenario_engine"
   | "plant_twin"
   | "alarm_intelligence"
+  | "human_monitoring"
   | "reasoning_layer"
   | "adaptive_orchestrator"
   | "action_validator"
@@ -221,6 +222,39 @@ export type ActionRequest = {
   reason_note?: string;
 };
 
+export type InteractionTelemetryWorkspace = "operate" | "review";
+
+export type InteractionTelemetryUiRegion =
+  | ActionRequest["ui_region"]
+  | "runtime_controls"
+  | "workspace_switcher"
+  | "alarm_cluster"
+  | "review_workspace";
+
+export type InteractionTelemetryEventKind =
+  | "action_request"
+  | "action_confirmation"
+  | "action_confirmation_dismissed"
+  | "workspace_switch"
+  | "runtime_control"
+  | "alarm_cluster_toggle"
+  | "manual_control_adjustment"
+  | "supervisor_override_request"
+  | "supervisor_override_approved"
+  | "supervisor_override_denied";
+
+export type InteractionTelemetryRecord = {
+  interaction_id: string;
+  sim_time_sec: number;
+  tick_index: number;
+  event_kind: InteractionTelemetryEventKind;
+  ui_region: InteractionTelemetryUiRegion;
+  workspace?: InteractionTelemetryWorkspace;
+  target_id?: string;
+  requested_value?: number;
+  detail?: string;
+};
+
 export type ActionValidationResult = {
   validation_result_id: string;
   action_request_id: string;
@@ -297,6 +331,89 @@ export type ReasoningSnapshot = {
   expected_root_cause_aligned: boolean;
 };
 
+export type HumanMonitoringMode =
+  | "placeholder_compatibility"
+  | "live_sources"
+  | "degraded"
+  | "unavailable";
+
+export type HumanMonitoringSourceKind =
+  | "legacy_runtime_placeholder"
+  | "interaction_telemetry"
+  | "camera_cv"
+  | "manual_annotation";
+
+export type HumanMonitoringSourceAvailability =
+  | "active"
+  | "degraded"
+  | "unavailable"
+  | "not_connected";
+
+export type HumanMonitoringFreshnessStatus = "current" | "aging" | "stale" | "no_observations";
+
+export type HumanMonitoringRiskCues = {
+  hesitation_pressure: number;
+  latency_trend_pressure: number;
+  reversal_oscillation_pressure: number;
+  inactivity_pressure: number;
+  burstiness_pressure: number;
+  navigation_instability_pressure: number;
+  advisory_visual_attention_pressure: number;
+};
+
+export type HumanMonitoringInterpretationInput = {
+  workload_index: number;
+  attention_stability_index: number;
+  signal_confidence: number;
+  risk_cues: HumanMonitoringRiskCues;
+  degraded_mode_active: boolean;
+  degraded_mode_reason: string;
+  observation_window_ticks: number;
+  contributing_source_ids: string[];
+  provenance: "legacy_runtime_placeholder" | "canonical_source_pipeline";
+  interpretation_note: string;
+};
+
+export type HumanMonitoringSourceSnapshot = {
+  source_id: string;
+  source_kind: HumanMonitoringSourceKind;
+  availability: HumanMonitoringSourceAvailability;
+  freshness_status: HumanMonitoringFreshnessStatus;
+  confidence: number;
+  status_note: string;
+  latest_observation_age_sec?: number;
+  last_observation_sim_time_sec?: number;
+  oldest_observation_sim_time_sec?: number;
+  expected_update_interval_sec: number;
+  stale_after_sec: number;
+  window_tick_span: number;
+  window_duration_sec: number;
+  sample_count_in_window: number;
+  contributes_to_aggregate: boolean;
+};
+
+export type HumanMonitoringSnapshot = {
+  snapshot_id: string;
+  mode: HumanMonitoringMode;
+  freshness_status: HumanMonitoringFreshnessStatus;
+  aggregate_confidence: number;
+  degraded_state_active: boolean;
+  degraded_state_reason: string;
+  status_summary: string;
+  latest_observation_sim_time_sec?: number;
+  oldest_observation_sim_time_sec?: number;
+  window_tick_span: number;
+  window_duration_sec: number;
+  connected_source_count: number;
+  active_source_count: number;
+  current_source_count: number;
+  degraded_source_count: number;
+  stale_source_count: number;
+  contributing_source_count: number;
+  sources: HumanMonitoringSourceSnapshot[];
+  interpretation_input?: HumanMonitoringInterpretationInput;
+};
+
 export type OperatorStateSnapshot = {
   workload_index: number;
   attention_stability_index: number;
@@ -310,12 +427,14 @@ export type CombinedRiskBand = "low" | "guarded" | "elevated" | "high";
 
 export type CombinedRiskFactor = {
   factor_id:
-    | "plant_severity"
-    | "alarm_burden"
-    | "diagnosis_uncertainty"
-    | "operator_workload"
+    | "plant_urgency"
+    | "alarm_escalation_pressure"
+    | "storyline_procedure_pressure"
+    | "phase_time_pressure"
+    | "human_workload_pressure"
     | "attention_instability"
-    | "signal_confidence_penalty";
+    | "interaction_friction"
+    | "human_confidence_penalty";
   label: string;
   raw_index: number;
   contribution: number;
@@ -323,8 +442,15 @@ export type CombinedRiskFactor = {
 };
 
 export type CombinedRiskSnapshot = {
+  risk_model_id: string;
   combined_risk_score: number;
   combined_risk_band: CombinedRiskBand;
+  plant_urgency_index: number;
+  human_pressure_index: number;
+  fusion_confidence: number;
+  human_influence_scale: number;
+  recommended_assistance_mode: SupportMode;
+  recommended_assistance_reason: string;
   factor_breakdown: CombinedRiskFactor[];
   top_contributing_factors: string[];
   confidence_caveat: string;
@@ -455,6 +581,7 @@ export type SessionLogEventType =
   | "phase_changed"
   | "plant_tick_recorded"
   | "alarm_set_updated"
+  | "human_monitoring_snapshot_recorded"
   | "reasoning_snapshot_published"
   | "support_mode_changed"
   | "operator_state_snapshot_recorded"
@@ -561,6 +688,7 @@ export type CompletedSessionReviewMilestone = {
 
 export type CompletedSessionReviewHighlightKind =
   | "storyline"
+  | "human_monitoring"
   | "assistance"
   | "intervention"
   | "ai_advisor"
@@ -572,6 +700,23 @@ export type CompletedSessionReviewHighlight = {
   kind: CompletedSessionReviewHighlightKind;
   label: string;
   detail: string;
+};
+
+export type ReviewProofPointKind =
+  | "monitoring_status"
+  | "human_indicator_shift"
+  | "support_transition"
+  | "validator_reason"
+  | "human_aware_adaptation";
+
+export type ReviewProofPoint = {
+  proof_id: string;
+  kind: ReviewProofPointKind;
+  label: string;
+  detail: string;
+  sim_time_sec?: number;
+  source_event_id?: string;
+  tick_id?: string;
 };
 
 export type CompletedSessionReview = {
@@ -587,6 +732,7 @@ export type CompletedSessionReview = {
   key_events: CompletedSessionReviewEvent[];
   milestones: CompletedSessionReviewMilestone[];
   highlights: CompletedSessionReviewHighlight[];
+  proof_points: ReviewProofPoint[];
 };
 
 /** Phase 5 Slice C: deterministic comparison of one baseline and one adaptive completed review. */
@@ -630,6 +776,11 @@ export type SessionRunComparisonJudgeSummary = {
   why_it_matters: string;
 };
 
+export type ComparisonProofSummary = {
+  headline: string;
+  bullets: string[];
+};
+
 export type SessionRunComparison = {
   schema_version: SessionRunComparisonSchemaVersion;
   comparison_id: string;
@@ -651,6 +802,7 @@ export type SessionRunComparison = {
   key_event_count_adaptive: number;
   interpretation_lines: string[];
   judge_summary: SessionRunComparisonJudgeSummary;
+  proof_summary: ComparisonProofSummary;
 };
 
 export type ReportProvenance = {
@@ -685,6 +837,7 @@ export type SessionAfterActionReport = {
   kpi_summary: KpiSummary;
   milestones: CompletedSessionReviewMilestone[];
   highlights: CompletedSessionReviewHighlight[];
+  proof_points: ReviewProofPoint[];
   timeline: CompletedSessionReviewEvent[];
   provenance: ReportProvenance;
 };
@@ -711,6 +864,7 @@ export type ComparisonReportArtifact = {
     completion_sim_time_sec: number;
   };
   judge_summary: SessionRunComparisonJudgeSummary;
+  proof_summary: ComparisonProofSummary;
   kpi_rows: SessionRunComparisonKpiDelta[];
   milestone_kind_counts: SessionRunComparisonMilestoneKindCount[];
   interpretation_lines: string[];
@@ -745,6 +899,7 @@ export type SessionSnapshot = {
   alarm_set: AlarmSet;
   alarm_intelligence: AlarmIntelligenceSnapshot;
   reasoning_snapshot: ReasoningSnapshot;
+  human_monitoring: HumanMonitoringSnapshot;
   operator_state: OperatorStateSnapshot;
   combined_risk: CombinedRiskSnapshot;
   first_response_lane: FirstResponseLane;

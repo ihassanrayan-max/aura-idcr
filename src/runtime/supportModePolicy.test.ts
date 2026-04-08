@@ -110,26 +110,34 @@ function buildOperatorState(overrides: Partial<OperatorStateSnapshot> = {}): Ope
 
 function buildCombinedRisk(overrides: Partial<CombinedRiskSnapshot> = {}): CombinedRiskSnapshot {
   return {
+    risk_model_id: "hpsn_lite_v1",
     combined_risk_score: 46,
     combined_risk_band: "elevated",
+    plant_urgency_index: 48,
+    human_pressure_index: 52,
+    fusion_confidence: 82,
+    human_influence_scale: 1,
+    recommended_assistance_mode: "guided_support",
+    recommended_assistance_reason:
+      "Recommend Guided Support because elevated risk is being driven mainly by plant urgency and human workload pressure.",
     factor_breakdown: [
       {
-        factor_id: "plant_severity",
-        label: "Plant severity",
+        factor_id: "plant_urgency",
+        label: "Plant urgency",
         raw_index: 48,
         contribution: 16.3,
-        detail: "Plant severity is elevated.",
+        detail: "Plant urgency is elevated.",
       },
       {
-        factor_id: "diagnosis_uncertainty",
-        label: "Diagnosis uncertainty",
+        factor_id: "storyline_procedure_pressure",
+        label: "Storyline/procedure pressure",
         raw_index: 34,
         contribution: 5.4,
-        detail: "Reasoning is stable.",
+        detail: "Storyline pressure is stable.",
       },
       {
-        factor_id: "operator_workload",
-        label: "Operator workload",
+        factor_id: "human_workload_pressure",
+        label: "Human workload pressure",
         raw_index: 64,
         contribution: 9,
         detail: "Workload is elevated.",
@@ -142,24 +150,24 @@ function buildCombinedRisk(overrides: Partial<CombinedRiskSnapshot> = {}): Combi
         detail: "Attention remains bounded.",
       },
       {
-        factor_id: "signal_confidence_penalty",
-        label: "Signal confidence penalty",
+        factor_id: "human_confidence_penalty",
+        label: "Human confidence penalty",
         raw_index: 16,
         contribution: 1,
         detail: "Signal confidence is nominal.",
       },
       {
-        factor_id: "alarm_burden",
-        label: "Alarm burden",
+        factor_id: "alarm_escalation_pressure",
+        label: "Alarm escalation pressure",
         raw_index: 38,
         contribution: 8.4,
-        detail: "Alarm burden remains manageable.",
+        detail: "Alarm escalation remains manageable.",
       },
     ],
-    top_contributing_factors: ["Plant severity", "Operator workload", "Alarm burden"],
+    top_contributing_factors: ["Plant urgency", "Human workload pressure", "Alarm escalation pressure"],
     confidence_caveat: "Signal confidence 84/100 from current runtime and session cues.",
-    why_risk_is_current: "Combined risk is elevated because plant severity and operator workload are the strongest current drivers.",
-    what_changed: "Risk is steady; plant severity remains the main driver.",
+    why_risk_is_current: "Elevated risk is being driven mainly by plant urgency and human workload pressure; the raw assistance recommendation is Guided Support.",
+    what_changed: "Risk is steady; plant urgency remains the main driver.",
     ...overrides,
   };
 }
@@ -222,10 +230,13 @@ describe("resolveSupportModePolicy", () => {
       combined_risk: buildCombinedRisk({
         combined_risk_score: 32,
         combined_risk_band: "guarded",
+        recommended_assistance_mode: "monitoring_support",
+        recommended_assistance_reason:
+          "Recommend Monitoring Support because guarded risk remains inside the lighter watch band.",
         factor_breakdown: buildCombinedRisk().factor_breakdown.map((factor) =>
-          factor.factor_id === "diagnosis_uncertainty"
+          factor.factor_id === "storyline_procedure_pressure"
             ? { ...factor, raw_index: 20, contribution: 3.2 }
-            : factor.factor_id === "operator_workload"
+            : factor.factor_id === "human_workload_pressure"
               ? { ...factor, raw_index: 48, contribution: 6.7 }
               : factor,
         ),
@@ -245,10 +256,13 @@ describe("resolveSupportModePolicy", () => {
       combined_risk: buildCombinedRisk({
         combined_risk_score: 30,
         combined_risk_band: "guarded",
+        recommended_assistance_mode: "monitoring_support",
+        recommended_assistance_reason:
+          "Recommend Monitoring Support because guarded risk remains inside the lighter watch band.",
         factor_breakdown: buildCombinedRisk().factor_breakdown.map((factor) =>
-          factor.factor_id === "diagnosis_uncertainty"
+          factor.factor_id === "storyline_procedure_pressure"
             ? { ...factor, raw_index: 18, contribution: 2.9 }
-            : factor.factor_id === "operator_workload"
+            : factor.factor_id === "human_workload_pressure"
               ? { ...factor, raw_index: 46, contribution: 6.4 }
               : factor,
         ),

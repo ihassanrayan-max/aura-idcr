@@ -6,16 +6,23 @@ import type {
   SessionRunComparison,
 } from "../contracts/aura";
 
+function judgeRunLabel(mode: CompletedSessionReview["session_mode"]): string {
+  return mode === "baseline" ? "Baseline run" : "AURA-assisted (adaptive) run";
+}
+
 function buildSessionSummaryBlock(review: CompletedSessionReview): ReportSummaryBlock {
+  const proof_points = (review.proof_points ?? []).slice(0, 3).map((proof) => `${proof.label}: ${proof.detail}`);
   const outcomeWord = review.terminal_outcome.outcome.toUpperCase();
   const notable_points = [
-    `Mode: ${review.session_mode}.`,
+    `Mode: ${judgeRunLabel(review.session_mode)}.`,
     `Outcome at t+${review.completion_sim_time_sec}s sim time.`,
-    ...review.highlights.slice(0, 3).map((highlight) => `${highlight.label}: ${highlight.detail}`),
+    ...(proof_points.length > 0
+      ? proof_points
+      : review.highlights.slice(0, 3).map((highlight) => `${highlight.label}: ${highlight.detail}`)),
   ];
 
   return {
-    headline: `${review.scenario_title} ${review.session_mode} run ${outcomeWord}.`,
+    headline: `${review.scenario_title} ${judgeRunLabel(review.session_mode)} ${outcomeWord}.`,
     outcome_line: `${review.terminal_outcome.outcome} at t+${review.completion_sim_time_sec}s sim time${
       review.terminal_outcome.stabilized ? " with stable recovery achieved." : "."
     }`,
@@ -43,6 +50,7 @@ export function buildSessionAfterActionReport(review: CompletedSessionReview): S
     kpi_summary: review.kpi_summary,
     milestones: review.milestones,
     highlights: review.highlights,
+    proof_points: review.proof_points ?? [],
     timeline: review.key_events,
     provenance: {
       derived_from: "CompletedSessionReview",
@@ -80,6 +88,7 @@ export function buildComparisonReportArtifact(params: {
       completion_sim_time_sec: adaptive_review.completion_sim_time_sec,
     },
     judge_summary: comparison.judge_summary,
+    proof_summary: comparison.proof_summary,
     kpi_rows: comparison.kpi_deltas,
     milestone_kind_counts: comparison.milestone_kind_counts,
     interpretation_lines: comparison.interpretation_lines,

@@ -9,10 +9,14 @@ import type {
   CounterfactualBranchAction,
   CounterfactualBranchId,
   CounterfactualBranchResult,
+  InteractionTelemetryEventKind,
+  InteractionTelemetryUiRegion,
+  InteractionTelemetryWorkspace,
   PendingActionConfirmation,
   PendingSupervisorOverride,
   ExecutedAction,
   FirstResponseLane,
+  HumanMonitoringSnapshot,
   LoggedAlarmState,
   OperatorStateSnapshot,
   PlantTick,
@@ -58,6 +62,17 @@ import {
   type PlantTwinInternalState,
 } from "../runtime/plantTwin";
 import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
+import {
+  type CameraCvLifecycleStatus,
+  createHumanMonitoringRuntimeState,
+  evaluateHumanMonitoring,
+  recordCameraCvObservation,
+  recordInteractionTelemetry,
+  setCameraCvIntent,
+  setInteractionTelemetrySuppressed,
+  updateCameraCvLifecycle,
+  type HumanMonitoringRuntimeState,
+} from "../runtime/humanMonitoring";
 import { buildOperatorStateSnapshot } from "../runtime/operatorState";
 import { buildFirstResponseLane } from "../runtime/procedureLane";
 import { buildReasoningSnapshot, createReasoningRuntimeState, type ReasoningRuntimeState } from "../runtime/reasoningEngine";
@@ -98,6 +113,32 @@ type ActionRequestParams = {
 type CounterfactualAdvisorRequestParams = {
   requested_control_id?: string;
   requested_value?: number;
+};
+
+type RecordUiInteractionParams = {
+  event_kind: InteractionTelemetryEventKind;
+  ui_region: InteractionTelemetryUiRegion;
+  workspace?: InteractionTelemetryWorkspace;
+  target_id?: string;
+  requested_value?: number;
+  detail?: string;
+};
+
+type UpdateCameraCvLifecycleParams = {
+  lifecycle_status: CameraCvLifecycleStatus;
+  status_note: string;
+  unavailable_reason?: string;
+  clear_observations?: boolean;
+};
+
+type RecordCameraCvObservationParams = {
+  observation_kind: "stable_face" | "weak_face" | "no_face" | "multiple_faces";
+  face_count: number;
+  strongest_face_confidence: number;
+  face_center_offset: number;
+  head_motion_delta: number;
+  face_area_ratio: number;
+  note: string;
 };
 
 function summarizeAlarmClusters(alarm_intelligence: AlarmIntelligenceSnapshot) {
@@ -154,6 +195,59 @@ function summarizeSupportPolicy(support_policy: SupportPolicySnapshot) {
     pinned_alarm_ids: support_policy.critical_visibility.pinned_alarm_ids,
     always_visible_alarm_ids: support_policy.critical_visibility.always_visible_alarm_ids,
     critical_variable_ids: support_policy.critical_visibility.critical_variable_ids,
+  };
+}
+
+function summarizeHumanMonitoring(human_monitoring: HumanMonitoringSnapshot) {
+  return {
+    snapshot_id: human_monitoring.snapshot_id,
+    mode: human_monitoring.mode,
+    freshness_status: human_monitoring.freshness_status,
+    aggregate_confidence: human_monitoring.aggregate_confidence,
+    degraded_state_active: human_monitoring.degraded_state_active,
+    degraded_state_reason: human_monitoring.degraded_state_reason,
+    status_summary: human_monitoring.status_summary,
+    latest_observation_sim_time_sec: human_monitoring.latest_observation_sim_time_sec,
+    oldest_observation_sim_time_sec: human_monitoring.oldest_observation_sim_time_sec,
+    window_tick_span: human_monitoring.window_tick_span,
+    window_duration_sec: human_monitoring.window_duration_sec,
+    connected_source_count: human_monitoring.connected_source_count,
+    active_source_count: human_monitoring.active_source_count,
+    current_source_count: human_monitoring.current_source_count,
+    degraded_source_count: human_monitoring.degraded_source_count,
+    stale_source_count: human_monitoring.stale_source_count,
+    contributing_source_count: human_monitoring.contributing_source_count,
+    sources: human_monitoring.sources.map((source) => ({
+      source_id: source.source_id,
+      source_kind: source.source_kind,
+      availability: source.availability,
+      freshness_status: source.freshness_status,
+      confidence: source.confidence,
+      status_note: source.status_note,
+      latest_observation_age_sec: source.latest_observation_age_sec,
+      last_observation_sim_time_sec: source.last_observation_sim_time_sec,
+      oldest_observation_sim_time_sec: source.oldest_observation_sim_time_sec,
+      expected_update_interval_sec: source.expected_update_interval_sec,
+      stale_after_sec: source.stale_after_sec,
+      window_tick_span: source.window_tick_span,
+      window_duration_sec: source.window_duration_sec,
+      sample_count_in_window: source.sample_count_in_window,
+      contributes_to_aggregate: source.contributes_to_aggregate,
+    })),
+    interpretation_input: human_monitoring.interpretation_input
+      ? {
+          workload_index: human_monitoring.interpretation_input.workload_index,
+          attention_stability_index: human_monitoring.interpretation_input.attention_stability_index,
+          signal_confidence: human_monitoring.interpretation_input.signal_confidence,
+          risk_cues: human_monitoring.interpretation_input.risk_cues,
+          degraded_mode_active: human_monitoring.interpretation_input.degraded_mode_active,
+          degraded_mode_reason: human_monitoring.interpretation_input.degraded_mode_reason,
+          observation_window_ticks: human_monitoring.interpretation_input.observation_window_ticks,
+          contributing_source_ids: human_monitoring.interpretation_input.contributing_source_ids,
+          provenance: human_monitoring.interpretation_input.provenance,
+          interpretation_note: human_monitoring.interpretation_input.interpretation_note,
+        }
+      : undefined,
   };
 }
 
@@ -243,6 +337,7 @@ export class AuraSessionStore {
   private scenario_runtime_state: ScenarioRuntimeState;
   private alarm_runtime_state: AlarmRuntimeState;
   private reasoning_runtime_state: ReasoningRuntimeState;
+  private human_monitoring_runtime_state: HumanMonitoringRuntimeState;
   private plant_internal_state: PlantTwinInternalState;
   private support_mode_runtime_state = createSupportModeRuntimeState();
   private snapshot: SessionSnapshot;
@@ -283,6 +378,7 @@ export class AuraSessionStore {
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
     this.reasoning_runtime_state = createReasoningRuntimeState();
+    this.human_monitoring_runtime_state = createHumanMonitoringRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
     this.snapshot = this.createInitialSnapshot();
   }
@@ -296,7 +392,9 @@ export class AuraSessionStore {
     alarm_intelligence: AlarmIntelligenceSnapshot;
     reasoning_snapshot: ReasoningSnapshot;
     first_response_lane: FirstResponseLane;
+    current_phase: SessionSnapshot["current_phase"];
   } {
+    const current_phase = getActivePhase(this.scenario, this.scenario_runtime_state);
     const runtime_profile_id = this.runtime_profile_id;
     const alarm_intelligence = buildAlarmIntelligence(params.alarm_set, runtime_profile_id);
     const reasoning_result = buildReasoningSnapshot({
@@ -322,6 +420,7 @@ export class AuraSessionStore {
       alarm_intelligence,
       reasoning_snapshot: reasoning_result.reasoning_snapshot,
       first_response_lane,
+      current_phase,
     };
   }
 
@@ -337,11 +436,13 @@ export class AuraSessionStore {
     alarm_intelligence: AlarmIntelligenceSnapshot;
     reasoning_snapshot: ReasoningSnapshot;
     first_response_lane: FirstResponseLane;
+    human_monitoring: HumanMonitoringSnapshot;
     operator_state: OperatorStateSnapshot;
     combined_risk: CombinedRiskSnapshot;
     support_mode: SupportMode;
     support_policy: SupportPolicySnapshot;
     support_refinement: SupportRefinementSnapshot;
+    human_monitoring_runtime_state: HumanMonitoringRuntimeState;
     support_mode_runtime_state: ReturnType<typeof createSupportModeRuntimeState>;
     lane_changed: boolean;
   } {
@@ -358,23 +459,38 @@ export class AuraSessionStore {
           phase2_state.reasoning_snapshot.dominant_hypothesis_id
       : false;
 
-    const operator_state = buildOperatorStateSnapshot({
+    const human_monitoring_result = evaluateHumanMonitoring({
       sim_time_sec: params.sim_time_sec,
       tick_index: params.tick_index,
+      tick_duration_sec: this.tick_duration_sec,
       plant_state: params.plant_state,
       alarm_set: params.alarm_set,
       alarm_intelligence: phase2_state.alarm_intelligence,
       reasoning_snapshot: phase2_state.reasoning_snapshot,
       executed_actions: params.executed_actions,
       lane_changed,
+      runtime_state: this.human_monitoring_runtime_state,
     });
+    const operator_state = buildOperatorStateSnapshot({
+      human_monitoring: human_monitoring_result.snapshot,
+    });
+    const current_phase_elapsed_time_sec = getPhaseElapsedTimeSec(
+      params.sim_time_sec,
+      this.scenario_runtime_state,
+    );
 
     const combined_risk = buildCombinedRiskSnapshot({
+      sim_time_sec: params.sim_time_sec,
       plant_state: params.plant_state,
       alarm_set: params.alarm_set,
       alarm_intelligence: phase2_state.alarm_intelligence,
       reasoning_snapshot: phase2_state.reasoning_snapshot,
+      human_monitoring: human_monitoring_result.snapshot,
       operator_state,
+      first_response_lane: phase2_state.first_response_lane,
+      current_phase: phase2_state.current_phase,
+      current_phase_elapsed_time_sec,
+      scenario_expected_duration_sec: this.scenario.expected_duration_sec,
       previous_combined_risk: params.previous_snapshot?.combined_risk,
     });
     const support_mode_result =
@@ -404,11 +520,13 @@ export class AuraSessionStore {
     return {
       ...phase2_state,
       first_response_lane: support_refinement_result.first_response_lane,
+      human_monitoring: human_monitoring_result.snapshot,
       operator_state,
       combined_risk,
       support_mode: support_mode_result.support_mode,
       support_policy: support_mode_result.support_policy,
       support_refinement: support_refinement_result.support_refinement,
+      human_monitoring_runtime_state: human_monitoring_result.runtime_state,
       support_mode_runtime_state: support_mode_result.runtime_state,
       lane_changed,
     };
@@ -523,7 +641,16 @@ export class AuraSessionStore {
       allowed_action_ids: initial_phase.allowed_action_ids ?? [],
       executed_actions: [],
     });
+    this.human_monitoring_runtime_state = phase3_state.human_monitoring_runtime_state;
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
+    const human_monitoring_event = this.logger.append({
+      sim_time_sec: 0,
+      event_type: "human_monitoring_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: initial_phase.phase_id,
+      payload: summarizeHumanMonitoring(phase3_state.human_monitoring),
+      trace_refs: [{ ref_type: "tick_id", ref_value: tick_with_alarm_counts.tick_id }],
+    });
     const operator_state_event = this.logger.append({
       sim_time_sec: 0,
       event_type: "operator_state_snapshot_recorded",
@@ -554,10 +681,19 @@ export class AuraSessionStore {
         expected_root_cause_aligned: phase3_state.reasoning_snapshot.expected_root_cause_aligned,
         lane_item_ids: phase3_state.first_response_lane.items.map((item) => item.item_id),
         lane_items: summarizeLaneItems(phase3_state.first_response_lane),
+        risk_model_id: phase3_state.combined_risk.risk_model_id,
         combined_risk_score: phase3_state.combined_risk.combined_risk_score,
         combined_risk_band: phase3_state.combined_risk.combined_risk_band,
+        plant_urgency_index: phase3_state.combined_risk.plant_urgency_index,
+        human_pressure_index: phase3_state.combined_risk.human_pressure_index,
+        fusion_confidence: phase3_state.combined_risk.fusion_confidence,
+        human_influence_scale: phase3_state.combined_risk.human_influence_scale,
         top_contributing_factors: phase3_state.combined_risk.top_contributing_factors,
+        recommended_assistance_mode: phase3_state.combined_risk.recommended_assistance_mode,
+        recommended_assistance_reason: phase3_state.combined_risk.recommended_assistance_reason,
         confidence_caveat: phase3_state.combined_risk.confidence_caveat,
+        why_risk_is_current: phase3_state.combined_risk.why_risk_is_current,
+        what_changed: phase3_state.combined_risk.what_changed,
         factor_breakdown: summarizeRiskFactors(phase3_state.combined_risk),
         support_mode: phase3_state.support_mode,
         ...summarizeSupportRefinement(phase3_state.support_refinement),
@@ -592,6 +728,7 @@ export class AuraSessionStore {
           phase_changed_event.event_id,
           plant_tick_event.event_id,
           alarm_event.event_id,
+          human_monitoring_event.event_id,
           operator_state_event.event_id,
           reasoning_event.event_id,
         ],
@@ -599,6 +736,7 @@ export class AuraSessionStore {
       alarm_set: initial_alarm_eval.alarm_set,
       alarm_intelligence: phase3_state.alarm_intelligence,
       reasoning_snapshot: phase3_state.reasoning_snapshot,
+      human_monitoring: phase3_state.human_monitoring,
       operator_state: phase3_state.operator_state,
       combined_risk: phase3_state.combined_risk,
       first_response_lane: phase3_state.first_response_lane,
@@ -618,6 +756,66 @@ export class AuraSessionStore {
       logging_active: true,
       validation_status_available: true,
     };
+  }
+
+  private publishMonitoringOnlySnapshot(): void {
+    const human_monitoring_result = evaluateHumanMonitoring({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      tick_index: this.snapshot.tick_index,
+      tick_duration_sec: this.tick_duration_sec,
+      plant_state: this.snapshot.plant_tick.plant_state,
+      alarm_set: this.snapshot.alarm_set,
+      alarm_intelligence: this.snapshot.alarm_intelligence,
+      reasoning_snapshot: this.snapshot.reasoning_snapshot,
+      executed_actions: this.snapshot.executed_actions,
+      lane_changed: false,
+      runtime_state: this.human_monitoring_runtime_state,
+    });
+    const operator_state = buildOperatorStateSnapshot({
+      human_monitoring: human_monitoring_result.snapshot,
+    });
+
+    this.human_monitoring_runtime_state = human_monitoring_result.runtime_state;
+
+    const human_monitoring_event = this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "human_monitoring_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: summarizeHumanMonitoring(human_monitoring_result.snapshot),
+      trace_refs: [{ ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id }],
+    });
+    const operator_state_event = this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "operator_state_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        workload_index: operator_state.workload_index,
+        attention_stability_index: operator_state.attention_stability_index,
+        signal_confidence: operator_state.signal_confidence,
+        degraded_mode_active: operator_state.degraded_mode_active,
+        degraded_mode_reason: operator_state.degraded_mode_reason,
+        observation_window_ticks: operator_state.observation_window_ticks,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id }],
+    });
+
+    this.snapshot = {
+      ...this.snapshot,
+      human_monitoring: human_monitoring_result.snapshot,
+      operator_state,
+      events: this.logger.list(),
+      plant_tick: {
+        ...this.snapshot.plant_tick,
+        source_event_ids: [
+          ...this.snapshot.plant_tick.source_event_ids,
+          human_monitoring_event.event_id,
+          operator_state_event.event_id,
+        ],
+      },
+    };
+    this.emit();
   }
 
   private evaluateScenarioOutcome(params: {
@@ -845,6 +1043,77 @@ export class AuraSessionStore {
     return this.snapshot;
   }
 
+  private recordUiInteraction(params: RecordUiInteractionParams): void {
+    this.human_monitoring_runtime_state = recordInteractionTelemetry({
+      runtime_state: this.human_monitoring_runtime_state,
+      sim_time_sec: this.snapshot.sim_time_sec,
+      tick_index: this.snapshot.tick_index,
+      ...params,
+    });
+  }
+
+  setInteractionTelemetrySuppressed(suppressed: boolean): void {
+    this.human_monitoring_runtime_state = setInteractionTelemetrySuppressed(
+      this.human_monitoring_runtime_state,
+      suppressed,
+    );
+  }
+
+  recordInteractionTelemetry(params: RecordUiInteractionParams): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    this.recordUiInteraction(params);
+  }
+
+  setCameraCvIntent(enabled: boolean): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    const result = setCameraCvIntent({
+      runtime_state: this.human_monitoring_runtime_state,
+      enabled,
+    });
+    this.human_monitoring_runtime_state = result.runtime_state;
+    if (result.refresh_recommended) {
+      this.publishMonitoringOnlySnapshot();
+    }
+  }
+
+  updateCameraCvLifecycle(params: UpdateCameraCvLifecycleParams): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    const result = updateCameraCvLifecycle({
+      runtime_state: this.human_monitoring_runtime_state,
+      ...params,
+    });
+    this.human_monitoring_runtime_state = result.runtime_state;
+    if (result.refresh_recommended) {
+      this.publishMonitoringOnlySnapshot();
+    }
+  }
+
+  recordCameraCvObservation(params: RecordCameraCvObservationParams): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    const result = recordCameraCvObservation({
+      runtime_state: this.human_monitoring_runtime_state,
+      sim_time_sec: this.snapshot.sim_time_sec,
+      tick_index: this.snapshot.tick_index,
+      ...params,
+    });
+    this.human_monitoring_runtime_state = result.runtime_state;
+    if (result.refresh_recommended) {
+      this.publishMonitoringOnlySnapshot();
+    }
+  }
+
   setSessionMode(mode: SessionMode): void {
     this.reset({ session_mode: mode });
   }
@@ -866,6 +1135,7 @@ export class AuraSessionStore {
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
     this.reasoning_runtime_state = createReasoningRuntimeState();
+    this.human_monitoring_runtime_state = createHumanMonitoringRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
     this.support_mode_runtime_state = createSupportModeRuntimeState();
     this.snapshot = this.createInitialSnapshot();
@@ -1294,6 +1564,16 @@ export class AuraSessionStore {
     }
 
     const pending_confirmation = this.snapshot.pending_action_confirmation;
+    this.recordUiInteraction({
+      event_kind: "action_confirmation",
+      ui_region: pending_confirmation.action_request.ui_region,
+      target_id: pending_confirmation.action_request.action_id,
+      requested_value:
+        typeof pending_confirmation.action_request.requested_value === "number"
+          ? pending_confirmation.action_request.requested_value
+          : undefined,
+      detail: "Operator confirmed a soft-warning action.",
+    });
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
       event_type: "action_confirmation_recorded",
@@ -1323,6 +1603,12 @@ export class AuraSessionStore {
       return;
     }
 
+    this.recordUiInteraction({
+      event_kind: "action_confirmation_dismissed",
+      ui_region: this.snapshot.pending_action_confirmation.action_request.ui_region,
+      target_id: this.snapshot.pending_action_confirmation.action_request.action_id,
+      detail: "Operator dismissed a pending soft-warning confirmation.",
+    });
     this.snapshot = {
       ...this.snapshot,
       pending_action_confirmation: undefined,
@@ -1349,6 +1635,13 @@ export class AuraSessionStore {
       requested_at_sim_time_sec: this.snapshot.sim_time_sec,
       request_note: trimmed_note,
     };
+    this.recordUiInteraction({
+      event_kind: "supervisor_override_request",
+      ui_region: "review_workspace",
+      workspace: "review",
+      target_id: next_pending.action_request.action_id,
+      detail: trimmed_note ?? "Operator requested bounded supervisor review.",
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1389,6 +1682,13 @@ export class AuraSessionStore {
 
     const pending_override = this.snapshot.pending_supervisor_override;
     const trimmed_note = supervisor_note?.trim() || undefined;
+    this.recordUiInteraction({
+      event_kind: "supervisor_override_approved",
+      ui_region: "review_workspace",
+      workspace: "review",
+      target_id: pending_override.action_request.action_id,
+      detail: trimmed_note ?? "Supervisor approved one bounded override.",
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1444,6 +1744,13 @@ export class AuraSessionStore {
 
     const pending_override = this.snapshot.pending_supervisor_override;
     const trimmed_note = supervisor_note?.trim() || undefined;
+    this.recordUiInteraction({
+      event_kind: "supervisor_override_denied",
+      ui_region: "review_workspace",
+      workspace: "review",
+      target_id: pending_override.action_request.action_id,
+      detail: trimmed_note ?? "Supervisor denied the bounded override request.",
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1498,6 +1805,14 @@ export class AuraSessionStore {
       ui_region: params.ui_region,
       reason_note: params.reason_note,
     };
+    this.recordUiInteraction({
+      event_kind: "action_request",
+      ui_region: action_request.ui_region,
+      target_id: action_request.action_id,
+      requested_value:
+        typeof action_request.requested_value === "number" ? action_request.requested_value : undefined,
+      detail: action_request.reason_note,
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1663,6 +1978,7 @@ export class AuraSessionStore {
       executed_actions: this.snapshot.executed_actions,
       previous_snapshot: this.snapshot,
     });
+    this.human_monitoring_runtime_state = phase3_state.human_monitoring_runtime_state;
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
 
     const plant_tick: PlantTick = {
@@ -1718,6 +2034,14 @@ export class AuraSessionStore {
       },
       trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
     });
+    const human_monitoring_event = this.logger.append({
+      sim_time_sec,
+      event_type: "human_monitoring_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: current_phase.phase_id,
+      payload: summarizeHumanMonitoring(phase3_state.human_monitoring),
+      trace_refs: [{ ref_type: "tick_id", ref_value: plant_tick.tick_id }],
+    });
     const operator_state_event = this.logger.append({
       sim_time_sec,
       event_type: "operator_state_snapshot_recorded",
@@ -1749,10 +2073,19 @@ export class AuraSessionStore {
         lane_changed: phase3_state.lane_changed,
         lane_item_ids: phase3_state.first_response_lane.items.map((item) => item.item_id),
         lane_items: summarizeLaneItems(phase3_state.first_response_lane),
+        risk_model_id: phase3_state.combined_risk.risk_model_id,
         combined_risk_score: phase3_state.combined_risk.combined_risk_score,
         combined_risk_band: phase3_state.combined_risk.combined_risk_band,
+        plant_urgency_index: phase3_state.combined_risk.plant_urgency_index,
+        human_pressure_index: phase3_state.combined_risk.human_pressure_index,
+        fusion_confidence: phase3_state.combined_risk.fusion_confidence,
+        human_influence_scale: phase3_state.combined_risk.human_influence_scale,
         top_contributing_factors: phase3_state.combined_risk.top_contributing_factors,
+        recommended_assistance_mode: phase3_state.combined_risk.recommended_assistance_mode,
+        recommended_assistance_reason: phase3_state.combined_risk.recommended_assistance_reason,
         confidence_caveat: phase3_state.combined_risk.confidence_caveat,
+        why_risk_is_current: phase3_state.combined_risk.why_risk_is_current,
+        what_changed: phase3_state.combined_risk.what_changed,
         factor_breakdown: summarizeRiskFactors(phase3_state.combined_risk),
         support_mode: phase3_state.support_mode,
         ...summarizeSupportRefinement(phase3_state.support_refinement),
@@ -1770,6 +2103,8 @@ export class AuraSessionStore {
         payload: {
           from_mode: this.snapshot.support_mode,
           to_mode: phase3_state.support_mode,
+          recommended_mode: phase3_state.combined_risk.recommended_assistance_mode,
+          recommended_reason: phase3_state.combined_risk.recommended_assistance_reason,
           trigger_reason: phase3_state.support_policy.transition_reason,
           current_mode_reason: phase3_state.support_policy.current_mode_reason,
           support_behavior_changes: phase3_state.support_policy.support_behavior_changes,
@@ -1907,13 +2242,20 @@ export class AuraSessionStore {
       tick_index: this.snapshot.tick_index + 1,
       plant_tick: {
         ...plant_tick,
-        source_event_ids: [plant_tick_event.event_id, alarm_event.event_id, operator_state_event.event_id, reasoning_event.event_id]
+        source_event_ids: [
+          plant_tick_event.event_id,
+          alarm_event.event_id,
+          human_monitoring_event.event_id,
+          operator_state_event.event_id,
+          reasoning_event.event_id,
+        ]
           .concat(support_mode_event_id ? [support_mode_event_id] : [])
           .concat(diagnosis_event_id ? [diagnosis_event_id] : []),
       },
       alarm_set: alarm_evaluation.alarm_set,
       alarm_intelligence: phase3_state.alarm_intelligence,
       reasoning_snapshot: phase3_state.reasoning_snapshot,
+      human_monitoring: phase3_state.human_monitoring,
       operator_state: phase3_state.operator_state,
       combined_risk: phase3_state.combined_risk,
       support_mode: phase3_state.support_mode,

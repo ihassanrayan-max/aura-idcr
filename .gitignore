@@ -26,6 +26,7 @@ logs/
 tmp/
 temp/
 .cache/
+.tmp-edge*/
 
 # Test / coverage
 .coverage

@@ -91,12 +91,46 @@ function summarizeStore(store: AuraSessionStore) {
     alarm_cards: snapshot.alarm_intelligence.visible_alarm_card_count,
     dominant_hypothesis_id: snapshot.reasoning_snapshot.dominant_hypothesis_id,
     stable_for_ticks: snapshot.reasoning_snapshot.stable_for_ticks,
+    human_monitoring: {
+      snapshot_id: snapshot.human_monitoring.snapshot_id,
+      mode: snapshot.human_monitoring.mode,
+      freshness_status: snapshot.human_monitoring.freshness_status,
+      aggregate_confidence: snapshot.human_monitoring.aggregate_confidence,
+      degraded_state_active: snapshot.human_monitoring.degraded_state_active,
+      degraded_state_reason: snapshot.human_monitoring.degraded_state_reason,
+      status_summary: snapshot.human_monitoring.status_summary,
+      window_tick_span: snapshot.human_monitoring.window_tick_span,
+      window_duration_sec: snapshot.human_monitoring.window_duration_sec,
+      connected_source_count: snapshot.human_monitoring.connected_source_count,
+      active_source_count: snapshot.human_monitoring.active_source_count,
+      current_source_count: snapshot.human_monitoring.current_source_count,
+      degraded_source_count: snapshot.human_monitoring.degraded_source_count,
+      stale_source_count: snapshot.human_monitoring.stale_source_count,
+      contributing_source_count: snapshot.human_monitoring.contributing_source_count,
+      sources: snapshot.human_monitoring.sources.map((source) => ({
+        source_id: source.source_id,
+        source_kind: source.source_kind,
+        availability: source.availability,
+        freshness_status: source.freshness_status,
+        confidence: source.confidence,
+        contributes_to_aggregate: source.contributes_to_aggregate,
+      })),
+      interpretation_input: snapshot.human_monitoring.interpretation_input,
+    },
     operator_state: snapshot.operator_state,
     combined_risk: {
+      risk_model_id: snapshot.combined_risk.risk_model_id,
       combined_risk_score: snapshot.combined_risk.combined_risk_score,
       combined_risk_band: snapshot.combined_risk.combined_risk_band,
+      plant_urgency_index: snapshot.combined_risk.plant_urgency_index,
+      human_pressure_index: snapshot.combined_risk.human_pressure_index,
+      fusion_confidence: snapshot.combined_risk.fusion_confidence,
+      human_influence_scale: snapshot.combined_risk.human_influence_scale,
+      recommended_assistance_mode: snapshot.combined_risk.recommended_assistance_mode,
+      recommended_assistance_reason: snapshot.combined_risk.recommended_assistance_reason,
       top_contributing_factors: snapshot.combined_risk.top_contributing_factors,
       confidence_caveat: snapshot.combined_risk.confidence_caveat,
+      why_risk_is_current: snapshot.combined_risk.why_risk_is_current,
       what_changed: snapshot.combined_risk.what_changed,
       factor_breakdown: snapshot.combined_risk.factor_breakdown.map((factor) => ({
         factor_id: factor.factor_id,
@@ -246,6 +280,7 @@ describe("AuraSessionStore", () => {
     expect(eventTypes).toContain("phase_changed");
     expect(eventTypes).toContain("plant_tick_recorded");
     expect(eventTypes).toContain("alarm_set_updated");
+    expect(eventTypes).toContain("human_monitoring_snapshot_recorded");
     expect(eventTypes).toContain("action_requested");
     expect(eventTypes).toContain("action_validated");
     expect(eventTypes).toContain("operator_action_applied");
@@ -555,26 +590,51 @@ describe("AuraSessionStore", () => {
   it("records deterministic degraded mode early and recovers confidence after a successful correction", () => {
     const initialStore = new AuraSessionStore({ session_index: 16, tick_duration_sec: 5 });
     const initialOperatorState = initialStore.getSnapshot().operator_state;
+    const initialHumanMonitoring = initialStore.getSnapshot().human_monitoring;
     const successfulStore = runSuccessfulSession();
     const finalOperatorState = successfulStore.getSnapshot().operator_state;
+    const finalHumanMonitoring = successfulStore.getSnapshot().human_monitoring;
 
     expect(initialOperatorState.degraded_mode_active).toBe(true);
     expect(initialOperatorState.signal_confidence).toBeLessThan(70);
     expect(initialOperatorState.degraded_mode_reason).toMatch(/short observation window/i);
+    expect(initialHumanMonitoring.mode).toBe("placeholder_compatibility");
+    expect(initialHumanMonitoring.degraded_state_active).toBe(true);
 
     expect(finalOperatorState.degraded_mode_active).toBe(false);
     expect(finalOperatorState.signal_confidence).toBeGreaterThanOrEqual(70);
     expect(finalOperatorState.workload_index).toBeGreaterThanOrEqual(0);
     expect(finalOperatorState.workload_index).toBeLessThanOrEqual(100);
+    expect(finalHumanMonitoring.mode).toBe("placeholder_compatibility");
+    expect(finalHumanMonitoring.connected_source_count).toBe(2);
+    expect(
+      successfulStore
+        .getSnapshot()
+        .events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded")
+        .some((event) => {
+          const payload = event.payload as Record<string, unknown>;
+          return payload.mode === "live_sources";
+        }),
+    ).toBe(true);
   });
 
   it("publishes inspectable combined-risk outputs alongside the Phase 2 reasoning snapshot", () => {
     const snapshot = runSuccessfulSession().getSnapshot();
     const reasoningEvents = snapshot.events.filter((event) => event.event_type === "reasoning_snapshot_published");
+    const monitoringEvents = snapshot.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded");
     const operatorEvents = snapshot.events.filter((event) => event.event_type === "operator_state_snapshot_recorded");
+    const lastMonitoringPayload = monitoringEvents[monitoringEvents.length - 1]?.payload as Record<string, unknown>;
     const lastReasoningPayload = reasoningEvents[reasoningEvents.length - 1]?.payload as Record<string, unknown>;
     const lastOperatorPayload = operatorEvents[operatorEvents.length - 1]?.payload as Record<string, unknown>;
 
+    expect(monitoringEvents.length).toBeGreaterThan(0);
+    expect(lastMonitoringPayload.mode).toBe(snapshot.human_monitoring.mode);
+    expect(lastMonitoringPayload.freshness_status).toBe(snapshot.human_monitoring.freshness_status);
+    expect(lastMonitoringPayload.aggregate_confidence).toBe(snapshot.human_monitoring.aggregate_confidence);
+    expect(lastMonitoringPayload.connected_source_count).toBe(snapshot.human_monitoring.connected_source_count);
+    expect(lastMonitoringPayload.contributing_source_count).toBe(snapshot.human_monitoring.contributing_source_count);
+    expect(lastMonitoringPayload.sources).toBeDefined();
+    expect(lastMonitoringPayload.interpretation_input).toBeDefined();
     expect(operatorEvents.length).toBeGreaterThan(0);
     expect(lastOperatorPayload.workload_index).toBe(snapshot.operator_state.workload_index);
     expect(lastOperatorPayload.attention_stability_index).toBe(snapshot.operator_state.attention_stability_index);
@@ -600,6 +660,121 @@ describe("AuraSessionStore", () => {
     expect(lastReasoningPayload.current_mode_reason).toBe(snapshot.support_policy.current_mode_reason);
   });
 
+  it("keeps the human-monitoring foundation wired into snapshot and log state on startup and tick advance", () => {
+    const store = new AuraSessionStore({ session_index: 301, tick_duration_sec: 5 });
+    const initialSnapshot = store.getSnapshot();
+
+    expect(initialSnapshot.human_monitoring.mode).toBe("placeholder_compatibility");
+    expect(initialSnapshot.human_monitoring.sources).toHaveLength(3);
+    expect(initialSnapshot.human_monitoring.interpretation_input?.provenance).toBe("legacy_runtime_placeholder");
+    expect(
+      initialSnapshot.human_monitoring.sources.some((source) => source.source_kind === "interaction_telemetry"),
+    ).toBe(true);
+    expect(
+      initialSnapshot.human_monitoring.sources.some(
+        (source) => source.source_kind === "camera_cv" && source.availability === "not_connected",
+      ),
+    ).toBe(true);
+    expect(initialSnapshot.events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
+
+    store.advanceTick();
+    const nextSnapshot = store.getSnapshot();
+    const latestMonitoringEvent = [...nextSnapshot.events]
+      .reverse()
+      .find((event) => event.event_type === "human_monitoring_snapshot_recorded");
+
+    expect(nextSnapshot.human_monitoring.snapshot_id).toBe("hm_t0001");
+    expect(nextSnapshot.plant_tick.source_event_ids).toContain(latestMonitoringEvent?.event_id);
+  });
+
+  it("publishes monitoring-only webcam refreshes without recomputing combined risk or support mode", () => {
+    const store = new AuraSessionStore({ session_index: 322, tick_duration_sec: 5 });
+    const before = store.getSnapshot();
+    const beforeEventCount = before.events.length;
+
+    store.setCameraCvIntent(true);
+    store.recordCameraCvObservation({
+      observation_kind: "stable_face",
+      face_count: 1,
+      strongest_face_confidence: 82,
+      face_center_offset: 0.1,
+      head_motion_delta: 0.08,
+      face_area_ratio: 0.14,
+      note: "single stable face for store test",
+    });
+
+    const after = store.getSnapshot();
+    const cameraSource = after.human_monitoring.sources.find((source) => source.source_kind === "camera_cv");
+
+    expect(cameraSource?.contributes_to_aggregate).toBe(true);
+    expect(after.operator_state.signal_confidence).toBeGreaterThanOrEqual(before.operator_state.signal_confidence);
+    expect(after.combined_risk.combined_risk_score).toBe(before.combined_risk.combined_risk_score);
+    expect(after.support_mode).toBe(before.support_mode);
+    expect(after.plant_tick.tick_id).toBe(before.plant_tick.tick_id);
+    expect(after.events.length).toBeGreaterThan(beforeEventCount);
+    expect(after.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded").length).toBeGreaterThan(
+      before.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded").length,
+    );
+  });
+
+  it("lets real UI interactions contribute through the canonical interaction telemetry source on the next tick", () => {
+    const store = new AuraSessionStore({ session_index: 321, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /Operate/i }));
+    fireEvent.change(screen.getByLabelText(/Feedwater Demand Target/i), {
+      target: { value: "74" },
+    });
+
+    act(() => {
+      store.advanceTick();
+    });
+
+    const snapshot = store.getSnapshot();
+    const interactionSource = snapshot.human_monitoring.sources.find(
+      (source) => source.source_kind === "interaction_telemetry",
+    );
+
+    expect(snapshot.human_monitoring.mode).toBe("live_sources");
+    expect(snapshot.human_monitoring.interpretation_input?.contributing_source_ids).toContain(
+      "interaction_telemetry",
+    );
+    expect(interactionSource?.contributes_to_aggregate).toBe(true);
+    expect(interactionSource?.sample_count_in_window).toBeGreaterThan(0);
+  });
+
+  it("records telemetry-backed monitoring evidence into logs and completed review artifacts", () => {
+    const snapshot = runSuccessfulSession().getSnapshot();
+    const monitoringEvents = snapshot.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded");
+    const lastMonitoringPayload = monitoringEvents[monitoringEvents.length - 1]?.payload as Record<string, unknown>;
+    const reviewMonitoringHighlight = snapshot.completed_review?.highlights.find(
+      (highlight) => highlight.kind === "human_monitoring",
+    );
+
+    expect(
+      monitoringEvents.some((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        return payload.mode === "live_sources";
+      }),
+    ).toBe(true);
+    expect(Array.isArray(lastMonitoringPayload.sources)).toBe(true);
+    expect(
+      monitoringEvents.some((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        const sources = payload.sources as Array<Record<string, unknown>> | undefined;
+        return (
+          Array.isArray(sources) &&
+          sources.some(
+            (source) =>
+              source.source_kind === "interaction_telemetry" && source.contributes_to_aggregate === true,
+          )
+        );
+      }),
+    ).toBe(true);
+    expect(reviewMonitoringHighlight?.detail).toMatch(/live monitoring sources contributed evidence during the run/i);
+  });
+
   it("logs a replay-inspectable support-mode transition when the scenario escalates", () => {
     const store = new AuraSessionStore({ session_index: 17, tick_duration_sec: 5 });
 
@@ -617,21 +792,33 @@ describe("AuraSessionStore", () => {
     expect(String(lastTransitionPayload.trigger_reason)).toMatch(/Escalated immediately/i);
   });
 
-  it("renders the compact support-state risk outputs in the HMI", () => {
+  it("renders Packet 5 posture legibility cues in the HMI", () => {
     const store = new AuraSessionStore({ session_index: 18, tick_duration_sec: 5 });
     render(<App store={store} autoRun={false} />);
 
     expect(screen.getByText("Support Posture")).toBeInTheDocument();
-    expect(screen.getByText("Workload")).toBeInTheDocument();
-    expect(screen.getByText("Attention stability")).toBeInTheDocument();
+    expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getAllByText(/Active posture/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Risk recommendation/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/What now/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Mode effect/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Operator still controls/i)).toBeInTheDocument();
+    expect(screen.getByText(/Why this posture/i)).toBeInTheDocument();
+    expect(screen.getByText(/Top posture drivers/i)).toBeInTheDocument();
     expect(screen.getByText("Signal confidence")).toBeInTheDocument();
-    expect(screen.getByText(/Why risk is here now/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Confidence caveat/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Mode effect now/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Watch next/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Combined risk/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Assistance mode/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Critical visibility guardrails active/i).length).toBeGreaterThan(0);
+  });
+
+  it("keeps the baseline operator path calm and non-adaptive", () => {
+    const store = new AuraSessionStore({ session_index: 118, tick_duration_sec: 5, session_mode: "baseline" });
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getByText(/Baseline run keeps monitoring only/i)).toBeInTheDocument();
+    expect(screen.getByText(/Baseline posture locked/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Baseline session/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Guided Support is active now/i)).not.toBeInTheDocument();
   });
 
   it("renders the bounded soft-warning confirmation flow inside the existing shell", () => {
@@ -799,6 +986,11 @@ describe("AuraSessionStore", () => {
       requestAction: () => false,
       confirmPendingAction: () => false,
       dismissPendingActionConfirmation: () => undefined,
+      recordInteractionTelemetry: () => undefined,
+      setCameraCvIntent: () => undefined,
+      updateCameraCvLifecycle: () => undefined,
+      recordCameraCvObservation: () => undefined,
+      setInteractionTelemetrySuppressed: () => undefined,
       advanceTick: () => protectedSnapshot,
       reset: () => undefined,
     } as unknown as AuraSessionStore;
@@ -809,6 +1001,10 @@ describe("AuraSessionStore", () => {
     expect(screen.getAllByText(/Protected validation active/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Protected Response is elevating this validation result/i)).toBeInTheDocument();
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
+    expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getAllByText(/Protected Response is active now/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Critical variables and pinned alarms stay surfaced/i)).toBeInTheDocument();
+    expect(screen.getByText(/Operator authority stays with you/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Next Actions/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Storyline Board/i })).toBeInTheDocument();
   });
@@ -819,6 +1015,12 @@ describe("AuraSessionStore", () => {
     openReviewWorkspace();
     expect(screen.getByTestId("completed-session-review")).toBeInTheDocument();
     expect(screen.getByTestId("kpi-summary-block")).toBeInTheDocument();
+    expect(screen.getByTestId("adaptive-evidence-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("proof-trail-panel")).toBeInTheDocument();
+    expect(screen.getByText(/Adaptive support evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/Human-aware proof trail/i)).toBeInTheDocument();
+    expect(screen.getByText(/Assistance trajectory/i)).toBeInTheDocument();
+    expect(screen.getByText(/Monitoring active|Monitoring degraded|Monitoring unavailable/i)).toBeInTheDocument();
     expect(screen.getByText(/Completed run summary/i)).toBeInTheDocument();
   });
 
@@ -904,6 +1106,45 @@ describe("AuraSessionStore", () => {
     openReviewWorkspace();
     expect(screen.getByTestId("session-run-comparison")).toBeInTheDocument();
     expect(screen.getByText(/Judge-facing summary/i)).toBeInTheDocument();
+    expect(screen.getByTestId("comparison-proof-summary")).toBeInTheDocument();
+    expect(screen.getByText(/Why the AURA-assisted run was different/i)).toBeInTheDocument();
+  });
+
+  it("captures a bounded human-aware proof moment when canonical adaptive evidence supports it", () => {
+    const store = new AuraSessionStore({
+      session_index: 244,
+      tick_duration_sec: 5,
+      scenario_id: "scn_main_steam_isolation_upset",
+      session_mode: "baseline",
+    });
+
+    store.runUntilComplete(100);
+    store.reset({ session_mode: "adaptive", scenario_id: "scn_main_steam_isolation_upset" });
+
+    advanceUntil(
+      store,
+      (snapshot) =>
+        Number(snapshot.plant_tick.plant_state.vessel_pressure_mpa) >= 7.42 ||
+        Number(snapshot.plant_tick.plant_state.containment_pressure_kpa) >= 108 ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_CONTAINMENT_PRESSURE_HIGH") ||
+        snapshot.alarm_set.active_alarm_ids.includes("ALM_SRV_STUCK_OPEN"),
+      40,
+    );
+
+    store.requestAction({
+      action_id: "act_adjust_isolation_condenser",
+      requested_value: 48,
+      ui_region: "plant_mimic",
+      reason_note: "Packet 6 human-aware proof test",
+    });
+    store.runUntilComplete(100);
+
+    const snapshot = store.getSnapshot();
+    const captureKey = `${snapshot.scenario.scenario_id}@${snapshot.scenario.version}`;
+    const adaptiveReview = snapshot.evaluation_capture?.[captureKey]?.adaptive_completed;
+
+    expect(adaptiveReview).toBeDefined();
+    expect(adaptiveReview?.proof_points.some((proof) => proof.kind === "human_aware_adaptation")).toBe(true);
   });
 
   it("applies next-run scenario and session mode together on reset", () => {

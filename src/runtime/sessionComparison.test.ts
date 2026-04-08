@@ -158,6 +158,36 @@ function makeReview(params: {
       },
     ],
     highlights: [],
+    proof_points: [
+      {
+        proof_id: `proof_monitoring_${params.session_id}`,
+        kind: "monitoring_status",
+        label: params.session_mode === "baseline" ? "Monitoring degraded" : "Monitoring active",
+        detail:
+          params.session_mode === "baseline"
+            ? "Monitoring stayed degraded with placeholder-only evidence."
+            : "Monitoring stayed active with live interaction evidence.",
+      },
+      {
+        proof_id: `proof_support_${params.session_id}`,
+        kind: "support_transition",
+        label: params.session_mode === "baseline" ? "Baseline posture fixed" : "Support shifted to Guided Support",
+        detail:
+          params.session_mode === "baseline"
+            ? "Baseline run kept Monitoring Support fixed."
+            : "Adaptive run shifted from Monitoring Support to Guided Support.",
+      },
+      ...(params.session_mode === "adaptive"
+        ? [
+            {
+              proof_id: `proof_human_${params.session_id}`,
+              kind: "human_aware_adaptation" as const,
+              label: "Human-aware signals shaped support",
+              detail: "Interaction telemetry and operator-state strain fed the adaptive support response.",
+            },
+          ]
+        : []),
+    ],
   };
 }
 
@@ -201,6 +231,7 @@ describe("buildSessionRunComparison", () => {
     expect(diag?.delta).toBe(-30);
     expect(diag?.favors).toBe("adaptive");
     expect(c.completion_sim_time_sec_delta).toBe(-50);
+    expect(c.proof_summary.headline).toMatch(/AURA-assisted \(adaptive\) run/i);
   });
 
   it("is deterministic for the same inputs", () => {
@@ -299,6 +330,34 @@ describe("buildSessionRunComparison", () => {
       adaptive_count: 1,
     });
     expect(comparison.interpretation_lines.join(" ")).toMatch(/supervisor_override baseline 0 vs adaptive 1/i);
-    expect(comparison.interpretation_lines.join(" ")).toMatch(/Validator demo checkpoints: baseline 1 vs adaptive 2/i);
+    expect(comparison.interpretation_lines.join(" ")).toMatch(/Baseline run 1 vs AURA-assisted \(adaptive\) run 2/i);
+    expect(comparison.proof_summary.bullets.join(" ")).toMatch(/Visible adaptive example/i);
+  });
+
+  it("keeps proof-summary wording honest when monitoring is limited", () => {
+    const baseline = makeReview({
+      session_id: "b_limited",
+      session_mode: "baseline",
+      outcome: "success",
+      completion_sim_time_sec: 210,
+    });
+    const adaptive = makeReview({
+      session_id: "a_limited",
+      session_mode: "adaptive",
+      outcome: "success",
+      completion_sim_time_sec: 205,
+    });
+
+    adaptive.proof_points = adaptive.proof_points.map((proof) =>
+      proof.kind === "monitoring_status"
+        ? { ...proof, label: "Monitoring degraded", detail: "Monitoring stayed degraded with aging evidence." }
+        : proof,
+    );
+
+    const comparison = buildSessionRunComparison(baseline, adaptive);
+
+    expect(comparison.proof_summary.bullets[0]).toMatch(/Monitoring posture/i);
+    expect(comparison.proof_summary.bullets[3]).toMatch(/confidence/i);
+    expect(comparison.proof_summary.bullets[3]).toMatch(/AURA-assisted/i);
   });
 });
