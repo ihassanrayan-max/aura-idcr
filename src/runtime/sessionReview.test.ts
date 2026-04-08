@@ -102,6 +102,8 @@ describe("buildCompletedSessionReview", () => {
       /live monitoring sources contributed evidence during the run/i,
     );
     expect(ka.highlights.find((highlight) => highlight.kind === "assistance")?.detail).toMatch(/Fusion confidence/i);
+    expect(ka.highlights.find((highlight) => highlight.kind === "assistance")?.detail).toMatch(/Operate-visible effect/i);
+    expect(ka.proof_points.find((proof) => proof.kind === "support_transition")?.detail).toMatch(/Operate-visible effect/i);
   });
 
   it("always includes terminal key events at the end of the key timeline", () => {
@@ -214,5 +216,6 @@ describe("buildCompletedSessionReview", () => {
     expect(review.proof_points.find((proof) => proof.kind === "monitoring_status")?.label).toMatch(/unavailable|degraded/i);
     expect(review.proof_points.find((proof) => proof.kind === "monitoring_status")?.detail).toMatch(/No live monitoring sources were available/i);
     expect(review.proof_points.some((proof) => proof.kind === "human_aware_adaptation")).toBe(false);
+    expect(review.proof_points.find((proof) => proof.kind === "support_transition")?.detail).toMatch(/Operate-visible effect/i);
   });
 });

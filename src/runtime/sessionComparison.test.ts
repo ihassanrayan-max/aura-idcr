@@ -232,6 +232,7 @@ describe("buildSessionRunComparison", () => {
     expect(diag?.favors).toBe("adaptive");
     expect(c.completion_sim_time_sec_delta).toBe(-50);
     expect(c.proof_summary.headline).toMatch(/AURA-assisted \(adaptive\) run/i);
+    expect(c.proof_summary.bullets[1]).toMatch(/Operate-visible difference/i);
   });
 
   it("is deterministic for the same inputs", () => {

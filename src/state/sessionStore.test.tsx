@@ -931,6 +931,7 @@ describe("AuraSessionStore", () => {
 
     expect(screen.getByText("Support Posture")).toBeInTheDocument();
     expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getByTestId("open-monitoring-from-support")).toBeInTheDocument();
     expect(screen.getAllByText(/Active posture/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Risk recommendation/i)).toBeInTheDocument();
     expect(screen.getAllByText(/What now/i).length).toBeGreaterThan(0);
@@ -941,6 +942,7 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText("Signal confidence")).toBeInTheDocument();
     expect(screen.getAllByText(/Combined risk/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Critical visibility guardrails active/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("heading", { name: /^Human Monitoring 2.0$/i })).not.toBeInTheDocument();
   });
 
   it("keeps the baseline operator path calm and non-adaptive", () => {
@@ -951,7 +953,124 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Baseline run keeps monitoring only/i)).toBeInTheDocument();
     expect(screen.getByText(/Baseline posture locked/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Baseline session/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/No adaptive HM2 change/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Verification bias active/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Human-side confidence is limited/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Guided Support is active now/i)).not.toBeInTheDocument();
+  });
+
+  it("opens the isolated Human Monitoring workspace from the Support Posture inspector affordance", () => {
+    const store = new AuraSessionStore({ session_index: 318, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    fireEvent.click(screen.getByTestId("open-monitoring-from-support"));
+
+    expect(screen.getByTestId("human-monitoring-workspace")).toBeInTheDocument();
+    expect(screen.getByText(/Current Operate behavior this explains/i)).toBeInTheDocument();
+  });
+
+  it("tightens Operate pacing and validator wording when Human Monitoring 2.0 is degraded", () => {
+    const store = new AuraSessionStore({ session_index: 319, tick_duration_sec: 5 });
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      store.advanceTick();
+    }
+
+    store.requestAction({
+      action_id: "act_adjust_feedwater",
+      requested_value: 70,
+      ui_region: "plant_mimic",
+      reason_note: "HM2 degraded integration render test",
+    });
+
+    const degradedSnapshot = {
+      ...store.getSnapshot(),
+      human_monitoring: {
+        ...store.getSnapshot().human_monitoring,
+        mode: "degraded" as const,
+        freshness_status: "stale" as const,
+        aggregate_confidence: 42,
+        degraded_state_active: true,
+        degraded_state_reason: "Human Monitoring 2.0 confidence is reduced for this render test.",
+      },
+      operator_state: {
+        ...store.getSnapshot().operator_state,
+        degraded_mode_active: true,
+        degraded_mode_reason: "Operator-state proxy confidence is reduced for this render test.",
+        signal_confidence: 45,
+      },
+    };
+    const mockStore = {
+      getSnapshot: () => degradedSnapshot,
+      subscribe: () => () => undefined,
+      requestAction: () => false,
+      confirmPendingAction: () => false,
+      dismissPendingActionConfirmation: () => undefined,
+      requestSupervisorOverrideReview: () => false,
+      recordInteractionTelemetry: () => undefined,
+      setCameraCvIntent: () => undefined,
+      updateCameraCvLifecycle: () => undefined,
+      recordCameraCvObservation: () => undefined,
+      setInteractionTelemetrySuppressed: () => undefined,
+      advanceTick: () => degradedSnapshot,
+      reset: () => undefined,
+    } as unknown as AuraSessionStore;
+
+    render(<App store={mockStore} autoRun={false} />);
+
+    expect(screen.getAllByText(/HM2 degraded/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("next-action-item")).toHaveLength(2);
+    expect(screen.getAllByText(/Verification bias active/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Human-side confidence is limited/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Human monitoring status/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Pinned critical alarms/i).length).toBeGreaterThan(0);
+  });
+
+  it("keeps plant state primary when Human Monitoring 2.0 is unavailable", () => {
+    const store = new AuraSessionStore({ session_index: 320, tick_duration_sec: 5 });
+    const unavailableSnapshot = {
+      ...store.getSnapshot(),
+      human_monitoring: {
+        ...store.getSnapshot().human_monitoring,
+        mode: "unavailable" as const,
+        freshness_status: "no_observations" as const,
+        aggregate_confidence: 0,
+        connected_source_count: 0,
+        contributing_source_count: 0,
+        degraded_state_active: true,
+        degraded_state_reason: "No live Human Monitoring 2.0 observations are available.",
+      },
+      operator_state: {
+        ...store.getSnapshot().operator_state,
+        degraded_mode_active: true,
+        degraded_mode_reason: "Operator-state output is unavailable in this render test.",
+        signal_confidence: 0,
+      },
+    };
+    const mockStore = {
+      getSnapshot: () => unavailableSnapshot,
+      subscribe: () => () => undefined,
+      requestAction: () => false,
+      confirmPendingAction: () => false,
+      dismissPendingActionConfirmation: () => undefined,
+      requestSupervisorOverrideReview: () => false,
+      recordInteractionTelemetry: () => undefined,
+      setCameraCvIntent: () => undefined,
+      updateCameraCvLifecycle: () => undefined,
+      recordCameraCvObservation: () => undefined,
+      setInteractionTelemetrySuppressed: () => undefined,
+      advanceTick: () => unavailableSnapshot,
+      reset: () => undefined,
+    } as unknown as AuraSessionStore;
+
+    render(<App store={mockStore} autoRun={false} />);
+
+    expect(screen.getAllByText(/HM2 unavailable/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Verification bias active/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/plant and alarm state remain primary/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("next-action-item")).toHaveLength(2);
+    expect(screen.getByText(/Situation Board/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Pinned critical alarms/i).length).toBeGreaterThan(0);
   });
 
   it("renders the bounded soft-warning confirmation flow inside the existing shell", () => {
@@ -1150,6 +1269,7 @@ describe("AuraSessionStore", () => {
     expect(screen.getByTestId("kpi-summary-block")).toBeInTheDocument();
     expect(screen.getByTestId("adaptive-evidence-panel")).toBeInTheDocument();
     expect(screen.getByTestId("proof-trail-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("operate-visible-adaptation-card")).toBeInTheDocument();
     expect(screen.getByText(/Adaptive support evidence/i)).toBeInTheDocument();
     expect(screen.getByText(/Human-aware proof trail/i)).toBeInTheDocument();
     expect(screen.getByText(/Assistance trajectory/i)).toBeInTheDocument();

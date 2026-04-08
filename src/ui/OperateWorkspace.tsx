@@ -64,6 +64,7 @@ type OperateWorkspaceProps = {
   onConfirmPendingAction: () => void;
   onDismissPendingActionConfirmation: () => void;
   onRequestSupervisorOverrideReview: () => void;
+  onOpenMonitoring: () => void;
   onOpenReview: () => void;
   isTutorialActionAllowed: (actionId: TutorialActionId) => boolean;
 };
@@ -231,6 +232,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
     onConfirmPendingAction,
     onDismissPendingActionConfirmation,
     onRequestSupervisorOverrideReview,
+    onOpenMonitoring,
     onOpenReview,
     isTutorialActionAllowed,
   } = props;
@@ -532,11 +534,15 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
               </StatusPill>
             ))}
           </div>
-          <p className="lane-mode-note">{snapshot.support_policy.support_behavior_changes.join(" ")}</p>
+          <p className="lane-mode-note">{model.laneSummaryNote}</p>
 
           <div className={cx("lane-list", presentationPolicy.support_panel_mode_class)}>
             {model.laneItems.map((item) => (
-              <article key={item.id} className={cx("lane-item", item.emphasis && "lane-item--emphasized")}>
+              <article
+                key={item.id}
+                className={cx("lane-item", item.emphasis && "lane-item--emphasized")}
+                data-testid="next-action-item"
+              >
                 <div className="section-divider">
                   <div>
                     <strong>{item.label}</strong>
@@ -586,6 +592,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                 <span>{pendingConfirmation.action_request.action_id}</span>
               </div>
               <p className="lane-mode-note">{presentationPolicy.pending_confirmation_intro}</p>
+              {model.validatorHumanMonitoringNote ? <p className="lane-caution">{model.validatorHumanMonitoringNote}</p> : null}
               <p>{pendingConfirmation.validation_result.explanation}</p>
               <p className="lane-why-now">{pendingConfirmation.validation_result.risk_context}</p>
               <p className="lane-caution">{pendingConfirmation.validation_result.confidence_note}</p>
@@ -637,6 +644,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
                 <StatusPill tone={validationBadgeTone(lastValidation.outcome)}>{lastValidation.outcome}</StatusPill>
               </div>
               <p className="lane-mode-note">{presentationPolicy.validator_mode_summary}</p>
+              {model.validatorHumanMonitoringNote ? <p className="lane-caution">{model.validatorHumanMonitoringNote}</p> : null}
               <p>{lastValidation.explanation}</p>
               <p className="lane-meta">Reason code {lastValidation.reason_code}</p>
               <p className="lane-why-now">{lastValidation.risk_context}</p>
@@ -851,6 +859,16 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           title="Support Posture"
           subtitle="Active posture, recommendation, guardrails, and operator-control cues stay legible without hiding the rest of the shell."
           data-tutorial-target="support-posture"
+          actions={
+            <button
+              type="button"
+              className="ghost-button"
+              data-testid="open-monitoring-from-support"
+              onClick={onOpenMonitoring}
+            >
+              Inspect Human Monitoring
+            </button>
+          }
         >
           <MetricStrip items={model.supportMetrics} className="metric-strip--compact" />
 

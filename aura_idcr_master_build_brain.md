@@ -1520,6 +1520,28 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: Codex GPT-5 Human Monitoring 2.0 Phase 2 integration session
+- Task worked on: Implemented Human Monitoring 2.0 Phase 2 by integrating bounded, explainable human-monitoring effects into Operate and review/report proof while preserving the isolated inspection workspace
+- Status: Done
+- What changed:
+  - Kept the existing isolated `Human Monitoring` workspace intact and extended it with an explicit cross-reference explaining what the current monitor state is changing in Operate, so the inspection surface remains the authority while the demo story becomes easier to narrate
+  - Updated `src/ui/viewModel.ts`, `src/ui/OperateWorkspace.tsx`, and `src/App.tsx` so canonical human-monitoring outputs now produce bounded Operate-visible effects only when credible: posture explanation, degraded-confidence messaging, urgency/pacing wording, watch-signal emphasis, guardrail emphasis, recommendation framing, and a direct `Inspect Human Monitoring` affordance from Operate without introducing a new autonomous mode or hiding plant-first context
+  - Tightened Operate integration so stale, degraded, or unavailable human-monitoring data cannot dominate the system: plant/alarm state remains primary, pinned critical visibility remains present, and the HM2 effect collapses to explicit verification-bias / caution messaging instead of stronger adaptation when confidence is limited
+  - Updated `src/runtime/sessionReview.ts`, `src/runtime/sessionComparison.ts`, `src/runtime/reportArtifacts.ts`, and `src/ui/ReviewWorkspace.tsx` so completed Review, comparison proof, and exported notable points now call out the specific Operate-visible adaptation that HM2 influenced, giving judges a clearer before/after explanation path instead of requiring raw payload inspection
+  - Added focused verification in `src/state/sessionStore.test.tsx`, `src/runtime/sessionReview.test.ts`, `src/runtime/sessionComparison.test.ts`, and `src/runtime/reportArtifacts.test.ts` for Operate integration, preserved critical visibility, degraded/unavailable fallback behavior, continued isolated-workspace availability, and HM2-linked review/report evidence
+  - Re-verified with passing `npm test` and passing `npm run build`; the repo is green at 147 passing tests, and the pre-existing Vite large-chunk warning for the lazy webcam bundle remains unchanged
+- What remains:
+  - Phase 2 intentionally does not add new human-monitoring sources, new risk-model math, new validator decision rules, new adaptive layout regions, or any hidden/automatic plant-control behavior
+  - Further optional work could deepen demo/report polish, richer Human Monitoring workspace observability, or additional bounded HM2-derived wording refinements, but those are no longer required for the credible Phase 2 integration slice
+  - The isolated Human Monitoring workspace should remain available in future work as the inspection authority; any additional downstream integration should continue to derive from the canonical monitoring freshness/degraded semantics rather than parallel ad hoc UI logic
+- Blockers:
+  - None in-repo after implementation and verification
+- Next recommended step:
+  - If additional polish is desired, focus on optional demo narration/report presentation around the now-visible HM2 effect rather than widening the adaptation authority of human-monitoring signals
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

@@ -36,6 +36,10 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
             <strong>{model.summaryHeadline}</strong>
             <p>{model.summaryBody}</p>
           </div>
+          <div className="monitoring-card">
+            <span className="utility-card__label">Current Operate behavior this explains</span>
+            <p>{model.operateCrossReference}</p>
+          </div>
         </SectionShell>
 
         <SectionShell

@@ -135,6 +135,8 @@ export type OperateWorkspaceModel = {
   }>;
   assistanceCue: OperateAssistanceCueModel;
   laneGuidanceCards: OperateGuidanceCardModel[];
+  laneSummaryNote: string;
+  validatorHumanMonitoringNote?: string;
   supportMetrics: MetricItemModel[];
   supportPills: StatusPillModel[];
   supportSections: OperateSupportSectionModel[];
@@ -147,6 +149,7 @@ export type HumanMonitoringWorkspaceModel = {
   summaryPills: StatusPillModel[];
   summaryHeadline: string;
   summaryBody: string;
+  operateCrossReference: string;
   sourceCards: Array<{
     id: string;
     title: string;
@@ -284,6 +287,257 @@ function buildOperatorControlNote(snapshot: SessionSnapshot): string {
   return "Operator authority is preserved. Lane guidance remains advisory, and validation only adds friction when a bounded higher-risk action needs confirmation or review.";
 }
 
+type HumanMonitoringOperateIntegration = {
+  statusLabel: string;
+  effectLabel: string;
+  tone: StatusTone;
+  summary: string;
+  orientationMatterNote: string;
+  nextActionNote?: string;
+  laneNote: string;
+  validatorNote?: string;
+  storylineNote: string;
+  watchCardHeadline: string;
+  watchCardBody: string;
+  effectCardHeadline: string;
+  effectCardBody: string;
+  confidenceHeadline: string;
+  confidenceBody: string;
+  confidenceMeta: string;
+  confidencePills: StatusPillModel[];
+  workspaceCrossReference: string;
+  tightenLanePresentation: boolean;
+};
+
+function buildHumanMonitoringOperateIntegration(snapshot: SessionSnapshot): HumanMonitoringOperateIntegration {
+  const monitoringMode = monitoringModeLabel(snapshot.human_monitoring.mode);
+  const freshnessLabel = snapshot.human_monitoring.freshness_status;
+  const aggregateConfidenceLabel = `${snapshot.human_monitoring.aggregate_confidence}/100`;
+  const monitoringUnavailable =
+    snapshot.human_monitoring.mode === "unavailable" ||
+    snapshot.human_monitoring.freshness_status === "no_observations" ||
+    (snapshot.human_monitoring.connected_source_count === 0 && snapshot.human_monitoring.contributing_source_count === 0);
+  const monitoringLimited =
+    !monitoringUnavailable &&
+    (snapshot.human_monitoring.mode === "degraded" ||
+      snapshot.human_monitoring.freshness_status === "stale" ||
+      snapshot.human_monitoring.degraded_state_active ||
+      snapshot.operator_state.degraded_mode_active ||
+      snapshot.operator_state.signal_confidence < 70 ||
+      snapshot.human_monitoring.aggregate_confidence < 70);
+  const highHumanPressure =
+    snapshot.combined_risk.human_pressure_index >= 48 ||
+    snapshot.operator_state.workload_index >= 70 ||
+    snapshot.operator_state.attention_stability_index <= 72;
+  const attentionTight = snapshot.operator_state.attention_stability_index <= 76;
+
+  if (snapshot.session_mode === "baseline") {
+    return {
+      statusLabel: "HM2 informational",
+      effectLabel: "No adaptive HM2 change",
+      tone: "ok",
+      summary:
+        "Baseline mode keeps Human Monitoring 2.0 informational only, so Operate does not tighten posture, pacing, or validator wording from human-side cues.",
+      orientationMatterNote: "Human-side cues stay informational only in baseline mode.",
+      nextActionNote:
+        "Baseline mode keeps the broader action grouping instead of applying human-aware pacing changes.",
+      laneNote:
+        "Baseline mode keeps the broader guided grouping and leaves Human Monitoring 2.0 informational only.",
+      storylineNote:
+        "Baseline mode keeps the storyline broad and informational; human-side cues do not change narrowing strength here.",
+      watchCardHeadline: snapshot.support_refinement.watch_now_summary,
+      watchCardBody: `${snapshot.support_refinement.current_support_focus} Baseline mode keeps the broader grouping intact.`,
+      effectCardHeadline: "No adaptive HM2 change",
+      effectCardBody:
+        "Human Monitoring 2.0 remains available for inspection, but baseline Operate stays calm and does not change pacing or caution wording from that signal.",
+      confidenceHeadline: "Human Monitoring 2.0 stays informational in baseline.",
+      confidenceBody: `Mode ${monitoringMode}; freshness ${freshnessLabel}; aggregate confidence ${aggregateConfidenceLabel}.`,
+      confidenceMeta: "Adaptive HM2 wording changes are disabled in baseline mode.",
+      confidencePills: [
+        { label: monitoringMode, tone: "neutral" },
+        { label: `Freshness ${freshnessLabel}`, tone: freshnessTone(freshnessLabel) },
+        { label: "Informational only", tone: "ok" },
+      ],
+      workspaceCrossReference:
+        "This workspace shows the evidence behind the informational monitoring status while baseline Operate remains calm and non-adaptive.",
+      tightenLanePresentation: false,
+    };
+  }
+
+  if (monitoringUnavailable) {
+    return {
+      statusLabel: "HM2 unavailable",
+      effectLabel: "Verification bias active",
+      tone: "neutral",
+      summary:
+        "Human Monitoring 2.0 is unavailable, so plant and alarm state remain primary. Operate keeps verification explicit but avoids stronger human-side narrowing.",
+      orientationMatterNote: "Human-side input is unavailable, so critical plant and alarm cues stay primary.",
+      nextActionNote:
+        "Lead with one bounded step, then keep one watch item visible while human-side input is unavailable.",
+      laneNote:
+        "Monitoring is unavailable, so the lane is using a verify-then-commit pattern with one lead step and one watch item.",
+      validatorNote:
+        "Human-side confidence is limited or unavailable, so verification is being kept explicit before the action commits.",
+      storylineNote:
+        "Human-side input is unavailable, so the storyline is being held broader and verification-biased instead of narrowing harder.",
+      watchCardHeadline: snapshot.support_refinement.watch_now_summary,
+      watchCardBody:
+        "Plant and alarm state stay primary while the lane keeps one lead step and one watch item visible.",
+      effectCardHeadline: "Verification bias active",
+      effectCardBody:
+        "Operate is staying explicit and bounded because Human Monitoring 2.0 is unavailable; no extra human-side escalation is being applied.",
+      confidenceHeadline: "Human Monitoring 2.0 unavailable",
+      confidenceBody: `Mode ${monitoringMode}; freshness ${freshnessLabel}; aggregate confidence ${aggregateConfidenceLabel}.`,
+      confidenceMeta: "No extra HM2 escalation is being applied while monitoring is unavailable.",
+      confidencePills: [
+        { label: monitoringMode, tone: "neutral" },
+        { label: `Freshness ${freshnessLabel}`, tone: freshnessTone(freshnessLabel) },
+        { label: "Verification bias active", tone: "neutral" },
+      ],
+      workspaceCrossReference:
+        "This workspace explains why Operate is staying verification-biased and avoiding stronger human-side pacing changes while monitoring is unavailable.",
+      tightenLanePresentation: true,
+    };
+  }
+
+  if (monitoringLimited) {
+    return {
+      statusLabel: "HM2 degraded",
+      effectLabel: "Verification bias active",
+      tone: snapshot.support_mode === "protected_response" ? "alert" : "neutral",
+      summary:
+        "Human Monitoring 2.0 is degraded, so recommendations stay bounded, caution wording is stronger, and the adaptive layer avoids over-committing on human-side cues.",
+      orientationMatterNote: "Human-side confidence is reduced, so the watch picture stays explicit.",
+      nextActionNote:
+        "Lead with one bounded step, then keep one watch item visible while confidence is limited.",
+      laneNote:
+        "Monitoring confidence is reduced, so the lane is tightening to one lead step and one watch item before you commit.",
+      validatorNote:
+        "Human-side confidence is limited, so verification is being kept explicit before the action commits.",
+      storylineNote:
+        "Human-side confidence is reduced, so the storyline is being held broader and biased toward verification.",
+      watchCardHeadline: snapshot.support_refinement.watch_now_summary,
+      watchCardBody:
+        "Confidence is limited, so the lane keeps one lead step and one watch item up front instead of broadening the response picture.",
+      effectCardHeadline: "Verification bias active",
+      effectCardBody:
+        "Operate is strengthening caution wording and holding a verify-then-commit pattern because Human Monitoring 2.0 is degraded.",
+      confidenceHeadline: "Human Monitoring 2.0 degraded",
+      confidenceBody: `Mode ${monitoringMode}; freshness ${freshnessLabel}; aggregate confidence ${aggregateConfidenceLabel}.`,
+      confidenceMeta: snapshot.support_policy.degraded_confidence_effect,
+      confidencePills: [
+        { label: monitoringMode, tone: "neutral" },
+        { label: `Freshness ${freshnessLabel}`, tone: freshnessTone(freshnessLabel) },
+        { label: "Verification bias active", tone: "neutral" },
+      ],
+      workspaceCrossReference:
+        "This workspace explains why Operate is tightening posture wording, watch emphasis, and validator cautioning while Human Monitoring 2.0 confidence is limited.",
+      tightenLanePresentation: true,
+    };
+  }
+
+  if (highHumanPressure) {
+    const effectLabel = attentionTight ? "Watch emphasis tightened" : "Pacing tightened";
+    return {
+      statusLabel: "HM2 current",
+      effectLabel,
+      tone: snapshot.support_mode === "protected_response" ? "alert" : "neutral",
+      summary:
+        "Current human-side strain is visible, so Operate tightens watch emphasis and execution pacing while plant state stays primary.",
+      orientationMatterNote: "Human-side strain is high, so the next watch picture stays tighter.",
+      nextActionNote: "Take one bounded step, then re-check the watch item before broadening the search.",
+      laneNote:
+        "Human-side strain is elevated, so the lane shows one lead step and one watch item with firmer caution wording.",
+      validatorNote:
+        "Human-side strain is elevated even though confidence is current, so execution is being kept slower and bounded.",
+      storylineNote:
+        "Human-side strain is elevated, so the storyline is narrowed more cautiously around the current watch signals.",
+      watchCardHeadline: snapshot.support_refinement.watch_now_summary,
+      watchCardBody:
+        "Workload and attention strain are tightening the immediate watch picture, so Operate keeps one lead step plus one watch item up front.",
+      effectCardHeadline: effectLabel,
+      effectCardBody:
+        "Operate is slowing the recommendation pace into a bounded verify-then-commit rhythm because current human-side strain is elevated.",
+      confidenceHeadline: "Human Monitoring 2.0 is current, but strain is elevated.",
+      confidenceBody: `Mode ${monitoringMode}; freshness ${freshnessLabel}; aggregate confidence ${aggregateConfidenceLabel}.`,
+      confidenceMeta: snapshot.support_refinement.operator_context_note,
+      confidencePills: [
+        { label: monitoringMode, tone: "ok" },
+        { label: `Freshness ${freshnessLabel}`, tone: freshnessTone(freshnessLabel) },
+        { label: effectLabel, tone: snapshot.support_mode === "protected_response" ? "alert" : "neutral" },
+      ],
+      workspaceCrossReference:
+        "This workspace explains why Operate is tightening watch emphasis, slowing recommendation pacing, and using firmer caution wording even though Human Monitoring 2.0 remains current.",
+      tightenLanePresentation: true,
+    };
+  }
+
+  return {
+    statusLabel: "HM2 current",
+    effectLabel: "No extra constraint",
+    tone: "ok",
+    summary:
+      "Current monitoring is supporting nominal confidence, so Operate can keep direct wording without extra verification bias.",
+    orientationMatterNote:
+      "Human-side cues are current, so plant and alarm state can stay primary without extra confidence gating.",
+    laneNote:
+      "Current monitoring supports the broader guided grouping; no extra verification bias or pacing clamp is active.",
+    storylineNote:
+      "Human-side cues are current, so the storyline can stay direct without extra verification bias.",
+    watchCardHeadline: snapshot.support_refinement.watch_now_summary,
+    watchCardBody: snapshot.support_refinement.current_support_focus,
+    effectCardHeadline: "Current confidence",
+    effectCardBody:
+      "Human Monitoring 2.0 is current, so the adaptive layer is not adding extra confidence gating beyond the normal bounded support posture.",
+    confidenceHeadline: `Human Monitoring 2.0 current (${aggregateConfidenceLabel}).`,
+    confidenceBody: `Mode ${monitoringMode}; freshness ${freshnessLabel}; plant state and pinned alarms remain primary.`,
+    confidenceMeta: "Human Monitoring 2.0 remains advisory only; no extra HM2 constraint is active.",
+    confidencePills: [
+      { label: monitoringMode, tone: "ok" },
+      { label: `Freshness ${freshnessLabel}`, tone: freshnessTone(freshnessLabel) },
+      { label: "No extra constraint", tone: "ok" },
+    ],
+    workspaceCrossReference:
+      "This workspace explains why Operate can stay direct right now: Human Monitoring 2.0 is current enough that no extra verification bias is being applied.",
+    tightenLanePresentation: false,
+  };
+}
+
+function selectOperateLaneItems(
+  items: OperateWorkspaceModel["laneItems"],
+  tightenLanePresentation: boolean,
+): OperateWorkspaceModel["laneItems"] {
+  if (!tightenLanePresentation || items.length <= 2) {
+    return items;
+  }
+
+  const leadItem = items.find((item) => item.kind !== "watch") ?? items[0];
+  const watchItem = items.find((item) => item.kind === "watch" && item.id !== leadItem?.id);
+  const selectedIds = new Set<string>();
+  const selectedItems: OperateWorkspaceModel["laneItems"] = [];
+
+  for (const item of [leadItem, watchItem]) {
+    if (item && !selectedIds.has(item.id)) {
+      selectedIds.add(item.id);
+      selectedItems.push(item);
+    }
+  }
+
+  if (selectedItems.length < 2) {
+    for (const item of items) {
+      if (!selectedIds.has(item.id)) {
+        selectedIds.add(item.id);
+        selectedItems.push(item);
+      }
+      if (selectedItems.length >= 2) {
+        break;
+      }
+    }
+  }
+
+  return selectedItems;
+}
+
 type BuildOperateWorkspaceModelParams = {
   snapshot: SessionSnapshot;
   actionLabels: Record<string, string>;
@@ -307,12 +561,12 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
   const recommendedSupportTone = supportModeTone(snapshot.combined_risk.recommended_assistance_mode);
   const supportAlignmentNote = buildSupportAlignmentNote(snapshot, activeSupportLabel, recommendedSupportLabel);
   const operatorControlNote = buildOperatorControlNote(snapshot);
-  const supportBehaviorSummary = snapshot.support_policy.support_behavior_changes.join(" ");
   const confidenceBody =
     snapshot.support_refinement.degraded_confidence_caution ||
     snapshot.combined_risk.confidence_caveat ||
     snapshot.support_policy.degraded_confidence_effect;
   const transitionHeadline = buildSupportTransitionHeadline(snapshot);
+  const monitoringIntegration = buildHumanMonitoringOperateIntegration(snapshot);
 
   let nextHeadline = "Continue monitoring";
   let nextBody = "No operator action is being pushed right now. Stay with critical variables and grouped alarms.";
@@ -342,8 +596,40 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
     pinnedCriticalAlarms.length > 0 ? pinnedCriticalAlarms.map((alarm) => alarm.title).slice(0, 2).join(" | ") : "No pinned P1/P2 alarms";
   const matterBody =
     pinnedCriticalAlarms.length > 0
-      ? `${criticalAlarmTitle}. ${snapshot.support_policy.critical_visibility.summary}`
-      : `${snapshot.support_refinement.watch_now_summary}. ${snapshot.support_policy.critical_visibility.summary}`;
+      ? `${criticalAlarmTitle}. ${snapshot.support_policy.critical_visibility.summary} ${monitoringIntegration.orientationMatterNote}`
+      : `${snapshot.support_refinement.watch_now_summary}. ${snapshot.support_policy.critical_visibility.summary} ${monitoringIntegration.orientationMatterNote}`;
+  const baseLaneItems: OperateWorkspaceModel["laneItems"] = presentedLaneItems.map((item) => ({
+    id: item.item_id,
+    label: item.label,
+    kind: item.item_kind,
+    why: item.why,
+    whyNow: item.presentation_cue?.why_this_matters_now,
+    cautions: [
+      item.presentation_cue?.attention_sensitive_caution,
+      item.presentation_cue?.degraded_confidence_caveat,
+    ].filter((value): value is string => Boolean(value)),
+    completionHint: item.completion_hint,
+    signals: item.source_variable_ids.length > 0 ? item.source_variable_ids.map(formatSignalLabel).join(", ") : undefined,
+    actionLabel: item.recommended_action_id ? actionLabels[item.recommended_action_id] ?? item.recommended_action_id : undefined,
+    actionId: item.recommended_action_id,
+    actionValue: typeof item.recommended_value === "number" ? item.recommended_value : undefined,
+    actionValueLabel: typeof item.recommended_value === "number" ? `${item.recommended_value}% rated` : undefined,
+    emphasis: item.presentation_cue?.emphasized ?? false,
+    badges: item.presentation_cue
+      ? [
+          {
+            label: item.presentation_cue.urgency_level,
+            tone: urgencyBadgeTone(item.presentation_cue.urgency_level),
+          },
+          ...(item.presentation_cue.emphasized ? [{ label: "Emphasized now", tone: "ok" as const }] : []),
+          {
+            label: item.presentation_cue.wording_style,
+            tone: item.presentation_cue.wording_style === "concise" ? "neutral" : "ok",
+          },
+        ]
+      : [],
+  }));
+  const laneItems = selectOperateLaneItems(baseLaneItems, monitoringIntegration.tightenLanePresentation);
 
   return {
     orientationCards: [
@@ -367,7 +653,10 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         id: "next",
         eyebrow: "Do next",
         headline: nextHeadline,
-        body: nextBody,
+        body:
+          pendingConfirmation || pendingSupervisorOverride?.request_status === "requested" || !monitoringIntegration.nextActionNote
+            ? nextBody
+            : `${nextBody} ${monitoringIntegration.nextActionNote}`,
         tone: nextTone,
         meta: nextMeta,
       },
@@ -465,7 +754,7 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         },
         {
           label: "Operator context",
-          body: snapshot.support_refinement.operator_context_note,
+          body: `${snapshot.support_refinement.operator_context_note} ${monitoringIntegration.storylineNote}`.trim(),
         },
       ],
     },
@@ -553,54 +842,24 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
           },
         }
       : {}),
-    laneItems: presentedLaneItems.map((item) => ({
-      id: item.item_id,
-      label: item.label,
-      kind: item.item_kind,
-      why: item.why,
-      whyNow: item.presentation_cue?.why_this_matters_now,
-      cautions: [
-        item.presentation_cue?.attention_sensitive_caution,
-        item.presentation_cue?.degraded_confidence_caveat,
-      ].filter((value): value is string => Boolean(value)),
-      completionHint: item.completion_hint,
-      signals: item.source_variable_ids.length > 0 ? item.source_variable_ids.map(formatSignalLabel).join(", ") : undefined,
-      actionLabel: item.recommended_action_id ? actionLabels[item.recommended_action_id] ?? item.recommended_action_id : undefined,
-      actionId: item.recommended_action_id,
-      actionValue: typeof item.recommended_value === "number" ? item.recommended_value : undefined,
-      actionValueLabel: typeof item.recommended_value === "number" ? `${item.recommended_value}% rated` : undefined,
-      emphasis: item.presentation_cue?.emphasized ?? false,
-      badges: item.presentation_cue
-        ? [
-            {
-              label: item.presentation_cue.urgency_level,
-              tone: urgencyBadgeTone(item.presentation_cue.urgency_level),
-            },
-            ...(item.presentation_cue.emphasized ? [{ label: "Emphasized now", tone: "ok" as const }] : []),
-            {
-              label: item.presentation_cue.wording_style,
-              tone: item.presentation_cue.wording_style === "concise" ? "neutral" : "ok",
-            },
-          ]
-        : [],
-    })),
+    laneItems,
     assistanceCue: {
       eyebrow: "Assistance posture",
       headline: snapshot.session_mode === "baseline" ? "Baseline run keeps monitoring only." : `${activeSupportLabel} is active now.`,
-      body: `${supportAlignmentNote} ${snapshot.support_refinement.watch_now_summary}`,
-      tone: activeSupportTone,
+      body: `${supportAlignmentNote} ${monitoringIntegration.summary}`,
+      tone: monitoringIntegration.tone,
       pills: [
         {
           label: snapshot.session_mode === "baseline" ? "Baseline posture locked" : "Adaptive posture active",
           tone: snapshot.session_mode === "baseline" ? "ok" : activeSupportTone,
         },
         {
-          label:
-            snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode
-              ? "Risk and active posture aligned"
-              : `Risk recommends ${recommendedSupportLabel}`,
-          tone:
-            snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode ? "ok" : recommendedSupportTone,
+          label: monitoringIntegration.statusLabel,
+          tone: monitoringIntegration.tone,
+        },
+        {
+          label: monitoringIntegration.effectLabel,
+          tone: monitoringIntegration.tone,
         },
         {
           label: "Critical cues stay pinned",
@@ -612,20 +871,20 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       {
         id: "watch",
         label: "What now",
-        headline: snapshot.support_refinement.watch_now_summary,
-        body: snapshot.support_refinement.current_support_focus,
-        tone: activeSupportTone,
+        headline: monitoringIntegration.watchCardHeadline,
+        body: monitoringIntegration.watchCardBody,
+        tone: monitoringIntegration.tone,
       },
       {
         id: "effect",
         label: "Mode effect",
-        headline: snapshot.support_policy.support_behavior_changes[0] ?? "Support stays bounded inside the current shell.",
-        body:
-          snapshot.support_policy.support_behavior_changes.slice(1).join(" ") ||
-          snapshot.support_policy.current_mode_reason,
-        tone: activeSupportTone,
+        headline: monitoringIntegration.effectCardHeadline,
+        body: monitoringIntegration.effectCardBody,
+        tone: monitoringIntegration.tone,
       },
     ],
+    laneSummaryNote: monitoringIntegration.laneNote,
+    validatorHumanMonitoringNote: monitoringIntegration.validatorNote,
     supportMetrics: [
       {
         label: "Active posture",
@@ -658,7 +917,7 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       {
         label: "Signal confidence",
         value: `${snapshot.operator_state.signal_confidence}/100`,
-        caption: `Human influence ${snapshot.combined_risk.human_influence_scale.toFixed(2)}`,
+        caption: `${monitoringIntegration.statusLabel} | influence ${snapshot.combined_risk.human_influence_scale.toFixed(2)}`,
       },
     ],
     supportPills: [
@@ -673,6 +932,14 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       {
         label: "Operator authority retained",
         tone: "ok",
+      },
+      {
+        label: monitoringIntegration.statusLabel,
+        tone: monitoringIntegration.tone,
+      },
+      {
+        label: monitoringIntegration.effectLabel,
+        tone: monitoringIntegration.tone,
       },
       {
         label: `Degraded mode ${snapshot.operator_state.degraded_mode_active ? "active" : "clear"}`,
@@ -708,17 +975,17 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       {
         id: "watch",
         label: "What now",
-        headline: snapshot.support_refinement.watch_now_summary,
-        body: snapshot.support_refinement.current_support_focus,
-        tone: activeSupportTone,
+        headline: monitoringIntegration.watchCardHeadline,
+        body: monitoringIntegration.watchCardBody,
+        tone: monitoringIntegration.tone,
         meta: snapshot.support_refinement.summary_explanation,
       },
       {
         id: "effect",
         label: "Mode effect",
-        headline: snapshot.support_policy.support_behavior_changes[0] ?? "Support stays bounded inside the current shell.",
-        body: supportBehaviorSummary,
-        tone: activeSupportTone,
+        headline: monitoringIntegration.effectCardHeadline,
+        body: monitoringIntegration.effectCardBody,
+        tone: monitoringIntegration.tone,
         meta: snapshot.support_policy.current_mode_reason,
       },
       {
@@ -737,11 +1004,12 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
       },
       {
         id: "confidence",
-        label: "Confidence",
-        headline: `Fusion confidence ${snapshot.combined_risk.fusion_confidence.toFixed(1)}/100.`,
-        body: confidenceBody,
-        tone: snapshot.operator_state.degraded_mode_active ? "alert" : "neutral",
-        meta: snapshot.support_policy.degraded_confidence_effect,
+        label: "Human monitoring status",
+        headline: monitoringIntegration.confidenceHeadline,
+        body: monitoringIntegration.confidenceBody,
+        tone: monitoringIntegration.tone,
+        meta: monitoringIntegration.confidenceMeta || confidenceBody,
+        pills: monitoringIntegration.confidencePills,
       },
       {
         id: "operator",
@@ -755,7 +1023,7 @@ export function buildOperateWorkspaceModel(params: BuildOperateWorkspaceModelPar
         id: "transition",
         label: "What changed",
         headline: transitionHeadline,
-        body: `${snapshot.combined_risk.what_changed} ${snapshot.support_policy.transition_reason}`.trim(),
+        body: `${snapshot.combined_risk.what_changed} ${monitoringIntegration.summary}`.trim(),
         tone: snapshot.support_mode === snapshot.combined_risk.recommended_assistance_mode ? "neutral" : recommendedSupportTone,
         meta: snapshot.support_policy.mode_change_summary,
       },
@@ -982,6 +1250,7 @@ export function buildHumanMonitoringWorkspaceModel(
     summaryBody: snapshot.human_monitoring.degraded_state_active
       ? snapshot.human_monitoring.degraded_state_reason
       : "Monitoring is currently publishing a bounded, inspectable advisory picture into the runtime.",
+    operateCrossReference: buildHumanMonitoringOperateIntegration(snapshot).workspaceCrossReference,
     sourceCards: snapshot.human_monitoring.sources.map((source) => {
       const latestFeatures = inspectionSourceById.get(source.source_id)?.latest_features;
       return {

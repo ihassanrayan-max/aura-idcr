@@ -141,7 +141,7 @@ function buildProofSummary(params: {
         : "Baseline run stayed fixed while the AURA-assisted (adaptive) run kept adaptive support reasoning available.",
     bullets: [
       `Monitoring posture: ${judgeRunLabel("baseline")} - ${baselineMonitoring?.label ?? "No monitoring proof captured"}. ${judgeRunLabel("adaptive")} - ${adaptiveMonitoring?.label ?? "No monitoring proof captured"}.`,
-      `Support difference: ${judgeRunLabel("baseline")} - ${baselineSupport?.label ?? "No baseline posture proof captured"}. ${judgeRunLabel("adaptive")} - ${adaptiveSupport?.label ?? adaptiveValidator?.label ?? "No adaptive posture proof captured"}.`,
+      `Operate-visible difference: ${judgeRunLabel("baseline")} - ${baselineSupport?.detail ?? "No baseline posture proof captured"}. ${judgeRunLabel("adaptive")} - ${adaptiveHumanAware?.detail ?? adaptiveSupport?.detail ?? adaptiveValidator?.detail ?? "No adaptive posture proof captured"}.`,
       adaptiveHumanAware
         ? `Visible adaptive example: ${adaptiveHumanAware.detail}`
         : "Visible adaptive example: No bounded human-aware adaptation moment met the confidence threshold in the AURA-assisted (adaptive) run.",

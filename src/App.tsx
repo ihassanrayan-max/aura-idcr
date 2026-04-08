@@ -1046,6 +1046,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           onConfirmPendingAction={() => store.confirmPendingAction()}
           onDismissPendingActionConfirmation={() => store.dismissPendingActionConfirmation()}
           onRequestSupervisorOverrideReview={() => store.requestSupervisorOverrideReview()}
+          onOpenMonitoring={() => openWorkspace("monitoring")}
           onOpenReview={() => openWorkspace("review")}
         />
       ) : workspace === "monitoring" ? (

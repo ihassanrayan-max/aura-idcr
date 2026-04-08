@@ -74,6 +74,9 @@ function CompletedSessionReviewPanel(props: {
     (highlight) =>
       highlight.kind !== "assistance" && highlight.kind !== "human_monitoring" && highlight.kind !== "intervention",
   );
+  const operateVisibleProof =
+    review.proof_points.find((proof) => proof.kind === "human_aware_adaptation") ??
+    review.proof_points.find((proof) => proof.kind === "support_transition");
 
   useEffect(() => {
     setEventIndex(0);
@@ -216,8 +219,18 @@ function CompletedSessionReviewPanel(props: {
 
       <div className="review-card">
         <h3>Adaptive support evidence</h3>
-        <p>These proof points come from the canonical assistance, human-monitoring, and intervention highlights already assembled for the run.</p>
+        <p>These proof points show what the operator actually saw change in Operate, not just the internal monitoring and risk state.</p>
         <div className="review-evidence-grid" data-testid="adaptive-evidence-panel">
+          {operateVisibleProof ? (
+            <article
+              className={`review-evidence-card review-evidence-card--${reviewProofTone(operateVisibleProof.kind)}`}
+              data-testid="operate-visible-adaptation-card"
+            >
+              <span className="utility-card__label">Operate-visible adaptation</span>
+              <strong>{operateVisibleProof.label}</strong>
+              <p>{operateVisibleProof.detail}</p>
+            </article>
+          ) : null}
           {adaptiveEvidenceHighlights.map((highlight) => (
             <article
               key={highlight.highlight_id}

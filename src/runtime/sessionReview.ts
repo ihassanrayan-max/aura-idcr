@@ -174,6 +174,54 @@ function monitoringPostureFromPayload(payload: Record<string, unknown>): Monitor
   return "degraded";
 }
 
+function operateVisibleEffectFromPayload(
+  payload: Record<string, unknown>,
+  session_mode: SessionMode,
+): string | undefined {
+  const watch_now = stringValue(payload.watch_now_summary);
+  const support_focus = stringValue(payload.current_support_focus);
+  const degraded_caution = stringValue(payload.degraded_confidence_caution);
+  const degraded_effect = stringValue(payload.degraded_confidence_effect);
+  const operator_context = stringValue(payload.operator_context_note);
+  const behavior_changes = stringArrayValue(payload.support_behavior_changes);
+
+  if (session_mode === "baseline") {
+    return "Operate kept the broader lane grouping and left Human Monitoring 2.0 informational only.";
+  }
+
+  if (degraded_caution || /degraded confidence/i.test(degraded_effect ?? "")) {
+    return [
+      "Operate stayed verification-biased instead of narrowing harder from human-side cues.",
+      watch_now ? `Watch cue: ${watch_now}.` : "",
+      degraded_caution || degraded_effect,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (/tight/i.test(operator_context ?? "") || behavior_changes.some((entry) => /tighten|firmer|stronger/i.test(entry))) {
+    return [
+      "Operate tightened pacing and watch emphasis around the current bounded response picture.",
+      watch_now ? `Watch cue: ${watch_now}.` : "",
+      support_focus ?? operator_context ?? behavior_changes[0],
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (watch_now || support_focus || behavior_changes.length > 0) {
+    return [
+      watch_now ? `Operate highlighted ${watch_now}.` : "",
+      support_focus,
+      behavior_changes[0],
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return undefined;
+}
+
 function summarizeEventForReview(event: SessionLogEvent): { title: string; summary: string } {
   const p = event.payload;
   switch (event.event_type) {
@@ -512,6 +560,7 @@ function buildSupportTransitionProofPoint(events: SessionLogEvent[], session_mod
     const current_mode_reason = stringValue(reasoningEvent.payload.current_mode_reason);
     const recommended_reason = stringValue(reasoningEvent.payload.recommended_assistance_reason);
     const what_changed = stringValue(reasoningEvent.payload.what_changed);
+    const operate_visible_effect = operateVisibleEffectFromPayload(reasoningEvent.payload, session_mode);
 
     return {
       proof_id: `proof_support_${reasoningEvent.event_id}`,
@@ -525,6 +574,7 @@ function buildSupportTransitionProofPoint(events: SessionLogEvent[], session_mod
         current_mode_reason,
         recommended_reason,
         what_changed,
+        operate_visible_effect ? `Operate-visible effect: ${operate_visible_effect}` : "",
       ]
         .filter(Boolean)
         .join(" "),
@@ -548,6 +598,9 @@ function buildSupportTransitionProofPoint(events: SessionLogEvent[], session_mod
       stringValue(supportChange.payload.current_mode_reason) ??
       stringValue(reasoningEvent?.payload.current_mode_reason);
     const what_changed = stringValue(reasoningEvent?.payload.what_changed);
+    const operate_visible_effect = reasoningEvent
+      ? operateVisibleEffectFromPayload(reasoningEvent.payload, session_mode)
+      : undefined;
 
     return {
       proof_id: `proof_support_${supportChange.event_id}`,
@@ -561,6 +614,7 @@ function buildSupportTransitionProofPoint(events: SessionLogEvent[], session_mod
         trigger_reason,
         current_mode_reason,
         what_changed,
+        operate_visible_effect ? `Operate-visible effect: ${operate_visible_effect}` : "",
       ]
         .filter(Boolean)
         .join(" "),
@@ -583,6 +637,9 @@ function buildSupportTransitionProofPoint(events: SessionLogEvent[], session_mod
       stringValue(fallbackReasoning.payload.current_mode_reason),
       stringValue(fallbackReasoning.payload.recommended_assistance_reason),
       stringValue(fallbackReasoning.payload.what_changed),
+      operateVisibleEffectFromPayload(fallbackReasoning.payload, session_mode)
+        ? `Operate-visible effect: ${operateVisibleEffectFromPayload(fallbackReasoning.payload, session_mode)}`
+        : "",
     ]
       .filter(Boolean)
       .join(" "),
@@ -709,6 +766,7 @@ function buildHumanAwareAdaptationProofPoint(events: SessionLogEvent[]): ReviewP
     const confidence = numberValue(monitoringEvent.payload.aggregate_confidence) ?? 0;
     const whyRisk = stringValue(reasoningEvent.payload.why_risk_is_current);
     const whatChanged = stringValue(reasoningEvent.payload.what_changed);
+    const operateVisibleEffect = operateVisibleEffectFromPayload(reasoningEvent.payload, "adaptive");
     const sourceEvent = supportEvent ?? validationEvent ?? reasoningEvent;
     const supportDetail =
       stringValue(supportEvent?.payload.current_mode_reason) ??
@@ -727,6 +785,7 @@ function buildHumanAwareAdaptationProofPoint(events: SessionLogEvent[]): ReviewP
         supportEvent || supportMode
           ? `Support response: ${supportDetail ?? "Adaptive posture remained active."}`
           : `Validator response: ${stringValue(validationEvent?.payload.explanation) ?? formatValidationOutcome(validationEvent?.payload ?? {})}.`,
+        operateVisibleEffect ? `Operate-visible effect: ${operateVisibleEffect}` : "",
         whatChanged,
         humanFactorVisible
           ? "Human-side factors were visible in the top contributors."
@@ -916,7 +975,11 @@ function buildMilestones(events: SessionLogEvent[]): CompletedSessionReviewMiles
   });
 }
 
-function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): CompletedSessionReviewHighlight[] {
+function buildHighlights(
+  events: SessionLogEvent[],
+  outcome: ScenarioOutcome,
+  session_mode: SessionMode,
+): CompletedSessionReviewHighlight[] {
   const highlights: CompletedSessionReviewHighlight[] = [];
 
   const lastReasoning = [...events].reverse().find((event) => event.event_type === "reasoning_snapshot_published");
@@ -938,24 +1001,28 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
     const to = stringValue(last.payload.to_mode);
     const recommended = stringValue(last.payload.recommended_mode);
     const fusionConfidence = numberValue(lastReasoningEvent?.payload.fusion_confidence);
+    const operateVisibleEffect = lastReasoningEvent
+      ? operateVisibleEffectFromPayload(lastReasoningEvent.payload, session_mode)
+      : undefined;
     highlights.push({
       highlight_id: `hl_asst_${last.event_id}`,
       kind: "assistance",
       label: "Assistance trajectory",
       detail:
         supportEvents.length === 1
-          ? `One assistance transition recorded${to ? ` (now ${to})` : ""}.${recommended ? ` Risk recommendation ended at ${recommended}.` : ""}${fusionConfidence !== undefined ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}`
-          : `${supportEvents.length} assistance transitions; final mode${to ? `: ${to}` : " recorded"}.${recommended ? ` Risk recommendation ended at ${recommended}.` : ""}${fusionConfidence !== undefined ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}`,
+          ? `One assistance transition recorded${to ? ` (now ${to})` : ""}.${recommended ? ` Risk recommendation ended at ${recommended}.` : ""}${fusionConfidence !== undefined ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}${operateVisibleEffect ? ` Operate-visible effect: ${operateVisibleEffect}` : ""}`
+          : `${supportEvents.length} assistance transitions; final mode${to ? `: ${to}` : " recorded"}.${recommended ? ` Risk recommendation ended at ${recommended}.` : ""}${fusionConfidence !== undefined ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}${operateVisibleEffect ? ` Operate-visible effect: ${operateVisibleEffect}` : ""}`,
     });
   } else if (lastReasoningEvent) {
     const recommended = stringValue(lastReasoningEvent.payload.recommended_assistance_mode);
     const fusionConfidence = numberValue(lastReasoningEvent.payload.fusion_confidence);
+    const operateVisibleEffect = operateVisibleEffectFromPayload(lastReasoningEvent.payload, session_mode);
     if (recommended) {
       highlights.push({
         highlight_id: `hl_asst_${lastReasoningEvent.event_id}`,
         kind: "assistance",
         label: "Assistance trajectory",
-        detail: `No mode transition was required; the latest risk recommendation remained ${recommended}.${fusionConfidence !== undefined ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}`,
+        detail: `No mode transition was required; the latest risk recommendation remained ${recommended}.${fusionConfidence !== undefined ? ` Fusion confidence ${fusionConfidence.toFixed(1)}/100.` : ""}${operateVisibleEffect ? ` Operate-visible effect: ${operateVisibleEffect}` : ""}`,
       });
     }
   }
@@ -1046,7 +1113,7 @@ export function buildCompletedSessionReview(params: BuildCompletedSessionReviewP
   const { session_id, session_mode, scenario, outcome, kpi_summary, events } = params;
 
   const milestones = buildMilestones(events);
-  const highlights = buildHighlights(events, outcome);
+  const highlights = buildHighlights(events, outcome, session_mode);
   const proof_points = buildProofPoints(events, session_mode);
   const keySource = selectKeyEvents(events, milestones, proof_points);
   const key_events: CompletedSessionReviewEvent[] = keySource.map((event, index) => {

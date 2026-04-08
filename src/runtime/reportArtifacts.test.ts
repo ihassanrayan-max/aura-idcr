@@ -86,8 +86,8 @@ function makeReview(session_id: string, session_mode: "baseline" | "adaptive"): 
         label: session_mode === "baseline" ? "Monitoring degraded" : "Monitoring active",
         detail:
           session_mode === "baseline"
-            ? "Monitoring stayed degraded with placeholder-only evidence."
-            : "Monitoring stayed active with live interaction evidence.",
+            ? "Monitoring stayed degraded with placeholder-only evidence, so Operate kept Human Monitoring 2.0 informational only."
+            : "Monitoring stayed active with live interaction evidence, so Operate could keep direct human-aware wording.",
       },
       {
         proof_id: `proof_support_${session_id}`,
@@ -95,8 +95,8 @@ function makeReview(session_id: string, session_mode: "baseline" | "adaptive"): 
         label: session_mode === "baseline" ? "Baseline posture fixed" : "Support shifted to Guided Support",
         detail:
           session_mode === "baseline"
-            ? "Baseline run kept Monitoring Support fixed."
-            : "Adaptive run shifted from Monitoring Support to Guided Support.",
+            ? "Baseline run kept Monitoring Support fixed. Operate kept the broader lane grouping."
+            : "Adaptive run shifted from Monitoring Support to Guided Support. Operate tightened pacing and watch emphasis.",
       },
     ],
   };
@@ -112,6 +112,7 @@ describe("report artifacts", () => {
     expect(reportA.provenance.derived_from).toBe("CompletedSessionReview");
     expect(reportA.proof_points).toEqual(review.proof_points);
     expect(reportA.summary_block.notable_points.join(" ")).toMatch(/Monitoring/);
+    expect(reportA.summary_block.notable_points.join(" ")).toMatch(/Operate/i);
     expect(buildReportFilename(reportA)).toContain("after_action.json");
   });
 
