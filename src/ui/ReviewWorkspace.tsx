@@ -16,12 +16,34 @@ const DEMO_KPI_IDS = new Set([
   "workload_peak_index",
 ]);
 
+function reviewEvidenceTone(kind: CompletedSessionReview["highlights"][number]["kind"]): "ok" | "neutral" | "alert" {
+  switch (kind) {
+    case "human_monitoring":
+    case "storyline":
+      return "neutral";
+    case "assistance":
+    case "workload":
+      return "ok";
+    case "intervention":
+    case "outcome":
+      return "alert";
+  }
+}
+
 function CompletedSessionReviewPanel(props: {
   review: CompletedSessionReview;
   canonicalEvents: SessionLogEvent[];
 }) {
   const { review, canonicalEvents } = props;
   const [eventIndex, setEventIndex] = useState(0);
+  const adaptiveEvidenceHighlights = review.highlights.filter(
+    (highlight) =>
+      highlight.kind === "assistance" || highlight.kind === "human_monitoring" || highlight.kind === "intervention",
+  );
+  const generalHighlights = review.highlights.filter(
+    (highlight) =>
+      highlight.kind !== "assistance" && highlight.kind !== "human_monitoring" && highlight.kind !== "intervention",
+  );
 
   useEffect(() => {
     setEventIndex(0);
@@ -80,9 +102,26 @@ function CompletedSessionReviewPanel(props: {
       </div>
 
       <div className="review-card">
+        <h3>Adaptive support evidence</h3>
+        <p>These proof points come from the canonical assistance, human-monitoring, and intervention highlights already assembled for the run.</p>
+        <div className="review-evidence-grid" data-testid="adaptive-evidence-panel">
+          {adaptiveEvidenceHighlights.map((highlight) => (
+            <article
+              key={highlight.highlight_id}
+              className={`review-evidence-card review-evidence-card--${reviewEvidenceTone(highlight.kind)}`}
+            >
+              <span className="utility-card__label">{highlight.kind.replace(/_/g, " ")}</span>
+              <strong>{highlight.label}</strong>
+              <p>{highlight.detail}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="review-card">
         <h3>Highlights</h3>
         <ul className="review-list">
-          {review.highlights.map((highlight) => (
+          {generalHighlights.map((highlight) => (
             <li key={highlight.highlight_id}>
               <strong>{highlight.label}</strong>: {highlight.detail}
             </li>

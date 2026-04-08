@@ -113,6 +113,11 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
   } = props;
 
   const lastValidation = snapshot.last_validation_result;
+  const orderedSupportSections = presentationPolicy.support_section_order
+    .map((sectionId) => model.supportSections.find((section) => section.id === sectionId))
+    .filter((section): section is NonNullable<(typeof model.supportSections)[number]> => Boolean(section));
+  const leadSupportSection = orderedSupportSections[0];
+  const supportingSections = orderedSupportSections.slice(1);
 
   return (
     <main className="workspace-canvas" data-testid="operate-workspace" id="app-workspace">
@@ -267,7 +272,7 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
         </SectionShell>
 
         <SectionShell
-          className="operate-actions"
+          className={cx("operate-actions", `operate-actions--${presentationPolicy.validator_priority}`)}
           title="Next Actions"
           subtitle="The first-response lane is the primary action surface. Manual intervention is intentionally secondary."
           data-tutorial-target="next-actions"
@@ -283,6 +288,40 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
           }
         >
           <p className="section-shell__subtitle">{snapshot.first_response_lane.prototype_notice}</p>
+          <article
+            className={cx(
+              "assistance-cue",
+              `assistance-cue--${model.assistanceCue.tone}`,
+              `assistance-cue--${presentationPolicy.validator_priority}`,
+            )}
+            data-testid="assistance-posture-cue"
+          >
+            <div className="section-divider">
+              <div>
+                <span className="utility-card__label">{model.assistanceCue.eyebrow}</span>
+                <strong>{model.assistanceCue.headline}</strong>
+              </div>
+            </div>
+            <p>{model.assistanceCue.body}</p>
+            <div className="pill-row">
+              {model.assistanceCue.pills.map((pill) => (
+                <StatusPill key={pill.label} tone={pill.tone}>
+                  {pill.label}
+                </StatusPill>
+              ))}
+            </div>
+          </article>
+
+          <div className="lane-guidance-grid">
+            {model.laneGuidanceCards.map((card) => (
+              <article key={card.id} className={cx("lane-guidance-card", `lane-guidance-card--${card.tone}`)}>
+                <span className="utility-card__label">{card.label}</span>
+                <strong>{card.headline}</strong>
+                <p>{card.body}</p>
+              </article>
+            ))}
+          </div>
+
           <div className="pill-row">
             {model.laneBadges.map((badge) => (
               <StatusPill key={badge.label} tone={badge.tone}>
@@ -500,9 +539,9 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
         </SectionShell>
 
         <SectionShell
-          className="operate-support"
+          className={cx("operate-support", presentationPolicy.support_panel_mode_class)}
           title="Support Posture"
-          subtitle="Combined risk, workload, confidence, top factors, and current mode effect stay compact."
+          subtitle="Active posture, recommendation, guardrails, and operator-control cues stay legible without hiding the rest of the shell."
           data-tutorial-target="support-posture"
         >
           <MetricStrip items={model.supportMetrics} className="metric-strip--compact" />
@@ -515,22 +554,56 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
             ))}
           </div>
 
-          <div className="support-note-grid">
-            {model.supportNotes.map((note) => (
-              <article key={note.label} className="utility-card">
-                <span className="utility-card__label">{note.label}</span>
-                <p>{note.body}</p>
+          <div className="support-layout">
+            {leadSupportSection ? (
+              <article
+                className={cx(
+                  "support-section-card",
+                  "support-section-card--lead",
+                  `support-section-card--${leadSupportSection.tone}`,
+                )}
+              >
+                <span className="utility-card__label">{leadSupportSection.label}</span>
+                <strong>{leadSupportSection.headline}</strong>
+                <p>{leadSupportSection.body}</p>
+                {leadSupportSection.meta ? <p className="lane-meta">{leadSupportSection.meta}</p> : null}
+                {leadSupportSection.pills && leadSupportSection.pills.length > 0 ? (
+                  <div className="pill-row">
+                    {leadSupportSection.pills.map((pill) => (
+                      <StatusPill key={`${leadSupportSection.id}-${pill.label}`} tone={pill.tone}>
+                        {pill.label}
+                      </StatusPill>
+                    ))}
+                  </div>
+                ) : null}
               </article>
-            ))}
+            ) : null}
+
+            <div className="support-section-grid">
+              {supportingSections.map((section) => (
+                <article key={section.id} className={cx("support-section-card", `support-section-card--${section.tone}`)}>
+                  <span className="utility-card__label">{section.label}</span>
+                  <strong>{section.headline}</strong>
+                  <p>{section.body}</p>
+                  {section.meta ? <p className="lane-meta">{section.meta}</p> : null}
+                  {section.pills && section.pills.length > 0 ? (
+                    <div className="pill-row">
+                      {section.pills.map((pill) => (
+                        <StatusPill key={`${section.id}-${pill.label}`} tone={pill.tone}>
+                          {pill.label}
+                        </StatusPill>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </div>
 
-          {model.supportCaution ? (
-            <div className="support-caution">
-              <strong>Degraded-confidence caveat</strong>
-              <p>{model.supportCaution}</p>
-            </div>
-          ) : null}
-
+          <div className="section-divider">
+            <strong>Top posture drivers</strong>
+            <span>{snapshot.combined_risk.combined_risk_band} risk band</span>
+          </div>
           <div className="factor-list">
             {model.topFactors.map((factor) => (
               <article key={factor.id} className="factor-card">

@@ -129,6 +129,7 @@ describe("buildPresentationPolicy", () => {
     expect(policy.validator_should_surface).toBe(true);
     expect(policy.pending_confirmation_intro).toMatch(/Guided Support is asking/i);
     expect(policy.procedure_item_order).toBe("emphasized_first");
+    expect(policy.support_section_order.slice(0, 3)).toEqual(["mode", "watch", "effect"]);
   });
 
   it("makes hard prevents most prominent in protected response", () => {

@@ -722,21 +722,33 @@ describe("AuraSessionStore", () => {
     expect(String(lastTransitionPayload.trigger_reason)).toMatch(/Escalated immediately/i);
   });
 
-  it("renders the compact support-state risk outputs in the HMI", () => {
+  it("renders Packet 5 posture legibility cues in the HMI", () => {
     const store = new AuraSessionStore({ session_index: 18, tick_duration_sec: 5 });
     render(<App store={store} autoRun={false} />);
 
     expect(screen.getByText("Support Posture")).toBeInTheDocument();
-    expect(screen.getByText("Workload")).toBeInTheDocument();
-    expect(screen.getByText("Attention stability")).toBeInTheDocument();
+    expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getAllByText(/Active posture/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Risk recommendation/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/What now/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Mode effect/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Operator still controls/i)).toBeInTheDocument();
+    expect(screen.getByText(/Why this posture/i)).toBeInTheDocument();
+    expect(screen.getByText(/Top posture drivers/i)).toBeInTheDocument();
     expect(screen.getByText("Signal confidence")).toBeInTheDocument();
-    expect(screen.getByText(/Why risk is here now/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Confidence caveat/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Mode effect now/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Watch next/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Combined risk/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Assistance mode/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Critical visibility guardrails active/i).length).toBeGreaterThan(0);
+  });
+
+  it("keeps the baseline operator path calm and non-adaptive", () => {
+    const store = new AuraSessionStore({ session_index: 118, tick_duration_sec: 5, session_mode: "baseline" });
+    render(<App store={store} autoRun={false} />);
+
+    expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getByText(/Baseline run keeps monitoring only/i)).toBeInTheDocument();
+    expect(screen.getByText(/Baseline posture locked/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Baseline session/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Guided Support is active now/i)).not.toBeInTheDocument();
   });
 
   it("renders the bounded soft-warning confirmation flow inside the existing shell", () => {
@@ -919,6 +931,10 @@ describe("AuraSessionStore", () => {
     expect(screen.getAllByText(/Protected validation active/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Protected Response is elevating this validation result/i)).toBeInTheDocument();
     expect(screen.getByText(/Last action validation/i)).toBeInTheDocument();
+    expect(screen.getByTestId("assistance-posture-cue")).toBeInTheDocument();
+    expect(screen.getAllByText(/Protected Response is active now/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Critical variables and pinned alarms stay surfaced/i)).toBeInTheDocument();
+    expect(screen.getByText(/Operator authority stays with you/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Next Actions/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Storyline Board/i })).toBeInTheDocument();
   });
@@ -929,6 +945,10 @@ describe("AuraSessionStore", () => {
     openReviewWorkspace();
     expect(screen.getByTestId("completed-session-review")).toBeInTheDocument();
     expect(screen.getByTestId("kpi-summary-block")).toBeInTheDocument();
+    expect(screen.getByTestId("adaptive-evidence-panel")).toBeInTheDocument();
+    expect(screen.getByText(/Adaptive support evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/Assistance trajectory/i)).toBeInTheDocument();
+    expect(screen.getByText(/Human-monitoring posture/i)).toBeInTheDocument();
     expect(screen.getByText(/Completed run summary/i)).toBeInTheDocument();
   });
 

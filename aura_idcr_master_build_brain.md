@@ -1340,6 +1340,29 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 5 adaptive legibility session
+- Task worked on: Implemented Packet 5 as a bounded presentation-layer legibility pass so adaptive posture, watch-now guidance, operator authority, and review proof are visibly readable on top of the existing canonical Packet 4 outputs
+- Status: Done
+- What changed:
+  - Updated `src/ui/viewModel.ts` with a UI-local Packet 5 assistance-legibility model derived only from the current canonical snapshots, adding an explicit assistance cue, lane-guidance cards, reordered support sections, and clearer active-vs-recommended posture wording without introducing a new store path, contract, or adaptation state
+  - Reworked `src/ui/OperateWorkspace.tsx` so the Next Actions region now shows a visible posture cue plus watch-now/mode-effect guidance, and the Support Posture region now renders ordered posture cards driven by `presentationPolicy.support_section_order` instead of a compact note dump while keeping critical variables, pinned alarms, validator banners, and manual controls in their existing bounded regions
+  - Added restrained Packet 5 styling in `src/styles/workspaces.css` for posture cue hierarchy, mode-sensitive support cards, validator-priority emphasis, and review evidence cards using the existing engineering palette and without broad shell redesign or decorative dependency churn
+  - Updated `src/ui/ReviewWorkspace.tsx` so completed-run Review now surfaces canonical adaptive proof more explicitly through an `Adaptive support evidence` panel that promotes the already-generated assistance, human-monitoring, and intervention highlights instead of requiring raw payload inspection
+  - Extended verification in `src/state/sessionStore.test.tsx` and `src/runtime/presentationPolicy.test.ts` so the repo now proves Packet 5 posture legibility renders in Operate, baseline stays calm/non-adaptive, protected-response emphasis remains bounded without hiding core regions, Review surfaces adaptive proof directly, and guided support still drives the intended support-section ordering
+  - Re-verified with passing `npm test` and `npm run build`; the repo is green at 117 passing tests and the existing Vite chunk-size warning for the lazy webcam bundle remains unchanged
+- What remains:
+  - Packet 5 intentionally does not change `humanMonitoring`, `combinedRisk`, validator decision logic, session-store publication order, canonical logging, or scenario progression
+  - No new contracts, event types, review artifacts, or adaptive animations were added; this packet stays strictly in derived view models, existing workspaces, CSS, and render tests
+  - The lazy MediaPipe/webcam bundle still triggers the pre-existing Vite large-chunk warning, but Packet 5 did not broaden that footprint and the production build still passes
+- Blockers:
+  - None in-repo after verification
+- Next recommended step:
+  - Packet 6 can build demo/report polish on top of the new Review evidence prominence and the clearer Operate posture language without reworking the canonical monitoring, fusion, or support-policy pipeline
+  - If future UI polish extends adaptive emphasis further, keep it derived from `combined_risk`, `support_policy`, `support_refinement`, and `presentationPolicy` rather than introducing a parallel adaptation layer
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.
