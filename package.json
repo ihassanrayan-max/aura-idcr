@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "AURA-IDCR Phase 1 first end-to-end slice.",
+  "description": "AURA-IDCR — Adaptive User-state Risk-aware Integrated Digital Control Room prototype.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
