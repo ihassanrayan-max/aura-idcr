@@ -6,9 +6,9 @@ type BuildOperatorStateParams = {
 };
 
 export function buildOperatorStateSnapshot(params: BuildOperatorStateParams): OperatorStateSnapshot {
-  const compatibility_observation = params.human_monitoring.compatibility_observation;
+  const interpretation_input = params.human_monitoring.interpretation_input;
 
-  if (!compatibility_observation) {
+  if (!interpretation_input) {
     return {
       workload_index: 0,
       attention_stability_index: 100,
@@ -21,11 +21,11 @@ export function buildOperatorStateSnapshot(params: BuildOperatorStateParams): Op
   }
 
   return {
-    workload_index: compatibility_observation.workload_index,
-    attention_stability_index: compatibility_observation.attention_stability_index,
-    signal_confidence: compatibility_observation.signal_confidence,
-    degraded_mode_active: compatibility_observation.degraded_mode_active,
-    degraded_mode_reason: compatibility_observation.degraded_mode_reason,
-    observation_window_ticks: compatibility_observation.observation_window_ticks,
+    workload_index: interpretation_input.workload_index,
+    attention_stability_index: interpretation_input.attention_stability_index,
+    signal_confidence: interpretation_input.signal_confidence,
+    degraded_mode_active: interpretation_input.degraded_mode_active,
+    degraded_mode_reason: interpretation_input.degraded_mode_reason,
+    observation_window_ticks: interpretation_input.observation_window_ticks,
   };
 }

@@ -1,5 +1,11 @@
-import type { AlarmIntelligenceSnapshot, AlarmSet, ExecutedAction, PlantStateSnapshot, ReasoningSnapshot } from "../contracts/aura";
-import { buildHumanMonitoringSnapshot, buildLegacyRuntimePlaceholderSource } from "./humanMonitoring";
+import type {
+  AlarmIntelligenceSnapshot,
+  AlarmSet,
+  ExecutedAction,
+  PlantStateSnapshot,
+  ReasoningSnapshot,
+} from "../contracts/aura";
+import { evaluateHumanMonitoring, createHumanMonitoringRuntimeState } from "./humanMonitoring";
 import { buildOperatorStateSnapshot } from "./operatorState";
 
 const basePlantState: PlantStateSnapshot = {
@@ -72,7 +78,8 @@ function buildAlarmIntelligence(activeAlarmCount = 3): AlarmIntelligenceSnapshot
   return {
     visible_alarm_card_count: Math.max(Math.min(activeAlarmCount, 2), 0),
     grouped_alarm_count: Math.max(Math.min(activeAlarmCount, 2), 0),
-    compression_ratio: activeAlarmCount === 0 ? 0 : Number((activeAlarmCount / Math.max(Math.min(activeAlarmCount, 2), 1)).toFixed(2)),
+    compression_ratio:
+      activeAlarmCount === 0 ? 0 : Number((activeAlarmCount / Math.max(Math.min(activeAlarmCount, 2), 1)).toFixed(2)),
     dominant_cluster_id: activeAlarmCount > 0 ? "cluster_feedwater_inventory" : undefined,
     clusters: [],
   };
@@ -129,7 +136,7 @@ function buildExecutedAction(sim_time_sec: number): ExecutedAction {
 
 describe("buildOperatorStateSnapshot", () => {
   it("deterministically enters degraded mode when the observation window and interaction evidence are thin", () => {
-    const placeholder = buildLegacyRuntimePlaceholderSource({
+    const monitoring = evaluateHumanMonitoring({
       sim_time_sec: 0,
       tick_index: 0,
       tick_duration_sec: 5,
@@ -141,16 +148,10 @@ describe("buildOperatorStateSnapshot", () => {
         ranked_hypotheses: [],
         stable_for_ticks: 0,
       }),
-      executed_actions: [] as ExecutedAction[],
+      executed_actions: [],
       lane_changed: false,
-    });
-    const monitoring = buildHumanMonitoringSnapshot({
-      sim_time_sec: 0,
-      tick_index: 0,
-      tick_duration_sec: 5,
-      sources: [placeholder.source],
-      compatibility_observation: placeholder.compatibility_observation,
-    });
+      runtime_state: createHumanMonitoringRuntimeState(),
+    }).snapshot;
 
     const first = buildOperatorStateSnapshot({ human_monitoring: monitoring });
     const second = buildOperatorStateSnapshot({ human_monitoring: monitoring });
@@ -163,7 +164,7 @@ describe("buildOperatorStateSnapshot", () => {
   });
 
   it("recovers nominal confidence deterministically once history and interaction evidence exist", () => {
-    const placeholder = buildLegacyRuntimePlaceholderSource({
+    const monitoring = evaluateHumanMonitoring({
       sim_time_sec: 55,
       tick_index: 8,
       tick_duration_sec: 5,
@@ -173,14 +174,8 @@ describe("buildOperatorStateSnapshot", () => {
       reasoning_snapshot: buildReasoningSnapshot(),
       executed_actions: [buildExecutedAction(35)],
       lane_changed: false,
-    });
-    const monitoring = buildHumanMonitoringSnapshot({
-      sim_time_sec: 55,
-      tick_index: 8,
-      tick_duration_sec: 5,
-      sources: [placeholder.source],
-      compatibility_observation: placeholder.compatibility_observation,
-    });
+      runtime_state: createHumanMonitoringRuntimeState(),
+    }).snapshot;
 
     const snapshot = buildOperatorStateSnapshot({ human_monitoring: monitoring });
 
@@ -192,13 +187,20 @@ describe("buildOperatorStateSnapshot", () => {
     expect(snapshot.attention_stability_index).toBeLessThanOrEqual(100);
   });
 
-  it("falls back cleanly when no compatibility observation is available", () => {
-    const monitoring = buildHumanMonitoringSnapshot({
+  it("falls back cleanly when no interpretation input is available", () => {
+    const monitoring = evaluateHumanMonitoring({
       sim_time_sec: 30,
       tick_index: 6,
       tick_duration_sec: 5,
-      sources: [],
-    });
+      plant_state: basePlantState,
+      alarm_set: buildAlarmSet(1),
+      alarm_intelligence: buildAlarmIntelligence(1),
+      reasoning_snapshot: buildReasoningSnapshot(),
+      executed_actions: [],
+      lane_changed: false,
+      runtime_state: createHumanMonitoringRuntimeState(),
+      adapters: [],
+    }).snapshot;
 
     const snapshot = buildOperatorStateSnapshot({ human_monitoring: monitoring });
 

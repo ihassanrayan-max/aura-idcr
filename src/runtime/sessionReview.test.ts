@@ -88,6 +88,10 @@ describe("buildCompletedSessionReview", () => {
     expect(ka.highlights.some((h) => h.kind === "outcome")).toBe(true);
     expect(ka.key_events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
     expect(ka.highlights.some((highlight) => highlight.kind === "human_monitoring")).toBe(true);
+    expect(
+      ka.key_events.find((event) => event.event_type === "human_monitoring_snapshot_recorded")?.summary,
+    ).toMatch(/Contributing sources:/i);
+    expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(/freshness/i);
   });
 
   it("always includes terminal key events at the end of the key timeline", () => {

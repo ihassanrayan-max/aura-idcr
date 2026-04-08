@@ -94,6 +94,7 @@ function summarizeStore(store: AuraSessionStore) {
     human_monitoring: {
       snapshot_id: snapshot.human_monitoring.snapshot_id,
       mode: snapshot.human_monitoring.mode,
+      freshness_status: snapshot.human_monitoring.freshness_status,
       aggregate_confidence: snapshot.human_monitoring.aggregate_confidence,
       degraded_state_active: snapshot.human_monitoring.degraded_state_active,
       degraded_state_reason: snapshot.human_monitoring.degraded_state_reason,
@@ -102,13 +103,19 @@ function summarizeStore(store: AuraSessionStore) {
       window_duration_sec: snapshot.human_monitoring.window_duration_sec,
       connected_source_count: snapshot.human_monitoring.connected_source_count,
       active_source_count: snapshot.human_monitoring.active_source_count,
+      current_source_count: snapshot.human_monitoring.current_source_count,
+      degraded_source_count: snapshot.human_monitoring.degraded_source_count,
+      stale_source_count: snapshot.human_monitoring.stale_source_count,
+      contributing_source_count: snapshot.human_monitoring.contributing_source_count,
       sources: snapshot.human_monitoring.sources.map((source) => ({
         source_id: source.source_id,
         source_kind: source.source_kind,
         availability: source.availability,
+        freshness_status: source.freshness_status,
         confidence: source.confidence,
+        contributes_to_aggregate: source.contributes_to_aggregate,
       })),
-      compatibility_observation: snapshot.human_monitoring.compatibility_observation,
+      interpretation_input: snapshot.human_monitoring.interpretation_input,
     },
     operator_state: snapshot.operator_state,
     combined_risk: {
@@ -535,9 +542,12 @@ describe("AuraSessionStore", () => {
 
     expect(monitoringEvents.length).toBeGreaterThan(0);
     expect(lastMonitoringPayload.mode).toBe(snapshot.human_monitoring.mode);
+    expect(lastMonitoringPayload.freshness_status).toBe(snapshot.human_monitoring.freshness_status);
     expect(lastMonitoringPayload.aggregate_confidence).toBe(snapshot.human_monitoring.aggregate_confidence);
     expect(lastMonitoringPayload.connected_source_count).toBe(snapshot.human_monitoring.connected_source_count);
+    expect(lastMonitoringPayload.contributing_source_count).toBe(snapshot.human_monitoring.contributing_source_count);
     expect(lastMonitoringPayload.sources).toBeDefined();
+    expect(lastMonitoringPayload.interpretation_input).toBeDefined();
     expect(operatorEvents.length).toBeGreaterThan(0);
     expect(lastOperatorPayload.workload_index).toBe(snapshot.operator_state.workload_index);
     expect(lastOperatorPayload.attention_stability_index).toBe(snapshot.operator_state.attention_stability_index);
@@ -569,6 +579,7 @@ describe("AuraSessionStore", () => {
 
     expect(initialSnapshot.human_monitoring.mode).toBe("placeholder_compatibility");
     expect(initialSnapshot.human_monitoring.sources).toHaveLength(1);
+    expect(initialSnapshot.human_monitoring.interpretation_input?.provenance).toBe("legacy_runtime_placeholder");
     expect(initialSnapshot.events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
 
     store.advanceTick();

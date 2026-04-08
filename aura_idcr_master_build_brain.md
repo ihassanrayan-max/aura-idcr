@@ -1246,6 +1246,29 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 Packet 1 Prompt B human-monitoring hardening session
+- Task worked on: Finished Packet 1 by hardening the human-monitoring foundation into a source-ready canonical pipeline without adding real telemetry heuristics
+- Status: Done
+- What changed:
+  - Reworked `src/runtime/humanMonitoring.ts` from a snapshot helper into the canonical monitoring evaluator with explicit source-adapter contracts, runtime window state, freshness semantics, aggregate contribution rules, and bounded rolling-window metadata while keeping the existing legacy placeholder as the default registered adapter
+  - Extended `src/contracts/aura.ts` so human-monitoring snapshots now carry explicit freshness, source timing/staleness fields, contributing-source counts, and a generic `interpretation_input` bridge for downstream operator-state interpretation instead of the old placeholder-only compatibility shape
+  - Updated `src/runtime/operatorState.ts` and `src/state/sessionStore.ts` so operator-state outputs, state snapshots, and canonical logs are all derived from the same `evaluateHumanMonitoring(...)` path; the store no longer builds placeholder monitoring data ad hoc outside the foundation
+  - Tightened `src/runtime/sessionReview.ts` so review artifacts now summarize canonical monitoring freshness and contributing-source posture rather than only placeholder mode text
+  - Added focused verification in `src/runtime/humanMonitoring.test.ts`, `src/runtime/operatorState.test.ts`, `src/runtime/sessionReview.test.ts`, and `src/state/sessionStore.test.tsx` covering deterministic placeholder compatibility, unavailable handling, stale-source degradation, multi-source readiness, and aligned state/log/review behavior through the canonical monitoring path
+  - Re-verified the slice with `npm test`, `npm run build`, local dev-server startup on `http://127.0.0.1:4173`, and headless browser screenshots after `agent-browser` was found to be unavailable on this machine
+- What remains:
+  - No real interaction telemetry heuristics, webcam/CV ingestion, HPSN-Lite fusion, or adaptive UI mode changes were added in this Prompt B slice
+  - The only production monitoring adapter still active is the bounded legacy placeholder adapter, now routed through the canonical source pipeline so Packet 2 can attach real interaction telemetry without architectural rework
+  - Temporary `.tmp-edge*` browser-profile folders are being kept locally for now as verification artifacts only; before project closeout they must be deleted from the local workspace, removed from git tracking/history if ever committed, and confirmed absent from the remote repository
+- Blockers:
+  - The `agent-browser` CLI requested by the verification skill is not installed in this environment, so runtime/browser proof used the already-approved headless Edge screenshot flow instead
+- Next recommended step:
+  - Packet 2 can now add real interaction-telemetry source adapters inside `src/runtime/humanMonitoring.ts` and let the existing canonical evaluator feed `operatorState`, logging, review, and downstream reasoning unchanged
+  - Keep reminding future sessions that `.tmp-edge*` is temporary verification residue and must be cleaned out of local + remote repo state before final delivery
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

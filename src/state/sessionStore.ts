@@ -56,8 +56,9 @@ import {
 } from "../runtime/plantTwin";
 import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
 import {
-  buildHumanMonitoringSnapshot,
-  buildLegacyRuntimePlaceholderSource,
+  createHumanMonitoringRuntimeState,
+  evaluateHumanMonitoring,
+  type HumanMonitoringRuntimeState,
 } from "../runtime/humanMonitoring";
 import { buildOperatorStateSnapshot } from "../runtime/operatorState";
 import { buildFirstResponseLane } from "../runtime/procedureLane";
@@ -149,6 +150,7 @@ function summarizeHumanMonitoring(human_monitoring: HumanMonitoringSnapshot) {
   return {
     snapshot_id: human_monitoring.snapshot_id,
     mode: human_monitoring.mode,
+    freshness_status: human_monitoring.freshness_status,
     aggregate_confidence: human_monitoring.aggregate_confidence,
     degraded_state_active: human_monitoring.degraded_state_active,
     degraded_state_reason: human_monitoring.degraded_state_reason,
@@ -159,27 +161,38 @@ function summarizeHumanMonitoring(human_monitoring: HumanMonitoringSnapshot) {
     window_duration_sec: human_monitoring.window_duration_sec,
     connected_source_count: human_monitoring.connected_source_count,
     active_source_count: human_monitoring.active_source_count,
+    current_source_count: human_monitoring.current_source_count,
+    degraded_source_count: human_monitoring.degraded_source_count,
+    stale_source_count: human_monitoring.stale_source_count,
+    contributing_source_count: human_monitoring.contributing_source_count,
     sources: human_monitoring.sources.map((source) => ({
       source_id: source.source_id,
       source_kind: source.source_kind,
       availability: source.availability,
+      freshness_status: source.freshness_status,
       confidence: source.confidence,
       status_note: source.status_note,
+      latest_observation_age_sec: source.latest_observation_age_sec,
       last_observation_sim_time_sec: source.last_observation_sim_time_sec,
       oldest_observation_sim_time_sec: source.oldest_observation_sim_time_sec,
+      expected_update_interval_sec: source.expected_update_interval_sec,
+      stale_after_sec: source.stale_after_sec,
       window_tick_span: source.window_tick_span,
+      window_duration_sec: source.window_duration_sec,
       sample_count_in_window: source.sample_count_in_window,
+      contributes_to_aggregate: source.contributes_to_aggregate,
     })),
-    compatibility_observation: human_monitoring.compatibility_observation
+    interpretation_input: human_monitoring.interpretation_input
       ? {
-          workload_index: human_monitoring.compatibility_observation.workload_index,
-          attention_stability_index: human_monitoring.compatibility_observation.attention_stability_index,
-          signal_confidence: human_monitoring.compatibility_observation.signal_confidence,
-          degraded_mode_active: human_monitoring.compatibility_observation.degraded_mode_active,
-          degraded_mode_reason: human_monitoring.compatibility_observation.degraded_mode_reason,
-          observation_window_ticks: human_monitoring.compatibility_observation.observation_window_ticks,
-          provenance: human_monitoring.compatibility_observation.provenance,
-          compatibility_note: human_monitoring.compatibility_observation.compatibility_note,
+          workload_index: human_monitoring.interpretation_input.workload_index,
+          attention_stability_index: human_monitoring.interpretation_input.attention_stability_index,
+          signal_confidence: human_monitoring.interpretation_input.signal_confidence,
+          degraded_mode_active: human_monitoring.interpretation_input.degraded_mode_active,
+          degraded_mode_reason: human_monitoring.interpretation_input.degraded_mode_reason,
+          observation_window_ticks: human_monitoring.interpretation_input.observation_window_ticks,
+          contributing_source_ids: human_monitoring.interpretation_input.contributing_source_ids,
+          provenance: human_monitoring.interpretation_input.provenance,
+          interpretation_note: human_monitoring.interpretation_input.interpretation_note,
         }
       : undefined,
   };
@@ -244,6 +257,7 @@ export class AuraSessionStore {
   private scenario_runtime_state: ScenarioRuntimeState;
   private alarm_runtime_state: AlarmRuntimeState;
   private reasoning_runtime_state: ReasoningRuntimeState;
+  private human_monitoring_runtime_state: HumanMonitoringRuntimeState;
   private plant_internal_state: PlantTwinInternalState;
   private support_mode_runtime_state = createSupportModeRuntimeState();
   private snapshot: SessionSnapshot;
@@ -284,6 +298,7 @@ export class AuraSessionStore {
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
     this.reasoning_runtime_state = createReasoningRuntimeState();
+    this.human_monitoring_runtime_state = createHumanMonitoringRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
     this.snapshot = this.createInitialSnapshot();
   }
@@ -344,6 +359,7 @@ export class AuraSessionStore {
     support_mode: SupportMode;
     support_policy: SupportPolicySnapshot;
     support_refinement: SupportRefinementSnapshot;
+    human_monitoring_runtime_state: HumanMonitoringRuntimeState;
     support_mode_runtime_state: ReturnType<typeof createSupportModeRuntimeState>;
     lane_changed: boolean;
   } {
@@ -360,7 +376,7 @@ export class AuraSessionStore {
           phase2_state.reasoning_snapshot.dominant_hypothesis_id
       : false;
 
-    const legacy_placeholder = buildLegacyRuntimePlaceholderSource({
+    const human_monitoring_result = evaluateHumanMonitoring({
       sim_time_sec: params.sim_time_sec,
       tick_index: params.tick_index,
       tick_duration_sec: this.tick_duration_sec,
@@ -370,16 +386,10 @@ export class AuraSessionStore {
       reasoning_snapshot: phase2_state.reasoning_snapshot,
       executed_actions: params.executed_actions,
       lane_changed,
-    });
-    const human_monitoring = buildHumanMonitoringSnapshot({
-      sim_time_sec: params.sim_time_sec,
-      tick_index: params.tick_index,
-      tick_duration_sec: this.tick_duration_sec,
-      sources: [legacy_placeholder.source],
-      compatibility_observation: legacy_placeholder.compatibility_observation,
+      runtime_state: this.human_monitoring_runtime_state,
     });
     const operator_state = buildOperatorStateSnapshot({
-      human_monitoring,
+      human_monitoring: human_monitoring_result.snapshot,
     });
 
     const combined_risk = buildCombinedRiskSnapshot({
@@ -417,12 +427,13 @@ export class AuraSessionStore {
     return {
       ...phase2_state,
       first_response_lane: support_refinement_result.first_response_lane,
-      human_monitoring,
+      human_monitoring: human_monitoring_result.snapshot,
       operator_state,
       combined_risk,
       support_mode: support_mode_result.support_mode,
       support_policy: support_mode_result.support_policy,
       support_refinement: support_refinement_result.support_refinement,
+      human_monitoring_runtime_state: human_monitoring_result.runtime_state,
       support_mode_runtime_state: support_mode_result.runtime_state,
       lane_changed,
     };
@@ -537,6 +548,7 @@ export class AuraSessionStore {
       allowed_action_ids: initial_phase.allowed_action_ids ?? [],
       executed_actions: [],
     });
+    this.human_monitoring_runtime_state = phase3_state.human_monitoring_runtime_state;
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
     const human_monitoring_event = this.logger.append({
       sim_time_sec: 0,
@@ -888,6 +900,7 @@ export class AuraSessionStore {
     this.scenario_runtime_state = createScenarioRuntimeState();
     this.alarm_runtime_state = createAlarmRuntimeState();
     this.reasoning_runtime_state = createReasoningRuntimeState();
+    this.human_monitoring_runtime_state = createHumanMonitoringRuntimeState();
     this.plant_internal_state = createPlantTwinInternalState(this.scenario.initial_plant_state);
     this.support_mode_runtime_state = createSupportModeRuntimeState();
     this.snapshot = this.createInitialSnapshot();
@@ -1366,6 +1379,7 @@ export class AuraSessionStore {
       executed_actions: this.snapshot.executed_actions,
       previous_snapshot: this.snapshot,
     });
+    this.human_monitoring_runtime_state = phase3_state.human_monitoring_runtime_state;
     this.support_mode_runtime_state = phase3_state.support_mode_runtime_state;
 
     const plant_tick: PlantTick = {

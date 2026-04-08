@@ -315,32 +315,42 @@ export type HumanMonitoringSourceAvailability =
   | "unavailable"
   | "not_connected";
 
-export type HumanMonitoringCompatibilityObservation = {
+export type HumanMonitoringFreshnessStatus = "current" | "aging" | "stale" | "no_observations";
+
+export type HumanMonitoringInterpretationInput = {
   workload_index: number;
   attention_stability_index: number;
   signal_confidence: number;
   degraded_mode_active: boolean;
   degraded_mode_reason: string;
   observation_window_ticks: number;
-  provenance: "legacy_runtime_placeholder";
-  compatibility_note: string;
+  contributing_source_ids: string[];
+  provenance: "legacy_runtime_placeholder" | "canonical_source_pipeline";
+  interpretation_note: string;
 };
 
 export type HumanMonitoringSourceSnapshot = {
   source_id: string;
   source_kind: HumanMonitoringSourceKind;
   availability: HumanMonitoringSourceAvailability;
+  freshness_status: HumanMonitoringFreshnessStatus;
   confidence: number;
   status_note: string;
+  latest_observation_age_sec?: number;
   last_observation_sim_time_sec?: number;
   oldest_observation_sim_time_sec?: number;
+  expected_update_interval_sec: number;
+  stale_after_sec: number;
   window_tick_span: number;
+  window_duration_sec: number;
   sample_count_in_window: number;
+  contributes_to_aggregate: boolean;
 };
 
 export type HumanMonitoringSnapshot = {
   snapshot_id: string;
   mode: HumanMonitoringMode;
+  freshness_status: HumanMonitoringFreshnessStatus;
   aggregate_confidence: number;
   degraded_state_active: boolean;
   degraded_state_reason: string;
@@ -351,8 +361,12 @@ export type HumanMonitoringSnapshot = {
   window_duration_sec: number;
   connected_source_count: number;
   active_source_count: number;
+  current_source_count: number;
+  degraded_source_count: number;
+  stale_source_count: number;
+  contributing_source_count: number;
   sources: HumanMonitoringSourceSnapshot[];
-  compatibility_observation?: HumanMonitoringCompatibilityObservation;
+  interpretation_input?: HumanMonitoringInterpretationInput;
 };
 
 export type OperatorStateSnapshot = {
