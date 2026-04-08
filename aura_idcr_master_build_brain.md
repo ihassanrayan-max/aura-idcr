@@ -1269,6 +1269,31 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 2 interaction telemetry monitoring session
+- Task worked on: Implemented the first real human-monitoring source by adding interaction telemetry through the canonical monitoring pipeline without disturbing the deterministic plant/scenario demo backbone
+- Status: Done
+- What changed:
+  - Extended `src/contracts/aura.ts` with additive interaction-telemetry event/workspace/UI-region record types so practical operator interaction evidence can be represented cleanly without widening the public monitoring snapshot shape
+  - Updated `src/runtime/humanMonitoring.ts` so `HumanMonitoringRuntimeState` now owns a bounded interaction-telemetry buffer with suppression control for tutorial flow, added record/coalescing helpers, and registered a real `interaction_telemetry` source adapter beside the legacy placeholder adapter
+  - Implemented stable, bounded, non-medical interaction heuristics inside `src/runtime/humanMonitoring.ts` for hesitation pressure, interaction latency trend, reversal/oscillation pressure, inactivity during meaningful moments, burst/confusion pressure, and navigation instability, all mapped into the existing canonical `interpretation_input`
+  - Updated `src/state/sessionStore.ts` so action requests, confirmations, confirmation dismissals, supervisor-review requests/decisions, and App-originated workspace/runtime/manual-adjustment interactions all feed the same session-local telemetry buffer while `sessionStore` continues deriving operator-state only through `evaluateHumanMonitoring(...)`
+  - Updated `src/App.tsx` to record workspace switches, runtime controls, alarm-cluster inspection, and manual slider adjustments through new store telemetry hooks while suppressing tutorial-only interactions so onboarding does not pollute monitoring evidence
+  - Tightened `src/runtime/sessionReview.ts` so completed-run human-monitoring highlights now explicitly call out when interaction telemetry contributed live evidence during the run even if the final snapshot later degraded back to placeholder fallback after inactivity
+  - Added focused verification in `src/runtime/humanMonitoring.test.ts`, updated `src/runtime/sessionReview.test.ts`, and extended `src/state/sessionStore.test.tsx` for live interaction contribution, sparse/stale degradation, UI-driven telemetry capture, canonical log alignment, and review-artifact evidence
+- What remains:
+  - Packet 2 still intentionally does not add webcam/CV ingestion, HPSN-Lite plant+human fusion, adaptive UI mode switching, or any broader frontend redesign
+  - The legacy placeholder adapter remains in place as the bounded fallback when real interaction evidence is sparse or stale; Packet 3 should treat that as expected compatibility behavior rather than as unfinished wiring
+  - Final snapshots often return to `placeholder_compatibility` after long post-action inactivity because the interaction source is correctly allowed to age/stale; later fusion/reasoning work should use the canonical freshness/degraded semantics rather than assuming live telemetry stays current forever
+- Blockers:
+  - `agent-browser` is still unavailable in this environment, so browser verification continued to use the existing approved headless Edge screenshot path
+  - A direct `tsx` deterministic verification script hit a sandbox `spawn EPERM` on `esbuild`; rerunning that check outside the sandbox succeeded and confirmed all three deterministic scenarios still complete successfully with live interaction telemetry contribution during the run
+- Next recommended step:
+  - Packet 3 can now build plant+human fusion and higher-level reasoning on top of the canonical monitoring freshness/source semantics without reworking the Packet 2 telemetry path
+  - If future operator-behavior packets need richer focus/navigation evidence, extend the same session-local interaction telemetry buffer instead of creating downstream ad hoc monitoring logic
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

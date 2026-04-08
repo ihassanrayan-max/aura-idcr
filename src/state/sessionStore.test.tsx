@@ -528,7 +528,16 @@ describe("AuraSessionStore", () => {
     expect(finalOperatorState.workload_index).toBeGreaterThanOrEqual(0);
     expect(finalOperatorState.workload_index).toBeLessThanOrEqual(100);
     expect(finalHumanMonitoring.mode).toBe("placeholder_compatibility");
-    expect(finalHumanMonitoring.connected_source_count).toBe(1);
+    expect(finalHumanMonitoring.connected_source_count).toBe(2);
+    expect(
+      successfulStore
+        .getSnapshot()
+        .events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded")
+        .some((event) => {
+          const payload = event.payload as Record<string, unknown>;
+          return payload.mode === "live_sources";
+        }),
+    ).toBe(true);
   });
 
   it("publishes inspectable combined-risk outputs alongside the Phase 2 reasoning snapshot", () => {
@@ -578,8 +587,11 @@ describe("AuraSessionStore", () => {
     const initialSnapshot = store.getSnapshot();
 
     expect(initialSnapshot.human_monitoring.mode).toBe("placeholder_compatibility");
-    expect(initialSnapshot.human_monitoring.sources).toHaveLength(1);
+    expect(initialSnapshot.human_monitoring.sources).toHaveLength(2);
     expect(initialSnapshot.human_monitoring.interpretation_input?.provenance).toBe("legacy_runtime_placeholder");
+    expect(
+      initialSnapshot.human_monitoring.sources.some((source) => source.source_kind === "interaction_telemetry"),
+    ).toBe(true);
     expect(initialSnapshot.events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
 
     store.advanceTick();
@@ -590,6 +602,64 @@ describe("AuraSessionStore", () => {
 
     expect(nextSnapshot.human_monitoring.snapshot_id).toBe("hm_t0001");
     expect(nextSnapshot.plant_tick.source_event_ids).toContain(latestMonitoringEvent?.event_id);
+  });
+
+  it("lets real UI interactions contribute through the canonical interaction telemetry source on the next tick", () => {
+    const store = new AuraSessionStore({ session_index: 321, tick_duration_sec: 5 });
+    render(<App store={store} autoRun={false} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /Operate/i }));
+    fireEvent.change(screen.getByLabelText(/Feedwater Demand Target/i), {
+      target: { value: "74" },
+    });
+
+    act(() => {
+      store.advanceTick();
+    });
+
+    const snapshot = store.getSnapshot();
+    const interactionSource = snapshot.human_monitoring.sources.find(
+      (source) => source.source_kind === "interaction_telemetry",
+    );
+
+    expect(snapshot.human_monitoring.mode).toBe("live_sources");
+    expect(snapshot.human_monitoring.interpretation_input?.contributing_source_ids).toContain(
+      "interaction_telemetry",
+    );
+    expect(interactionSource?.contributes_to_aggregate).toBe(true);
+    expect(interactionSource?.sample_count_in_window).toBeGreaterThan(0);
+  });
+
+  it("records telemetry-backed monitoring evidence into logs and completed review artifacts", () => {
+    const snapshot = runSuccessfulSession().getSnapshot();
+    const monitoringEvents = snapshot.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded");
+    const lastMonitoringPayload = monitoringEvents[monitoringEvents.length - 1]?.payload as Record<string, unknown>;
+    const reviewMonitoringHighlight = snapshot.completed_review?.highlights.find(
+      (highlight) => highlight.kind === "human_monitoring",
+    );
+
+    expect(
+      monitoringEvents.some((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        return payload.mode === "live_sources";
+      }),
+    ).toBe(true);
+    expect(Array.isArray(lastMonitoringPayload.sources)).toBe(true);
+    expect(
+      monitoringEvents.some((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        const sources = payload.sources as Array<Record<string, unknown>> | undefined;
+        return (
+          Array.isArray(sources) &&
+          sources.some(
+            (source) =>
+              source.source_kind === "interaction_telemetry" && source.contributes_to_aggregate === true,
+          )
+        );
+      }),
+    ).toBe(true);
+    expect(reviewMonitoringHighlight?.detail).toMatch(/interaction telemetry contributed live evidence during the run/i);
   });
 
   it("logs a replay-inspectable support-mode transition when the scenario escalates", () => {
@@ -791,6 +861,8 @@ describe("AuraSessionStore", () => {
       requestAction: () => false,
       confirmPendingAction: () => false,
       dismissPendingActionConfirmation: () => undefined,
+      recordInteractionTelemetry: () => undefined,
+      setInteractionTelemetrySuppressed: () => undefined,
       advanceTick: () => protectedSnapshot,
       reset: () => undefined,
     } as unknown as AuraSessionStore;

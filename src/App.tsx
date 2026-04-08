@@ -187,6 +187,10 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   }, [snapshot.pending_supervisor_override?.action_request.action_request_id, snapshot.pending_supervisor_override?.request_status]);
 
   useEffect(() => {
+    store.setInteractionTelemetrySuppressed(tutorialState.mode !== "closed");
+  }, [store, tutorialState.mode]);
+
+  useEffect(() => {
     setExpandedClusterIds([]);
     setWorkspace("operate");
     setRunPace("guided");
@@ -401,6 +405,14 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
       recordTutorialSignal("workspace-operate-opened");
     }
 
+    store.recordInteractionTelemetry({
+      event_kind: "workspace_switch",
+      ui_region: "workspace_switcher",
+      workspace: nextWorkspace,
+      target_id: nextWorkspace,
+      detail: `Workspace switched to ${nextWorkspace}.`,
+    });
+
     startTransition(() => setWorkspace(nextWorkspace));
   }
 
@@ -408,6 +420,14 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     if (!isTutorialActionAllowed("alarm:inspect-cluster")) {
       return;
     }
+
+    store.recordInteractionTelemetry({
+      event_kind: "alarm_cluster_toggle",
+      ui_region: "alarm_cluster",
+      workspace,
+      target_id: clusterId,
+      detail: "Alarm cluster inspection toggled.",
+    });
 
     setExpandedClusterIds((current) => {
       const nextExpanded = current.includes(clusterId)
@@ -489,6 +509,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
 
     setRunPace(nextRunPace);
     setIsRunning(true);
+    store.recordInteractionTelemetry({
+      event_kind: "runtime_control",
+      ui_region: "runtime_controls",
+      workspace,
+      target_id: nextRunPace === "guided" ? "run_guided" : "run_live",
+      detail: `Runtime ${nextRunPace} pace started.`,
+    });
     setRuntimePauseReason(
       nextRunPace === "guided"
         ? "Guided pace running. Checkpoint pauses will stop the scenario at teachable moments so you can study the cause-and-effect chain."
@@ -503,6 +530,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     }
 
     setIsRunning(false);
+    store.recordInteractionTelemetry({
+      event_kind: "runtime_control",
+      ui_region: "runtime_controls",
+      workspace,
+      target_id: "pause",
+      detail: "Runtime paused.",
+    });
     setRuntimePauseReason(
       "Runtime paused. Resume guided pace for learning/demo mode, resume live pace for faster playback, or step one tick for a single deterministic update.",
     );
@@ -514,6 +548,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     }
 
     recordTutorialSignal("runtime-advanced");
+    store.recordInteractionTelemetry({
+      event_kind: "runtime_control",
+      ui_region: "runtime_controls",
+      workspace,
+      target_id: "advance_one_tick",
+      detail: "Runtime advanced one deterministic tick.",
+    });
     store.advanceTick();
     setRuntimePauseReason("Advanced one deterministic simulation tick. Step again or resume guided/live pace when you are ready.");
   }
@@ -528,6 +569,13 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
     setRuntimePauseReason(
       "Session reset. Guided pace is the learning/demo mode, live pace is the faster continuous mode, and one-tick stepping lets you inspect cause and effect.",
     );
+    store.recordInteractionTelemetry({
+      event_kind: "runtime_control",
+      ui_region: "runtime_controls",
+      workspace,
+      target_id: "reset_session",
+      detail: "Session reset requested from the command bar.",
+    });
     store.reset({
       session_mode: selectedSessionMode,
       scenario_id: selectedScenarioId,
@@ -816,10 +864,20 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           onToggleCluster={toggleCluster}
           onRequestLaneAction={requestLaneAction}
           onChangeControlValue={(controlId, value) =>
-            setControlValues((current) => ({
-              ...current,
-              [controlId]: value,
-            }))
+            {
+              store.recordInteractionTelemetry({
+                event_kind: "manual_control_adjustment",
+                ui_region: "plant_mimic",
+                workspace: "operate",
+                target_id: controlId,
+                requested_value: value,
+                detail: "Manual control slider adjusted.",
+              });
+              setControlValues((current) => ({
+                ...current,
+                [controlId]: value,
+              }));
+            }
           }
           onApplyControlAction={applyControlAction}
           onTriggerValidationDemoPreset={triggerValidationDemoPreset}

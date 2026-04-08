@@ -1,15 +1,16 @@
 import type {
   AlarmIntelligenceSnapshot,
   AlarmSet,
-  ExecutedAction,
+  InteractionTelemetryEventKind,
   PlantStateSnapshot,
   ReasoningSnapshot,
 } from "../contracts/aura";
 import {
-  buildLegacyRuntimePlaceholderSource,
+  DEFAULT_HUMAN_MONITORING_SOURCE_ADAPTERS,
   createHumanMonitoringRuntimeState,
   evaluateHumanMonitoring,
-  type HumanMonitoringSourceAdapter,
+  recordInteractionTelemetry,
+  setInteractionTelemetrySuppressed,
 } from "./humanMonitoring";
 
 const basePlantState: PlantStateSnapshot = {
@@ -32,7 +33,7 @@ const basePlantState: PlantStateSnapshot = {
   active_alarm_cluster_count: 2,
 };
 
-function buildAlarmSet(activeAlarmCount = 3): AlarmSet {
+function buildAlarmSet(activeAlarmCount = 3, overrides: Partial<AlarmSet> = {}): AlarmSet {
   const active_alarms = [
     {
       alarm_id: "ALM_FEEDWATER_FLOW_LOW",
@@ -75,6 +76,7 @@ function buildAlarmSet(activeAlarmCount = 3): AlarmSet {
     active_alarms,
     newly_raised_alarm_ids: active_alarms.map((alarm) => alarm.alarm_id),
     newly_cleared_alarm_ids: [],
+    ...overrides,
   };
 }
 
@@ -122,212 +124,325 @@ function buildReasoningSnapshot(overrides: Partial<ReasoningSnapshot> = {}): Rea
   };
 }
 
-function buildExecutedAction(sim_time_sec: number): ExecutedAction {
-  return {
-    action_request_id: "actreq_0001",
-    session_id: "session_001",
-    scenario_id: "scn_alarm_cascade_root_cause",
-    sim_time_sec,
-    actor_role: "operator",
-    action_id: "act_adjust_feedwater",
-    target_subsystem: "feedwater_system",
-    requested_value: 82,
-    ui_region: "plant_mimic",
-    reason_note: "test correction",
-    applied: true,
-  };
+function buildInteractionRuntimeState(
+  events: Array<{
+    sim_time_sec: number;
+    tick_index: number;
+    event_kind: InteractionTelemetryEventKind;
+    target_id?: string;
+    requested_value?: number;
+    workspace?: "operate" | "review";
+  }>,
+) {
+  let runtime_state = createHumanMonitoringRuntimeState();
+  for (const event of events) {
+    runtime_state = recordInteractionTelemetry({
+      runtime_state,
+      sim_time_sec: event.sim_time_sec,
+      tick_index: event.tick_index,
+      event_kind: event.event_kind,
+      ui_region:
+        event.event_kind === "workspace_switch"
+          ? "workspace_switcher"
+          : event.event_kind === "alarm_cluster_toggle"
+            ? "alarm_cluster"
+            : event.event_kind === "manual_control_adjustment"
+              ? "plant_mimic"
+              : event.event_kind.startsWith("supervisor_override")
+                ? "review_workspace"
+                : "runtime_controls",
+      workspace: event.workspace,
+      target_id: event.target_id,
+      requested_value: event.requested_value,
+      detail: "test interaction",
+    });
+  }
+  return runtime_state;
 }
 
-describe("humanMonitoring foundation", () => {
-  it("builds deterministic placeholder compatibility snapshots through the canonical evaluator", () => {
-    const params = {
-      sim_time_sec: 55,
-      tick_index: 8,
-      tick_duration_sec: 5,
-      plant_state: basePlantState,
-      alarm_set: buildAlarmSet(3),
-      alarm_intelligence: buildAlarmIntelligence(3),
-      reasoning_snapshot: buildReasoningSnapshot(),
-      executed_actions: [buildExecutedAction(35)],
-      lane_changed: false,
-    };
+function evaluateWithDefaultSources(params?: {
+  sim_time_sec?: number;
+  tick_index?: number;
+  runtime_state?: ReturnType<typeof createHumanMonitoringRuntimeState>;
+  alarm_set?: AlarmSet;
+  reasoning_snapshot?: ReasoningSnapshot;
+  lane_changed?: boolean;
+}) {
+  const runtime_state = params?.runtime_state ?? createHumanMonitoringRuntimeState();
+  return evaluateHumanMonitoring({
+    sim_time_sec: params?.sim_time_sec ?? 30,
+    tick_index: params?.tick_index ?? 6,
+    tick_duration_sec: 5,
+    plant_state: basePlantState,
+    alarm_set: params?.alarm_set ?? buildAlarmSet(3),
+    alarm_intelligence: buildAlarmIntelligence(3),
+    reasoning_snapshot: params?.reasoning_snapshot ?? buildReasoningSnapshot(),
+    executed_actions: [],
+    lane_changed: params?.lane_changed ?? false,
+    runtime_state,
+  }).snapshot;
+}
 
-    const first = evaluateHumanMonitoring({
-      ...params,
-      runtime_state: createHumanMonitoringRuntimeState(),
-    }).snapshot;
-    const second = evaluateHumanMonitoring({
-      ...params,
-      runtime_state: createHumanMonitoringRuntimeState(),
-    }).snapshot;
-
-    expect(first).toEqual(second);
-    expect(first.mode).toBe("placeholder_compatibility");
-    expect(first.connected_source_count).toBe(1);
-    expect(first.sources[0]?.source_kind).toBe("legacy_runtime_placeholder");
-    expect(first.interpretation_input?.provenance).toBe("legacy_runtime_placeholder");
-  });
-
-  it("reports unavailable when no sources are connected", () => {
-    const snapshot = evaluateHumanMonitoring({
+describe("humanMonitoring interaction telemetry", () => {
+  it("keeps placeholder compatibility active until live interaction evidence starts contributing", () => {
+    const snapshot = evaluateWithDefaultSources({
       sim_time_sec: 0,
       tick_index: 0,
-      tick_duration_sec: 5,
-      plant_state: basePlantState,
-      alarm_set: buildAlarmSet(0),
-      alarm_intelligence: buildAlarmIntelligence(0),
-      reasoning_snapshot: buildReasoningSnapshot(),
-      executed_actions: [],
-      lane_changed: false,
-      runtime_state: createHumanMonitoringRuntimeState(),
-      adapters: [],
-    }).snapshot;
-
-    expect(snapshot.mode).toBe("unavailable");
-    expect(snapshot.degraded_state_active).toBe(true);
-    expect(snapshot.aggregate_confidence).toBe(0);
-    expect(snapshot.status_summary).toMatch(/no source adapters are connected/i);
-  });
-
-  it("marks low-confidence placeholder windows as degraded without leaving placeholder mode", () => {
-    const snapshot = evaluateHumanMonitoring({
-      sim_time_sec: 0,
-      tick_index: 0,
-      tick_duration_sec: 5,
-      plant_state: { ...basePlantState, alarm_load_count: 0, active_alarm_cluster_count: 0 },
-      alarm_set: buildAlarmSet(0),
-      alarm_intelligence: buildAlarmIntelligence(0),
+      alarm_set: buildAlarmSet(0, {
+        newly_raised_alarm_ids: [],
+      }),
       reasoning_snapshot: buildReasoningSnapshot({
         dominant_hypothesis_id: undefined,
         ranked_hypotheses: [],
         stable_for_ticks: 0,
       }),
-      executed_actions: [],
-      lane_changed: false,
-      runtime_state: createHumanMonitoringRuntimeState(),
-    }).snapshot;
+    });
+
+    const interactionSource = snapshot.sources.find((source) => source.source_kind === "interaction_telemetry");
 
     expect(snapshot.mode).toBe("placeholder_compatibility");
-    expect(snapshot.degraded_state_active).toBe(true);
-    expect(snapshot.aggregate_confidence).toBeLessThan(70);
-    expect(snapshot.degraded_state_reason).toMatch(/short observation window/i);
+    expect(snapshot.connected_source_count).toBe(2);
+    expect(interactionSource?.freshness_status).toBe("no_observations");
+    expect(interactionSource?.contributes_to_aggregate).toBe(false);
+    expect(interactionSource?.status_note).toMatch(/no practical operator interaction evidence has been captured yet/i);
   });
 
-  it("marks stale connected adapters as degraded and removes them from the aggregate path", () => {
-    const staleAdapter: HumanMonitoringSourceAdapter = {
-      source_id: "test_interaction_source",
-      source_kind: "interaction_telemetry",
-      expected_update_interval_sec: 5,
-      stale_after_sec: 10,
-      window_duration_sec: 60,
-      evaluate: ({ sim_time_sec }) => ({
-        availability: "active",
-        confidence: 82,
-        status_note: "Test adapter for stale-window coverage.",
-        observation_sim_time_sec: sim_time_sec === 0 ? 0 : undefined,
-      }),
-    };
+  it("produces a bounded live interaction contribution from a stable nominal interaction window", () => {
+    const runtime_state = buildInteractionRuntimeState([
+      {
+        sim_time_sec: 5,
+        tick_index: 1,
+        event_kind: "workspace_switch",
+        target_id: "review",
+        workspace: "review",
+      },
+      {
+        sim_time_sec: 10,
+        tick_index: 2,
+        event_kind: "workspace_switch",
+        target_id: "operate",
+        workspace: "operate",
+      },
+      {
+        sim_time_sec: 15,
+        tick_index: 3,
+        event_kind: "manual_control_adjustment",
+        target_id: "control_feedwater_demand",
+        requested_value: 74,
+      },
+      {
+        sim_time_sec: 18,
+        tick_index: 3,
+        event_kind: "action_request",
+        target_id: "act_adjust_feedwater",
+        requested_value: 74,
+      },
+      {
+        sim_time_sec: 24,
+        tick_index: 4,
+        event_kind: "action_confirmation",
+        target_id: "act_adjust_feedwater",
+        requested_value: 74,
+      },
+    ]);
 
-    const first = evaluateHumanMonitoring({
-      sim_time_sec: 0,
-      tick_index: 0,
-      tick_duration_sec: 5,
-      plant_state: basePlantState,
-      alarm_set: buildAlarmSet(1),
-      alarm_intelligence: buildAlarmIntelligence(1),
-      reasoning_snapshot: buildReasoningSnapshot(),
-      executed_actions: [],
-      lane_changed: false,
-      runtime_state: createHumanMonitoringRuntimeState(),
-      adapters: [staleAdapter],
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 28,
+      tick_index: 5,
+      runtime_state,
+      alarm_set: buildAlarmSet(2, { newly_raised_alarm_ids: [] }),
     });
-    const second = evaluateHumanMonitoring({
+    const interactionSource = snapshot.sources.find((source) => source.source_kind === "interaction_telemetry");
+
+    expect(snapshot.mode).toBe("live_sources");
+    expect(snapshot.interpretation_input?.provenance).toBe("canonical_source_pipeline");
+    expect(snapshot.interpretation_input?.contributing_source_ids).toContain("interaction_telemetry");
+    expect(interactionSource?.contributes_to_aggregate).toBe(true);
+    expect(interactionSource?.confidence).toBeGreaterThanOrEqual(70);
+    expect(interactionSource?.status_note).toMatch(/interaction telemetry observed/i);
+    expect(snapshot.status_summary).toMatch(/interaction telemetry/i);
+  });
+
+  it("marks sparse interaction windows as degraded without claiming the source is unavailable", () => {
+    const runtime_state = buildInteractionRuntimeState([
+      {
+        sim_time_sec: 12,
+        tick_index: 2,
+        event_kind: "manual_control_adjustment",
+        target_id: "control_feedwater_demand",
+        requested_value: 66,
+      },
+    ]);
+
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 15,
+      tick_index: 3,
+      runtime_state,
+      alarm_set: buildAlarmSet(1, { newly_raised_alarm_ids: [] }),
+    });
+    const interactionSource = snapshot.sources.find((source) => source.source_kind === "interaction_telemetry");
+
+    expect(interactionSource?.availability).toBe("degraded");
+    expect(interactionSource?.freshness_status).toBe("current");
+    expect(interactionSource?.contributes_to_aggregate).toBe(true);
+    expect(interactionSource?.status_note).toMatch(/confidence reduced/i);
+    expect(snapshot.degraded_state_active).toBe(true);
+  });
+
+  it("ages out stale interaction telemetry cleanly while preserving canonical degraded semantics", () => {
+    const runtime_state = buildInteractionRuntimeState([
+      {
+        sim_time_sec: 0,
+        tick_index: 0,
+        event_kind: "action_request",
+        target_id: "act_adjust_feedwater",
+        requested_value: 70,
+      },
+    ]);
+
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 95,
+      tick_index: 19,
+      runtime_state,
+      alarm_set: buildAlarmSet(3, {
+        newly_raised_alarm_ids: [],
+      }),
+    });
+    const interactionSource = snapshot.sources.find((source) => source.source_kind === "interaction_telemetry");
+
+    expect(interactionSource?.freshness_status).toBe("stale");
+    expect(interactionSource?.contributes_to_aggregate).toBe(false);
+    expect(snapshot.degraded_state_active).toBe(true);
+    expect(snapshot.degraded_state_reason).toMatch(/interaction_telemetry is stale/i);
+  });
+
+  it("raises workload and lowers attention stability when reversals and bursty retries are present", () => {
+    const stableRuntime = buildInteractionRuntimeState([
+      { sim_time_sec: 6, tick_index: 1, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 68 },
+      { sim_time_sec: 18, tick_index: 3, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 72 },
+      { sim_time_sec: 30, tick_index: 6, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 76 },
+    ]);
+    const unstableRuntime = buildInteractionRuntimeState([
+      { sim_time_sec: 18, tick_index: 3, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 82 },
+      { sim_time_sec: 20, tick_index: 4, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 46 },
+      { sim_time_sec: 22, tick_index: 4, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 84 },
+      { sim_time_sec: 23, tick_index: 4, event_kind: "workspace_switch", target_id: "review", workspace: "review" },
+      { sim_time_sec: 24, tick_index: 4, event_kind: "workspace_switch", target_id: "operate", workspace: "operate" },
+    ]);
+
+    const stable = evaluateWithDefaultSources({
+      sim_time_sec: 34,
+      tick_index: 6,
+      runtime_state: stableRuntime,
+      alarm_set: buildAlarmSet(2, { newly_raised_alarm_ids: [] }),
+    });
+    const unstable = evaluateWithDefaultSources({
+      sim_time_sec: 34,
+      tick_index: 6,
+      runtime_state: unstableRuntime,
+      alarm_set: buildAlarmSet(2, { newly_raised_alarm_ids: [] }),
+    });
+
+    expect(unstable.interpretation_input?.workload_index ?? 0).toBeGreaterThan(
+      stable.interpretation_input?.workload_index ?? 0,
+    );
+    expect(unstable.interpretation_input?.attention_stability_index ?? 100).toBeLessThan(
+      stable.interpretation_input?.attention_stability_index ?? 100,
+    );
+  });
+
+  it("raises workload pressure for inactivity during meaningful moments without making unavailable claims", () => {
+    const runtime_state = buildInteractionRuntimeState([
+      {
+        sim_time_sec: 5,
+        tick_index: 1,
+        event_kind: "action_request",
+        target_id: "act_ack_alarm",
+      },
+    ]);
+
+    const calmSnapshot = evaluateWithDefaultSources({
       sim_time_sec: 30,
       tick_index: 6,
+      runtime_state,
+      alarm_set: buildAlarmSet(0, {
+        newly_raised_alarm_ids: [],
+        active_alarm_ids: [],
+        active_alarms: [],
+        highest_priority_active: undefined,
+      }),
+    });
+    const meaningfulSnapshot = evaluateWithDefaultSources({
+      sim_time_sec: 30,
+      tick_index: 6,
+      runtime_state,
+      alarm_set: buildAlarmSet(3),
+      lane_changed: true,
+      reasoning_snapshot: buildReasoningSnapshot({ changed_since_last_tick: true }),
+    });
+
+    expect(meaningfulSnapshot.interpretation_input?.workload_index ?? 0).toBeGreaterThan(
+      calmSnapshot.interpretation_input?.workload_index ?? 0,
+    );
+    expect(meaningfulSnapshot.sources.find((source) => source.source_kind === "interaction_telemetry")?.status_note).toMatch(
+      /hesitation pressure elevated/i,
+    );
+  });
+
+  it("preserves suppression for tutorial-only telemetry writes until capture is re-enabled", () => {
+    let runtime_state = createHumanMonitoringRuntimeState();
+    runtime_state = setInteractionTelemetrySuppressed(runtime_state, true);
+    runtime_state = recordInteractionTelemetry({
+      runtime_state,
+      sim_time_sec: 4,
+      tick_index: 0,
+      event_kind: "workspace_switch",
+      ui_region: "workspace_switcher",
+      workspace: "review",
+      target_id: "review",
+    });
+    expect(runtime_state.interaction_telemetry.records).toHaveLength(0);
+
+    runtime_state = setInteractionTelemetrySuppressed(runtime_state, false);
+    runtime_state = recordInteractionTelemetry({
+      runtime_state,
+      sim_time_sec: 5,
+      tick_index: 1,
+      event_kind: "workspace_switch",
+      ui_region: "workspace_switcher",
+      workspace: "review",
+      target_id: "review",
+    });
+    expect(runtime_state.interaction_telemetry.records).toHaveLength(1);
+  });
+
+  it("can run interaction telemetry by itself through the same canonical source pipeline", () => {
+    const interactionOnlyAdapters = DEFAULT_HUMAN_MONITORING_SOURCE_ADAPTERS.filter(
+      (adapter) => adapter.source_kind === "interaction_telemetry",
+    );
+    const runtime_state = buildInteractionRuntimeState([
+      { sim_time_sec: 8, tick_index: 1, event_kind: "workspace_switch", target_id: "review", workspace: "review" },
+      { sim_time_sec: 12, tick_index: 2, event_kind: "action_request", target_id: "act_adjust_feedwater", requested_value: 72 },
+      { sim_time_sec: 20, tick_index: 4, event_kind: "action_confirmation", target_id: "act_adjust_feedwater", requested_value: 72 },
+    ]);
+
+    const snapshot = evaluateHumanMonitoring({
+      sim_time_sec: 24,
+      tick_index: 4,
       tick_duration_sec: 5,
       plant_state: basePlantState,
-      alarm_set: buildAlarmSet(1),
-      alarm_intelligence: buildAlarmIntelligence(1),
+      alarm_set: buildAlarmSet(2, { newly_raised_alarm_ids: [] }),
+      alarm_intelligence: buildAlarmIntelligence(2),
       reasoning_snapshot: buildReasoningSnapshot(),
       executed_actions: [],
       lane_changed: false,
-      runtime_state: first.runtime_state,
-      adapters: [staleAdapter],
-    }).snapshot;
-
-    expect(second.mode).toBe("degraded");
-    expect(second.stale_source_count).toBe(1);
-    expect(second.contributing_source_count).toBe(0);
-    expect(second.sources[0]?.freshness_status).toBe("stale");
-  });
-
-  it("is structurally ready for multi-source interpretation inputs through the same canonical path", () => {
-    const placeholder = buildLegacyRuntimePlaceholderSource({
-      sim_time_sec: 25,
-      tick_index: 5,
-      tick_duration_sec: 5,
-      plant_state: basePlantState,
-      alarm_set: buildAlarmSet(2),
-      alarm_intelligence: buildAlarmIntelligence(2),
-      reasoning_snapshot: buildReasoningSnapshot(),
-      executed_actions: [buildExecutedAction(15)],
-      lane_changed: false,
-    });
-    const placeholderAdapter: HumanMonitoringSourceAdapter = {
-      source_id: "legacy_runtime_placeholder",
-      source_kind: "legacy_runtime_placeholder",
-      expected_update_interval_sec: 5,
-      stale_after_sec: 20,
-      window_duration_sec: 120,
-      evaluate: ({ sim_time_sec }) => ({
-        ...placeholder.source,
-        observation_sim_time_sec: sim_time_sec,
-      }),
-    };
-    const interactionAdapter: HumanMonitoringSourceAdapter = {
-      source_id: "interaction_ready_source",
-      source_kind: "interaction_telemetry",
-      expected_update_interval_sec: 5,
-      stale_after_sec: 15,
-      window_duration_sec: 120,
-      evaluate: ({ sim_time_sec }) => ({
-        availability: "active",
-        confidence: 76,
-        status_note: "Synthetic interaction source for multi-source aggregation coverage.",
-        observation_sim_time_sec: sim_time_sec,
-        interpretation_input: {
-          workload_index: 44,
-          attention_stability_index: 79,
-          signal_confidence: 76,
-          degraded_mode_active: false,
-          degraded_mode_reason: "Synthetic interaction source is nominal.",
-          observation_window_ticks: 6,
-          interpretation_note: "Synthetic interaction telemetry input.",
-          provenance: "canonical_source_pipeline",
-        },
-      }),
-    };
-
-    const snapshot = evaluateHumanMonitoring({
-      sim_time_sec: 25,
-      tick_index: 5,
-      tick_duration_sec: 5,
-      plant_state: basePlantState,
-      alarm_set: buildAlarmSet(2),
-      alarm_intelligence: buildAlarmIntelligence(2),
-      reasoning_snapshot: buildReasoningSnapshot(),
-      executed_actions: [buildExecutedAction(15)],
-      lane_changed: false,
-      runtime_state: createHumanMonitoringRuntimeState(),
-      adapters: [placeholderAdapter, interactionAdapter],
+      runtime_state,
+      adapters: interactionOnlyAdapters,
     }).snapshot;
 
     expect(snapshot.mode).toBe("live_sources");
-    expect(snapshot.contributing_source_count).toBe(2);
+    expect(snapshot.connected_source_count).toBe(1);
+    expect(snapshot.contributing_source_count).toBe(1);
     expect(snapshot.interpretation_input?.provenance).toBe("canonical_source_pipeline");
-    expect(snapshot.interpretation_input?.contributing_source_ids).toEqual([
-      "legacy_runtime_placeholder",
-      "interaction_ready_source",
-    ]);
   });
 });

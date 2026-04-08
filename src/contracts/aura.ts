@@ -221,6 +221,39 @@ export type ActionRequest = {
   reason_note?: string;
 };
 
+export type InteractionTelemetryWorkspace = "operate" | "review";
+
+export type InteractionTelemetryUiRegion =
+  | ActionRequest["ui_region"]
+  | "runtime_controls"
+  | "workspace_switcher"
+  | "alarm_cluster"
+  | "review_workspace";
+
+export type InteractionTelemetryEventKind =
+  | "action_request"
+  | "action_confirmation"
+  | "action_confirmation_dismissed"
+  | "workspace_switch"
+  | "runtime_control"
+  | "alarm_cluster_toggle"
+  | "manual_control_adjustment"
+  | "supervisor_override_request"
+  | "supervisor_override_approved"
+  | "supervisor_override_denied";
+
+export type InteractionTelemetryRecord = {
+  interaction_id: string;
+  sim_time_sec: number;
+  tick_index: number;
+  event_kind: InteractionTelemetryEventKind;
+  ui_region: InteractionTelemetryUiRegion;
+  workspace?: InteractionTelemetryWorkspace;
+  target_id?: string;
+  requested_value?: number;
+  detail?: string;
+};
+
 export type ActionValidationResult = {
   validation_result_id: string;
   action_request_id: string;

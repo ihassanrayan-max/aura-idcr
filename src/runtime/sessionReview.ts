@@ -82,10 +82,28 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
       const status = typeof p.status_summary === "string" ? p.status_summary : "";
       const connected = typeof p.connected_source_count === "number" ? p.connected_source_count : 0;
       const contributing = typeof p.contributing_source_count === "number" ? p.contributing_source_count : 0;
+      const interactionActive =
+        Array.isArray(p.sources) &&
+        p.sources.some(
+          (source) =>
+            source &&
+            typeof source === "object" &&
+            "source_kind" in source &&
+            source.source_kind === "interaction_telemetry" &&
+            "contributes_to_aggregate" in source &&
+            source.contributes_to_aggregate === true,
+        );
       return {
         title: "Human-monitoring snapshot recorded",
         summary:
-          [mode && `Mode: ${mode}.`, freshness && `Freshness: ${freshness}.`, `Connected sources: ${connected}.`, `Contributing sources: ${contributing}.`, status]
+          [
+            mode && `Mode: ${mode}.`,
+            freshness && `Freshness: ${freshness}.`,
+            `Connected sources: ${connected}.`,
+            `Contributing sources: ${contributing}.`,
+            interactionActive ? "Interaction telemetry contributed live evidence." : "",
+            status,
+          ]
             .filter(Boolean)
             .join(" ") || "Human-monitoring foundation snapshot recorded.",
       };
@@ -373,11 +391,39 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
     const connected = typeof p.connected_source_count === "number" ? p.connected_source_count : 0;
     const contributing = typeof p.contributing_source_count === "number" ? p.contributing_source_count : 0;
     const status = typeof p.status_summary === "string" ? p.status_summary : "";
+    const interactionActive =
+      Array.isArray(p.sources) &&
+      p.sources.some(
+        (source) =>
+          source &&
+          typeof source === "object" &&
+          "source_kind" in source &&
+          source.source_kind === "interaction_telemetry" &&
+          "contributes_to_aggregate" in source &&
+          source.contributes_to_aggregate === true,
+      );
+    const interactionActiveEver = events
+      .filter((event) => event.event_type === "human_monitoring_snapshot_recorded")
+      .some((event) => {
+        const sources = event.payload.sources;
+        return (
+          Array.isArray(sources) &&
+          sources.some(
+            (source) =>
+              source &&
+              typeof source === "object" &&
+              "source_kind" in source &&
+              source.source_kind === "interaction_telemetry" &&
+              "contributes_to_aggregate" in source &&
+              source.contributes_to_aggregate === true,
+          )
+        );
+      });
     highlights.push({
       highlight_id: `hl_monitoring_${latestMonitoring.event_id}`,
       kind: "human_monitoring",
       label: "Human-monitoring posture",
-      detail: `Mode ${mode}; freshness ${freshness}; connected sources ${connected}; contributing sources ${contributing}. ${status}`.trim(),
+      detail: `Mode ${mode}; freshness ${freshness}; connected sources ${connected}; contributing sources ${contributing}.${interactionActiveEver ? " Interaction telemetry contributed live evidence during the run." : ""}${interactionActive ? " It remained current in the latest snapshot." : ""} ${status}`.trim(),
     });
   }
 

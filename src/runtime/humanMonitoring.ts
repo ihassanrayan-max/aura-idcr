@@ -2,6 +2,10 @@ import type {
   AlarmIntelligenceSnapshot,
   AlarmSet,
   ExecutedAction,
+  InteractionTelemetryEventKind,
+  InteractionTelemetryRecord,
+  InteractionTelemetryUiRegion,
+  InteractionTelemetryWorkspace,
   HumanMonitoringFreshnessStatus,
   HumanMonitoringInterpretationInput,
   HumanMonitoringSnapshot,
@@ -26,6 +30,9 @@ export type LegacyRuntimePlaceholderParams = {
 };
 
 export type HumanMonitoringEvaluationContext = LegacyRuntimePlaceholderParams;
+export type HumanMonitoringAdapterContext = HumanMonitoringEvaluationContext & {
+  interaction_telemetry: InteractionTelemetryRuntimeState;
+};
 
 export type HumanMonitoringSourceReading = {
   availability: HumanMonitoringSourceAvailability;
@@ -44,6 +51,25 @@ export type HumanMonitoringSourceWindowState = {
 
 export type HumanMonitoringRuntimeState = {
   sources: Record<string, HumanMonitoringSourceWindowState>;
+  interaction_telemetry: InteractionTelemetryRuntimeState;
+};
+
+export type InteractionTelemetryRuntimeState = {
+  next_sequence: number;
+  records: InteractionTelemetryRecord[];
+  suppressed: boolean;
+};
+
+export type RecordInteractionTelemetryParams = {
+  runtime_state: HumanMonitoringRuntimeState;
+  sim_time_sec: number;
+  tick_index: number;
+  event_kind: InteractionTelemetryEventKind;
+  ui_region: InteractionTelemetryUiRegion;
+  workspace?: InteractionTelemetryWorkspace;
+  target_id?: string;
+  requested_value?: number;
+  detail?: string;
 };
 
 export type HumanMonitoringSourceAdapter = {
@@ -53,7 +79,7 @@ export type HumanMonitoringSourceAdapter = {
   stale_after_sec: number;
   window_duration_sec: number;
   evaluate: (
-    context: HumanMonitoringEvaluationContext,
+    context: HumanMonitoringAdapterContext,
     runtime_state: HumanMonitoringSourceWindowState | undefined,
   ) => HumanMonitoringSourceReading;
 };
@@ -67,6 +93,63 @@ export type EvaluateHumanMonitoringResult = {
   snapshot: HumanMonitoringSnapshot;
   runtime_state: HumanMonitoringRuntimeState;
 };
+
+const INTERACTION_TELEMETRY_WINDOW_SEC = 240;
+const INTERACTION_TELEMETRY_MAX_RECORDS = 96;
+const ACTIONABLE_INTERACTION_KINDS = new Set<InteractionTelemetryEventKind>([
+  "action_request",
+  "action_confirmation",
+  "runtime_control",
+  "supervisor_override_request",
+  "supervisor_override_approved",
+  "supervisor_override_denied",
+]);
+
+function clampWindowedInteractionRecords(
+  sim_time_sec: number,
+  records: InteractionTelemetryRecord[],
+): InteractionTelemetryRecord[] {
+  return records
+    .filter((record) => sim_time_sec - record.sim_time_sec <= INTERACTION_TELEMETRY_WINDOW_SEC)
+    .slice(-INTERACTION_TELEMETRY_MAX_RECORDS);
+}
+
+function formatInteractionSourceLabel(event_kind: InteractionTelemetryEventKind): string {
+  switch (event_kind) {
+    case "action_request":
+      return "action requests";
+    case "action_confirmation":
+      return "warning confirmations";
+    case "action_confirmation_dismissed":
+      return "warning dismissals";
+    case "workspace_switch":
+      return "workspace switches";
+    case "runtime_control":
+      return "runtime controls";
+    case "alarm_cluster_toggle":
+      return "alarm inspection toggles";
+    case "manual_control_adjustment":
+      return "manual control adjustments";
+    case "supervisor_override_request":
+      return "supervisor review requests";
+    case "supervisor_override_approved":
+      return "supervisor approvals";
+    case "supervisor_override_denied":
+      return "supervisor denials";
+  }
+}
+
+function formatInteractionStatusList(kinds: InteractionTelemetryEventKind[]): string {
+  return kinds.map((kind) => formatInteractionSourceLabel(kind)).join(", ");
+}
+
+function actionableInteraction(record: InteractionTelemetryRecord): boolean {
+  return ACTIONABLE_INTERACTION_KINDS.has(record.event_kind);
+}
+
+function tickSpanFromRecords(records: InteractionTelemetryRecord[]): number {
+  return new Set(records.map((record) => record.tick_index)).size;
+}
 
 function numberValue(value: PlantStateSnapshot[string]): number {
   return typeof value === "number" ? value : Number(value);
@@ -159,8 +242,11 @@ function deriveSourceSnapshot(params: {
   runtime_state: HumanMonitoringSourceWindowState;
 } {
   const previous_times = params.previous_state?.observation_times_sec ?? [];
-  const next_times = typeof params.reading.observation_sim_time_sec === "number"
-    ? [...previous_times, params.reading.observation_sim_time_sec]
+  const should_append_observation =
+    typeof params.reading.observation_sim_time_sec === "number" &&
+    previous_times[previous_times.length - 1] !== params.reading.observation_sim_time_sec;
+  const next_times = should_append_observation
+    ? [...previous_times, params.reading.observation_sim_time_sec!]
     : [...previous_times];
   const trimmed_times = next_times.filter(
     (time_sec) => params.sim_time_sec - time_sec <= params.adapter.window_duration_sec,
@@ -328,6 +414,12 @@ function buildHumanMonitoringSnapshot(params: {
   const has_placeholder_contributor = contributing_sources.some(
     (source) => source.source_kind === "legacy_runtime_placeholder",
   );
+  const connected_live_sources = connected_sources.filter(
+    (source) => source.source_kind !== "legacy_runtime_placeholder",
+  );
+  const live_source_labels = connected_live_sources.map((source) =>
+    source.source_kind === "interaction_telemetry" ? "interaction telemetry" : source.source_kind,
+  );
   const mode: HumanMonitoringSnapshot["mode"] =
     connected_sources.length === 0
       ? "unavailable"
@@ -360,9 +452,11 @@ function buildHumanMonitoringSnapshot(params: {
     mode === "unavailable"
       ? "Human-monitoring foundation is online, but no source adapters are connected yet."
       : mode === "placeholder_compatibility"
-        ? "Human-monitoring foundation is running through the canonical placeholder adapter so current operator-state behavior stays stable until live sources are added."
+        ? connected_live_sources.length > 0
+          ? `Human-monitoring remains anchored by the compatibility placeholder while ${live_source_labels.join(", ")} are present but not yet contributing current evidence.`
+          : "Human-monitoring foundation is running through the canonical placeholder adapter so current operator-state behavior stays stable until live sources are added."
         : mode === "live_sources"
-          ? "Human-monitoring inputs are flowing through the canonical source pipeline."
+          ? `Human-monitoring inputs are flowing through the canonical source pipeline with ${live_source_labels.join(", ")} contributing live interaction evidence.`
           : "Human-monitoring adapters are present, but freshness or confidence is currently degraded.";
 
   return {
@@ -391,6 +485,295 @@ function buildHumanMonitoringSnapshot(params: {
 export function createHumanMonitoringRuntimeState(): HumanMonitoringRuntimeState {
   return {
     sources: {},
+    interaction_telemetry: {
+      next_sequence: 0,
+      records: [],
+      suppressed: false,
+    },
+  };
+}
+
+export function setInteractionTelemetrySuppressed(
+  runtime_state: HumanMonitoringRuntimeState,
+  suppressed: boolean,
+): HumanMonitoringRuntimeState {
+  if (runtime_state.interaction_telemetry.suppressed === suppressed) {
+    return runtime_state;
+  }
+
+  return {
+    ...runtime_state,
+    interaction_telemetry: {
+      ...runtime_state.interaction_telemetry,
+      suppressed,
+    },
+  };
+}
+
+export function recordInteractionTelemetry(
+  params: RecordInteractionTelemetryParams,
+): HumanMonitoringRuntimeState {
+  const telemetry_state = params.runtime_state.interaction_telemetry;
+  if (telemetry_state.suppressed) {
+    return params.runtime_state;
+  }
+
+  const next_sequence = telemetry_state.next_sequence + 1;
+  const next_record: InteractionTelemetryRecord = {
+    interaction_id: `ix_${String(next_sequence).padStart(4, "0")}`,
+    sim_time_sec: params.sim_time_sec,
+    tick_index: params.tick_index,
+    event_kind: params.event_kind,
+    ui_region: params.ui_region,
+    workspace: params.workspace,
+    target_id: params.target_id,
+    requested_value: params.requested_value,
+    detail: params.detail,
+  };
+
+  const previous_records = clampWindowedInteractionRecords(params.sim_time_sec, telemetry_state.records);
+  const previous_last_record = previous_records[previous_records.length - 1];
+  const should_coalesce =
+    params.event_kind === "manual_control_adjustment" &&
+    previous_last_record?.event_kind === "manual_control_adjustment" &&
+    previous_last_record.sim_time_sec === params.sim_time_sec &&
+    previous_last_record.target_id === params.target_id;
+  const next_records = should_coalesce
+    ? [...previous_records.slice(0, -1), next_record]
+    : [...previous_records, next_record];
+
+  return {
+    ...params.runtime_state,
+    interaction_telemetry: {
+      next_sequence,
+      suppressed: telemetry_state.suppressed,
+      records: clampWindowedInteractionRecords(params.sim_time_sec, next_records),
+    },
+  };
+}
+
+function averageIntervalSec(records: InteractionTelemetryRecord[]): number | undefined {
+  if (records.length < 2) {
+    return undefined;
+  }
+
+  const intervals: number[] = [];
+  for (let index = 1; index < records.length; index += 1) {
+    intervals.push(Math.max(records[index]!.sim_time_sec - records[index - 1]!.sim_time_sec, 0));
+  }
+
+  return intervals.length > 0 ? intervals.reduce((total, value) => total + value, 0) / intervals.length : undefined;
+}
+
+function reversalCount(records: InteractionTelemetryRecord[]): number {
+  let count = 0;
+
+  for (let index = 1; index < records.length; index += 1) {
+    const previous = records[index - 1]!;
+    const current = records[index]!;
+    if (
+      previous.event_kind !== "action_request" ||
+      current.event_kind !== "action_request" ||
+      previous.target_id !== current.target_id ||
+      typeof previous.requested_value !== "number" ||
+      typeof current.requested_value !== "number"
+    ) {
+      continue;
+    }
+
+    const previous_direction = previous.requested_value - (records[index - 2]?.requested_value ?? previous.requested_value);
+    const current_direction = current.requested_value - previous.requested_value;
+    const magnitude_changed = Math.abs(current.requested_value - previous.requested_value) >= 8;
+    if (magnitude_changed && previous_direction !== 0 && current_direction !== 0 && previous_direction * current_direction < 0) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function repeatedRetryCount(records: InteractionTelemetryRecord[]): number {
+  let count = 0;
+
+  for (let index = 1; index < records.length; index += 1) {
+    const previous = records[index - 1]!;
+    const current = records[index]!;
+    if (
+      previous.event_kind === "action_request" &&
+      current.event_kind === "action_request" &&
+      previous.target_id === current.target_id &&
+      previous.sim_time_sec !== current.sim_time_sec &&
+      current.sim_time_sec - previous.sim_time_sec <= 15
+    ) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function recentInteractionDensity(records: InteractionTelemetryRecord[], sim_time_sec: number, window_sec: number): number {
+  return records.filter((record) => sim_time_sec - record.sim_time_sec <= window_sec).length;
+}
+
+function buildInteractionTelemetrySource(
+  context: HumanMonitoringAdapterContext,
+): HumanMonitoringSourceReading {
+  const records = clampWindowedInteractionRecords(
+    context.sim_time_sec,
+    context.interaction_telemetry.records,
+  );
+  const latest_record = records[records.length - 1];
+  if (!latest_record) {
+    return {
+      availability: "degraded",
+      confidence: 32,
+      status_note:
+        "Interaction telemetry is connected, but no practical operator interaction evidence has been captured yet. Outputs remain bounded interaction-performance proxies only.",
+      interpretation_input: {
+        workload_index: 20,
+        attention_stability_index: 82,
+        signal_confidence: 32,
+        degraded_mode_active: true,
+        degraded_mode_reason:
+          "Interaction telemetry is connected but still waiting for practical operator interaction evidence.",
+        observation_window_ticks: 0,
+        interpretation_note:
+          "Interaction telemetry remains in a sparse-evidence state; no medical or cognitive claim is being made.",
+        provenance: "canonical_source_pipeline",
+      },
+    };
+  }
+
+  const actionable_records = records.filter(actionableInteraction);
+  const unique_event_kinds = new Set(records.map((record) => record.event_kind));
+  const workspace_switch_count = records.filter((record) => record.event_kind === "workspace_switch").length;
+  const cluster_toggle_count = records.filter((record) => record.event_kind === "alarm_cluster_toggle").length;
+  const manual_adjustment_count = records.filter((record) => record.event_kind === "manual_control_adjustment").length;
+  const latest_interaction_age_sec = Math.max(context.sim_time_sec - latest_record.sim_time_sec, 0);
+  const average_latency_sec = averageIntervalSec(actionable_records);
+  const recent_density_15_sec = recentInteractionDensity(records, context.sim_time_sec, 15);
+  const reversal_pressure = clamp(reversalCount(actionable_records) * 16, 0, 34);
+  const retry_pressure = clamp(repeatedRetryCount(records) * 8, 0, 24);
+  const burstiness_index = clamp(
+    Math.max(recent_density_15_sec - 3, 0) * 8 +
+      retry_pressure +
+      Math.max(manual_adjustment_count - actionable_records.length, 0) * 2,
+    0,
+    38,
+  );
+  const navigation_instability_index = clamp(
+    workspace_switch_count * 10 + Math.max(cluster_toggle_count - 1, 0) * 5,
+    0,
+    32,
+  );
+  const meaningful_moment_pressure = clamp(
+    context.alarm_set.newly_raised_alarm_ids.length * 10 +
+      context.alarm_set.active_alarm_count * 3 +
+      (context.alarm_set.highest_priority_active === "P1" ? 12 : 0) +
+      (context.lane_changed ? 12 : 0) +
+      (context.reasoning_snapshot.changed_since_last_tick ? 8 : 0),
+    0,
+    42,
+  );
+  const hesitation_index =
+    actionable_records.length === 0
+      ? clamp(meaningful_moment_pressure * 0.8 + latest_interaction_age_sec * 0.6, 0, 36)
+      : meaningful_moment_pressure > 0 && latest_interaction_age_sec > 12
+        ? clamp((latest_interaction_age_sec - 12) * 1.4 + meaningful_moment_pressure * 0.55, 0, 36)
+        : 0;
+  const latency_trend_index =
+    typeof average_latency_sec === "number"
+      ? clamp(Math.max(average_latency_sec - 8, 0) * 2 + Math.max(latest_interaction_age_sec - average_latency_sec, 0), 0, 24)
+      : clamp(latest_interaction_age_sec * 0.6, 0, 18);
+  const stable_cadence_bonus =
+    typeof average_latency_sec === "number" &&
+    average_latency_sec >= 4 &&
+    average_latency_sec <= 18 &&
+    reversal_pressure === 0 &&
+    burstiness_index < 12
+      ? 8
+      : 0;
+  const workload_index = roundIndex(
+    18 +
+      hesitation_index * 0.9 +
+      latency_trend_index * 0.8 +
+      burstiness_index * 0.75 +
+      reversal_pressure * 0.55 +
+      navigation_instability_index * 0.25,
+  );
+  const attention_stability_index = roundIndex(
+    92 -
+      hesitation_index * 0.55 -
+      latency_trend_index * 0.45 -
+      burstiness_index * 0.45 -
+      reversal_pressure * 0.8 -
+      navigation_instability_index * 0.9 +
+      stable_cadence_bonus,
+  );
+
+  let signal_confidence = 24;
+  signal_confidence += Math.min(records.length, 8) * 6;
+  signal_confidence += Math.min(unique_event_kinds.size, 4) * 7;
+  signal_confidence += actionable_records.length > 0 ? 10 : 0;
+  signal_confidence -= latest_interaction_age_sec > 60 ? 26 : latest_interaction_age_sec > 25 ? 12 : 0;
+  signal_confidence -= records.length < 3 ? 16 : 0;
+  signal_confidence -= unique_event_kinds.size < 2 ? 12 : 0;
+  signal_confidence -= actionable_records.length === 0 ? 10 : 0;
+  const bounded_signal_confidence = roundIndex(clamp(signal_confidence, 18, 96));
+  const degraded_reasons: string[] = [];
+  if (records.length < 3) {
+    degraded_reasons.push("interaction evidence is sparse");
+  }
+  if (unique_event_kinds.size < 2) {
+    degraded_reasons.push("event diversity is still narrow");
+  }
+  if (latest_interaction_age_sec > 25) {
+    degraded_reasons.push("recent interaction evidence is aging");
+  }
+  if (actionable_records.length === 0) {
+    degraded_reasons.push("no actionable response behavior has been observed yet");
+  }
+
+  const dominant_signals = [
+    hesitation_index >= 14 ? "hesitation pressure elevated" : undefined,
+    latency_trend_index >= 12 ? "response latency trend elevated" : undefined,
+    reversal_pressure >= 16 ? "reversal pressure elevated" : undefined,
+    burstiness_index >= 16 ? "bursty interaction pattern observed" : undefined,
+    navigation_instability_index >= 12 ? "navigation instability observed" : undefined,
+  ].filter((value): value is string => Boolean(value));
+
+  const interpretation_note = [
+    `Interaction telemetry captured ${records.length} recent events across ${unique_event_kinds.size} event kinds.`,
+    dominant_signals.length > 0
+      ? `Current bounded interaction proxies: ${dominant_signals.join("; ")}.`
+      : "Current interaction pattern remains comparatively steady.",
+    "These values are practical interaction-performance proxies only, not a medical or cognitive truth claim.",
+  ].join(" ");
+
+  return {
+    availability: bounded_signal_confidence >= 70 ? "active" : "degraded",
+    confidence: bounded_signal_confidence,
+    status_note: [
+      `Interaction telemetry observed ${formatInteractionStatusList([...unique_event_kinds])}.`,
+      dominant_signals.length > 0 ? `Signals: ${dominant_signals.join("; ")}.` : "Signals are stable and bounded.",
+      degraded_reasons.length > 0 ? `Confidence reduced because ${degraded_reasons.join("; ")}.` : "Confidence is supported by recent, diverse interaction evidence.",
+      "This source estimates practical interaction behavior only.",
+    ].join(" "),
+    observation_sim_time_sec: latest_record.sim_time_sec,
+    interpretation_input: {
+      workload_index,
+      attention_stability_index,
+      signal_confidence: bounded_signal_confidence,
+      degraded_mode_active: degraded_reasons.length > 0 || bounded_signal_confidence < 70,
+      degraded_mode_reason:
+        degraded_reasons.length > 0
+          ? `Interaction telemetry confidence is reduced because ${degraded_reasons.join("; ")}.`
+          : "Interaction telemetry window is current and diverse enough to support bounded interpretation.",
+      observation_window_ticks: tickSpanFromRecords(records),
+      interpretation_note,
+      provenance: "canonical_source_pipeline",
+    },
   };
 }
 
@@ -583,8 +966,18 @@ const legacyRuntimePlaceholderAdapter: HumanMonitoringSourceAdapter = {
   evaluate: (context) => buildLegacyRuntimePlaceholderSource(context).source,
 };
 
+const interactionTelemetryAdapter: HumanMonitoringSourceAdapter = {
+  source_id: "interaction_telemetry",
+  source_kind: "interaction_telemetry",
+  expected_update_interval_sec: 20,
+  stale_after_sec: 60,
+  window_duration_sec: INTERACTION_TELEMETRY_WINDOW_SEC,
+  evaluate: (context) => buildInteractionTelemetrySource(context),
+};
+
 export const DEFAULT_HUMAN_MONITORING_SOURCE_ADAPTERS: readonly HumanMonitoringSourceAdapter[] = [
   legacyRuntimePlaceholderAdapter,
+  interactionTelemetryAdapter,
 ];
 
 export function evaluateHumanMonitoring(
@@ -593,13 +986,26 @@ export function evaluateHumanMonitoring(
   const adapters = params.adapters ?? DEFAULT_HUMAN_MONITORING_SOURCE_ADAPTERS;
   const next_runtime_state: HumanMonitoringRuntimeState = {
     sources: {},
+    interaction_telemetry: {
+      ...params.runtime_state.interaction_telemetry,
+      records: clampWindowedInteractionRecords(
+        params.sim_time_sec,
+        params.runtime_state.interaction_telemetry.records,
+      ),
+    },
   };
   const source_snapshots: HumanMonitoringSourceSnapshot[] = [];
   const readings: Array<{ source_id: string; reading: HumanMonitoringSourceReading }> = [];
 
   for (const adapter of adapters) {
     const previous_source_state = params.runtime_state.sources[adapter.source_id];
-    const reading = adapter.evaluate(params, previous_source_state);
+    const reading = adapter.evaluate(
+      {
+        ...params,
+        interaction_telemetry: next_runtime_state.interaction_telemetry,
+      },
+      previous_source_state,
+    );
     const { source_snapshot, runtime_state } = deriveSourceSnapshot({
       sim_time_sec: params.sim_time_sec,
       tick_duration_sec: params.tick_duration_sec,

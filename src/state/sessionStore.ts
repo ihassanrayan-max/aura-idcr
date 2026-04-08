@@ -5,6 +5,9 @@ import type {
   AlarmIntelligenceSnapshot,
   CombinedRiskSnapshot,
   CompletedSessionReview,
+  InteractionTelemetryEventKind,
+  InteractionTelemetryUiRegion,
+  InteractionTelemetryWorkspace,
   PendingActionConfirmation,
   PendingSupervisorOverride,
   ExecutedAction,
@@ -58,6 +61,8 @@ import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
 import {
   createHumanMonitoringRuntimeState,
   evaluateHumanMonitoring,
+  recordInteractionTelemetry,
+  setInteractionTelemetrySuppressed,
   type HumanMonitoringRuntimeState,
 } from "../runtime/humanMonitoring";
 import { buildOperatorStateSnapshot } from "../runtime/operatorState";
@@ -87,6 +92,15 @@ type ActionRequestParams = {
   requested_value?: number;
   ui_region: ActionRequest["ui_region"];
   reason_note?: string;
+};
+
+type RecordUiInteractionParams = {
+  event_kind: InteractionTelemetryEventKind;
+  ui_region: InteractionTelemetryUiRegion;
+  workspace?: InteractionTelemetryWorkspace;
+  target_id?: string;
+  requested_value?: number;
+  detail?: string;
 };
 
 function summarizeAlarmClusters(alarm_intelligence: AlarmIntelligenceSnapshot) {
@@ -880,6 +894,30 @@ export class AuraSessionStore {
     return this.snapshot;
   }
 
+  private recordUiInteraction(params: RecordUiInteractionParams): void {
+    this.human_monitoring_runtime_state = recordInteractionTelemetry({
+      runtime_state: this.human_monitoring_runtime_state,
+      sim_time_sec: this.snapshot.sim_time_sec,
+      tick_index: this.snapshot.tick_index,
+      ...params,
+    });
+  }
+
+  setInteractionTelemetrySuppressed(suppressed: boolean): void {
+    this.human_monitoring_runtime_state = setInteractionTelemetrySuppressed(
+      this.human_monitoring_runtime_state,
+      suppressed,
+    );
+  }
+
+  recordInteractionTelemetry(params: RecordUiInteractionParams): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    this.recordUiInteraction(params);
+  }
+
   setSessionMode(mode: SessionMode): void {
     this.reset({ session_mode: mode });
   }
@@ -1010,6 +1048,16 @@ export class AuraSessionStore {
     }
 
     const pending_confirmation = this.snapshot.pending_action_confirmation;
+    this.recordUiInteraction({
+      event_kind: "action_confirmation",
+      ui_region: pending_confirmation.action_request.ui_region,
+      target_id: pending_confirmation.action_request.action_id,
+      requested_value:
+        typeof pending_confirmation.action_request.requested_value === "number"
+          ? pending_confirmation.action_request.requested_value
+          : undefined,
+      detail: "Operator confirmed a soft-warning action.",
+    });
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
       event_type: "action_confirmation_recorded",
@@ -1039,6 +1087,12 @@ export class AuraSessionStore {
       return;
     }
 
+    this.recordUiInteraction({
+      event_kind: "action_confirmation_dismissed",
+      ui_region: this.snapshot.pending_action_confirmation.action_request.ui_region,
+      target_id: this.snapshot.pending_action_confirmation.action_request.action_id,
+      detail: "Operator dismissed a pending soft-warning confirmation.",
+    });
     this.snapshot = {
       ...this.snapshot,
       pending_action_confirmation: undefined,
@@ -1065,6 +1119,13 @@ export class AuraSessionStore {
       requested_at_sim_time_sec: this.snapshot.sim_time_sec,
       request_note: trimmed_note,
     };
+    this.recordUiInteraction({
+      event_kind: "supervisor_override_request",
+      ui_region: "review_workspace",
+      workspace: "review",
+      target_id: next_pending.action_request.action_id,
+      detail: trimmed_note ?? "Operator requested bounded supervisor review.",
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1105,6 +1166,13 @@ export class AuraSessionStore {
 
     const pending_override = this.snapshot.pending_supervisor_override;
     const trimmed_note = supervisor_note?.trim() || undefined;
+    this.recordUiInteraction({
+      event_kind: "supervisor_override_approved",
+      ui_region: "review_workspace",
+      workspace: "review",
+      target_id: pending_override.action_request.action_id,
+      detail: trimmed_note ?? "Supervisor approved one bounded override.",
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1160,6 +1228,13 @@ export class AuraSessionStore {
 
     const pending_override = this.snapshot.pending_supervisor_override;
     const trimmed_note = supervisor_note?.trim() || undefined;
+    this.recordUiInteraction({
+      event_kind: "supervisor_override_denied",
+      ui_region: "review_workspace",
+      workspace: "review",
+      target_id: pending_override.action_request.action_id,
+      detail: trimmed_note ?? "Supervisor denied the bounded override request.",
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,
@@ -1214,6 +1289,14 @@ export class AuraSessionStore {
       ui_region: params.ui_region,
       reason_note: params.reason_note,
     };
+    this.recordUiInteraction({
+      event_kind: "action_request",
+      ui_region: action_request.ui_region,
+      target_id: action_request.action_id,
+      requested_value:
+        typeof action_request.requested_value === "number" ? action_request.requested_value : undefined,
+      detail: action_request.reason_note,
+    });
 
     this.logger.append({
       sim_time_sec: this.snapshot.sim_time_sec,

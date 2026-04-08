@@ -92,6 +92,9 @@ describe("buildCompletedSessionReview", () => {
       ka.key_events.find((event) => event.event_type === "human_monitoring_snapshot_recorded")?.summary,
     ).toMatch(/Contributing sources:/i);
     expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(/freshness/i);
+    expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(
+      /interaction telemetry contributed live evidence during the run/i,
+    );
   });
 
   it("always includes terminal key events at the end of the key timeline", () => {
