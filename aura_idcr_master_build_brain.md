@@ -1162,6 +1162,53 @@ Use this section to track meaningful progress across sessions.
 - Next recommended step:
   - Hold scope unless the human explicitly requests a follow-up tutorial polish pass, deeper mobile walkthrough refinement, or another bounded frontend slice
 
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 tutorial sidecar window follow-up
+- Task worked on: Upgraded the running tutorial panel from a fixed blocker into a movable assistant-style sidecar window
+- Status: Done
+- What changed:
+  - Reworked `src/ui/TutorialOverlay.tsx` so the running tutorial now renders as a floating sidecar window with smart auto-placement, desktop drag support, manual-position memory for the current step, a reset-position action, and minimize/expand behavior without changing any existing tutorial flow, spotlight logic, gating, or progress handling
+  - Updated `src/styles/layout.css` so the sidecar window, drag chrome, minimized dock, and window actions feel lightweight and polished instead of modal-heavy while keeping the existing tutorial visual language
+  - Extended `src/ui/TutorialOverlay.test.tsx` to cover smart overlap avoidance, minimize/restore, and desktop drag/reset behavior in addition to the existing tutorial overlay checks
+  - Verified the enhancement with passing `npm test` and `npm run build`
+- What remains:
+  - Desktop interaction is the primary target for dragging; mobile remains functional through the existing responsive layout but was not expanded into a touch-first drag system
+- Blockers:
+  - None in repo after verification
+- Next recommended step:
+  - Hold scope unless the human explicitly requests touch dragging, deeper mobile sidecar refinement, or another bounded tutorial polish slice
+
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 tutorial menu interaction regression fix
+- Task worked on: Fixed the built-in tutorial launcher overlay so it correctly captures clicks instead of leaking them to the app behind it
+- Status: Done
+- What changed:
+  - Updated `src/styles/layout.css` so menu-mode tutorial overlays opt back into pointer events, keeping the launcher panel clickable and preventing background controls from receiving clicks while the intro dialog is open
+  - Added a small regression check in `src/ui/TutorialOverlay.test.tsx` confirming the launcher start action is clickable again
+  - Verified the narrow fix with passing `npm test` and `npm run build`
+- What remains:
+  - No additional walkthrough-flow change was required for the later full-tutorial Review handoff during this fix
+- Blockers:
+  - None
+- Next recommended step:
+  - Hold scope unless the human explicitly requests another tutorial-specific regression fix or polish pass
+
+- Date: 2026-04-07
+- Agent/session: GPT-5.4 Review-step tutorial lock regression fix
+- Task worked on: Fixed the guided tutorial loop that trapped the user on the Review workspace handoff step
+- Status: Done
+- What changed:
+  - Updated `src/ui/tutorial.ts` so the Review-handoff steps (`open-review` in the full walkthrough and `review-briefing` in the Review-only tour) explicitly require a manual workspace switch instead of being auto-forced back to the step's source workspace
+  - Preserved the existing tutorial copy, visuals, spotlighting, lock behavior, and progression rules while removing the stale auto-workspace override that caused `Review` to revert immediately to `Operate`
+  - Tightened the regression coverage in `src/state/sessionStore.test.tsx` so the Review tour now clicks the `Review` tab, verifies the workspace switch persists, and confirms the tutorial advances into the next Review step without resetting scenario state
+  - Re-verified the narrow fix with passing `npm test` and `npm run build`
+- What remains:
+  - No other tutorial flow, content, styling, or workspace logic was changed in this narrow regression fix
+- Blockers:
+  - None
+- Next recommended step:
+  - Hold scope unless the human explicitly requests another bounded tutorial regression fix or polish pass
+
 ---
 
 ## 26) Final reminder to all future agents

@@ -1058,6 +1058,7 @@ describe("AuraSessionStore", () => {
   });
 
   it("preserves the current scenario state for the review tutorial while guiding the user into Review", () => {
+    vi.useFakeTimers();
     installTutorialDomMocks();
     const store = new AuraSessionStore({
       session_index: 303,
@@ -1078,6 +1079,16 @@ describe("AuraSessionStore", () => {
     expect(screen.getByText(/Open the Review workspace\./i)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Review/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /^Next$/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Review/i }));
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(screen.getByTestId("review-workspace")).toBeInTheDocument();
+    expect(screen.getByText(/bounded oversight layer for interventions, event traceability, and demo markers/i)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Why Review is separate/i })).not.toBeInTheDocument();
     expect(store.getSnapshot().scenario.scenario_id).toBe("scn_main_steam_isolation_upset");
+    vi.useRealTimers();
   });
 });

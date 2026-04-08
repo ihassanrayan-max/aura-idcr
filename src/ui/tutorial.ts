@@ -397,6 +397,7 @@ const fullFlow: TutorialFlow = {
     {
       id: "open-review",
       workspace: "operate",
+      requiresManualWorkspaceSwitch: true,
       targetId: "workspace-switch",
       title: "Move into Review",
       summary: "Operate taught you how the live loop works. Review shows how the same session becomes oversight, replay, KPI evidence, and comparison-ready artifacts.",
@@ -538,6 +539,7 @@ const reviewFlow: TutorialFlow = {
     {
       id: "review-briefing",
       workspace: "operate",
+      requiresManualWorkspaceSwitch: true,
       targetId: "workspace-switch",
       title: "Why Review is separate",
       summary: "Review exists so evaluator evidence and supervisor tooling never drown out the live operator surface.",
