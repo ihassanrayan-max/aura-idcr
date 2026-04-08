@@ -587,10 +587,15 @@ describe("AuraSessionStore", () => {
     const initialSnapshot = store.getSnapshot();
 
     expect(initialSnapshot.human_monitoring.mode).toBe("placeholder_compatibility");
-    expect(initialSnapshot.human_monitoring.sources).toHaveLength(2);
+    expect(initialSnapshot.human_monitoring.sources).toHaveLength(3);
     expect(initialSnapshot.human_monitoring.interpretation_input?.provenance).toBe("legacy_runtime_placeholder");
     expect(
       initialSnapshot.human_monitoring.sources.some((source) => source.source_kind === "interaction_telemetry"),
+    ).toBe(true);
+    expect(
+      initialSnapshot.human_monitoring.sources.some(
+        (source) => source.source_kind === "camera_cv" && source.availability === "not_connected",
+      ),
     ).toBe(true);
     expect(initialSnapshot.events.some((event) => event.event_type === "human_monitoring_snapshot_recorded")).toBe(true);
 
@@ -602,6 +607,36 @@ describe("AuraSessionStore", () => {
 
     expect(nextSnapshot.human_monitoring.snapshot_id).toBe("hm_t0001");
     expect(nextSnapshot.plant_tick.source_event_ids).toContain(latestMonitoringEvent?.event_id);
+  });
+
+  it("publishes monitoring-only webcam refreshes without recomputing combined risk or support mode", () => {
+    const store = new AuraSessionStore({ session_index: 322, tick_duration_sec: 5 });
+    const before = store.getSnapshot();
+    const beforeEventCount = before.events.length;
+
+    store.setCameraCvIntent(true);
+    store.recordCameraCvObservation({
+      observation_kind: "stable_face",
+      face_count: 1,
+      strongest_face_confidence: 82,
+      face_center_offset: 0.1,
+      head_motion_delta: 0.08,
+      face_area_ratio: 0.14,
+      note: "single stable face for store test",
+    });
+
+    const after = store.getSnapshot();
+    const cameraSource = after.human_monitoring.sources.find((source) => source.source_kind === "camera_cv");
+
+    expect(cameraSource?.contributes_to_aggregate).toBe(true);
+    expect(after.operator_state.signal_confidence).toBeGreaterThanOrEqual(before.operator_state.signal_confidence);
+    expect(after.combined_risk.combined_risk_score).toBe(before.combined_risk.combined_risk_score);
+    expect(after.support_mode).toBe(before.support_mode);
+    expect(after.plant_tick.tick_id).toBe(before.plant_tick.tick_id);
+    expect(after.events.length).toBeGreaterThan(beforeEventCount);
+    expect(after.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded").length).toBeGreaterThan(
+      before.events.filter((event) => event.event_type === "human_monitoring_snapshot_recorded").length,
+    );
   });
 
   it("lets real UI interactions contribute through the canonical interaction telemetry source on the next tick", () => {
@@ -659,7 +694,7 @@ describe("AuraSessionStore", () => {
         );
       }),
     ).toBe(true);
-    expect(reviewMonitoringHighlight?.detail).toMatch(/interaction telemetry contributed live evidence during the run/i);
+    expect(reviewMonitoringHighlight?.detail).toMatch(/live monitoring sources contributed evidence during the run/i);
   });
 
   it("logs a replay-inspectable support-mode transition when the scenario escalates", () => {
@@ -862,6 +897,9 @@ describe("AuraSessionStore", () => {
       confirmPendingAction: () => false,
       dismissPendingActionConfirmation: () => undefined,
       recordInteractionTelemetry: () => undefined,
+      setCameraCvIntent: () => undefined,
+      updateCameraCvLifecycle: () => undefined,
+      recordCameraCvObservation: () => undefined,
       setInteractionTelemetrySuppressed: () => undefined,
       advanceTick: () => protectedSnapshot,
       reset: () => undefined,

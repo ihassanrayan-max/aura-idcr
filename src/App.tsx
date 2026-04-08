@@ -12,6 +12,7 @@ import { OperateWorkspace } from "./ui/OperateWorkspace";
 import { MetricStrip, StatusPill } from "./ui/primitives";
 import { ReviewWorkspace } from "./ui/ReviewWorkspace";
 import { TutorialOverlay } from "./ui/TutorialOverlay";
+import { useWebcamMonitoring } from "./ui/useWebcamMonitoring";
 import {
   getTutorialFlow,
   type RunPace,
@@ -134,6 +135,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   const [tutorialState, setTutorialState] = useState<TutorialState>(() =>
     store === defaultStore && !readTutorialDismissed() ? { mode: "menu" } : { mode: "closed" },
   );
+  const webcamMonitoring = useWebcamMonitoring({ store, snapshot });
 
   const previousSnapshotRef = useRef(snapshot);
   const tutorialAutoAdvanceStepRef = useRef<string | null>(null);
@@ -730,6 +732,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
             <StatusPill tone={checkpointPauseEnabled ? "ok" : "neutral"}>
               Checkpoint pauses {checkpointPauseEnabled ? "on" : "off"}
             </StatusPill>
+            <StatusPill tone={webcamMonitoring.statusTone}>{webcamMonitoring.statusLabel}</StatusPill>
             <button type="button" className="ghost-button" onClick={openTutorialMenu}>
               Tutorial guide
             </button>
@@ -830,6 +833,14 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
               >
                 {checkpointPauseEnabled ? "Turn checkpoint pauses off" : "Turn checkpoint pauses on"}
               </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={webcamMonitoring.disabled}
+                onClick={webcamMonitoring.toggle}
+              >
+                {webcamMonitoring.buttonLabel}
+              </button>
             </div>
           </div>
         </div>
@@ -848,6 +859,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
           </div>
           <p className="command-bar__summary">{runtimePauseReason}</p>
           <p className="command-bar__summary">{presentationPolicy.validation_status_summary}</p>
+          <p className="command-bar__summary">{webcamMonitoring.statusDetail}</p>
         </div>
       </header>
 

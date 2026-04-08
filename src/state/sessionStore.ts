@@ -59,10 +59,14 @@ import {
 } from "../runtime/plantTwin";
 import { buildCombinedRiskSnapshot } from "../runtime/combinedRisk";
 import {
+  type CameraCvLifecycleStatus,
   createHumanMonitoringRuntimeState,
   evaluateHumanMonitoring,
+  recordCameraCvObservation,
   recordInteractionTelemetry,
+  setCameraCvIntent,
   setInteractionTelemetrySuppressed,
+  updateCameraCvLifecycle,
   type HumanMonitoringRuntimeState,
 } from "../runtime/humanMonitoring";
 import { buildOperatorStateSnapshot } from "../runtime/operatorState";
@@ -101,6 +105,23 @@ type RecordUiInteractionParams = {
   target_id?: string;
   requested_value?: number;
   detail?: string;
+};
+
+type UpdateCameraCvLifecycleParams = {
+  lifecycle_status: CameraCvLifecycleStatus;
+  status_note: string;
+  unavailable_reason?: string;
+  clear_observations?: boolean;
+};
+
+type RecordCameraCvObservationParams = {
+  observation_kind: "stable_face" | "weak_face" | "no_face" | "multiple_faces";
+  face_count: number;
+  strongest_face_confidence: number;
+  face_center_offset: number;
+  head_motion_delta: number;
+  face_area_ratio: number;
+  note: string;
 };
 
 function summarizeAlarmClusters(alarm_intelligence: AlarmIntelligenceSnapshot) {
@@ -669,6 +690,66 @@ export class AuraSessionStore {
     };
   }
 
+  private publishMonitoringOnlySnapshot(): void {
+    const human_monitoring_result = evaluateHumanMonitoring({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      tick_index: this.snapshot.tick_index,
+      tick_duration_sec: this.tick_duration_sec,
+      plant_state: this.snapshot.plant_tick.plant_state,
+      alarm_set: this.snapshot.alarm_set,
+      alarm_intelligence: this.snapshot.alarm_intelligence,
+      reasoning_snapshot: this.snapshot.reasoning_snapshot,
+      executed_actions: this.snapshot.executed_actions,
+      lane_changed: false,
+      runtime_state: this.human_monitoring_runtime_state,
+    });
+    const operator_state = buildOperatorStateSnapshot({
+      human_monitoring: human_monitoring_result.snapshot,
+    });
+
+    this.human_monitoring_runtime_state = human_monitoring_result.runtime_state;
+
+    const human_monitoring_event = this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "human_monitoring_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: summarizeHumanMonitoring(human_monitoring_result.snapshot),
+      trace_refs: [{ ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id }],
+    });
+    const operator_state_event = this.logger.append({
+      sim_time_sec: this.snapshot.sim_time_sec,
+      event_type: "operator_state_snapshot_recorded",
+      source_module: "human_monitoring",
+      phase_id: this.snapshot.current_phase.phase_id,
+      payload: {
+        workload_index: operator_state.workload_index,
+        attention_stability_index: operator_state.attention_stability_index,
+        signal_confidence: operator_state.signal_confidence,
+        degraded_mode_active: operator_state.degraded_mode_active,
+        degraded_mode_reason: operator_state.degraded_mode_reason,
+        observation_window_ticks: operator_state.observation_window_ticks,
+      },
+      trace_refs: [{ ref_type: "tick_id", ref_value: this.snapshot.plant_tick.tick_id }],
+    });
+
+    this.snapshot = {
+      ...this.snapshot,
+      human_monitoring: human_monitoring_result.snapshot,
+      operator_state,
+      events: this.logger.list(),
+      plant_tick: {
+        ...this.snapshot.plant_tick,
+        source_event_ids: [
+          ...this.snapshot.plant_tick.source_event_ids,
+          human_monitoring_event.event_id,
+          operator_state_event.event_id,
+        ],
+      },
+    };
+    this.emit();
+  }
+
   private evaluateScenarioOutcome(params: {
     sim_time_sec: number;
     plant_state: PlantTick["plant_state"];
@@ -916,6 +997,53 @@ export class AuraSessionStore {
     }
 
     this.recordUiInteraction(params);
+  }
+
+  setCameraCvIntent(enabled: boolean): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    const result = setCameraCvIntent({
+      runtime_state: this.human_monitoring_runtime_state,
+      enabled,
+    });
+    this.human_monitoring_runtime_state = result.runtime_state;
+    if (result.refresh_recommended) {
+      this.publishMonitoringOnlySnapshot();
+    }
+  }
+
+  updateCameraCvLifecycle(params: UpdateCameraCvLifecycleParams): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    const result = updateCameraCvLifecycle({
+      runtime_state: this.human_monitoring_runtime_state,
+      ...params,
+    });
+    this.human_monitoring_runtime_state = result.runtime_state;
+    if (result.refresh_recommended) {
+      this.publishMonitoringOnlySnapshot();
+    }
+  }
+
+  recordCameraCvObservation(params: RecordCameraCvObservationParams): void {
+    if (this.snapshot.outcome) {
+      return;
+    }
+
+    const result = recordCameraCvObservation({
+      runtime_state: this.human_monitoring_runtime_state,
+      sim_time_sec: this.snapshot.sim_time_sec,
+      tick_index: this.snapshot.tick_index,
+      ...params,
+    });
+    this.human_monitoring_runtime_state = result.runtime_state;
+    if (result.refresh_recommended) {
+      this.publishMonitoringOnlySnapshot();
+    }
   }
 
   setSessionMode(mode: SessionMode): void {

@@ -58,6 +58,24 @@ function formatValidationOutcome(payload: Record<string, unknown>): string {
   return String(outcome ?? "unknown");
 }
 
+function liveMonitoringContributorLabels(sources: unknown): string[] {
+  if (!Array.isArray(sources)) {
+    return [];
+  }
+
+  return sources
+    .filter(
+      (source) =>
+        source &&
+        typeof source === "object" &&
+        "source_kind" in source &&
+        "contributes_to_aggregate" in source &&
+        source.contributes_to_aggregate === true &&
+        (source.source_kind === "interaction_telemetry" || source.source_kind === "camera_cv"),
+    )
+    .map((source) => (source.source_kind === "camera_cv" ? "Webcam monitoring" : "Interaction telemetry"));
+}
+
 function summarizeEventForReview(event: SessionLogEvent): { title: string; summary: string } {
   const p = event.payload;
   switch (event.event_type) {
@@ -82,17 +100,7 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
       const status = typeof p.status_summary === "string" ? p.status_summary : "";
       const connected = typeof p.connected_source_count === "number" ? p.connected_source_count : 0;
       const contributing = typeof p.contributing_source_count === "number" ? p.contributing_source_count : 0;
-      const interactionActive =
-        Array.isArray(p.sources) &&
-        p.sources.some(
-          (source) =>
-            source &&
-            typeof source === "object" &&
-            "source_kind" in source &&
-            source.source_kind === "interaction_telemetry" &&
-            "contributes_to_aggregate" in source &&
-            source.contributes_to_aggregate === true,
-        );
+      const liveContributors = liveMonitoringContributorLabels(p.sources);
       return {
         title: "Human-monitoring snapshot recorded",
         summary:
@@ -101,7 +109,7 @@ function summarizeEventForReview(event: SessionLogEvent): { title: string; summa
             freshness && `Freshness: ${freshness}.`,
             `Connected sources: ${connected}.`,
             `Contributing sources: ${contributing}.`,
-            interactionActive ? "Interaction telemetry contributed live evidence." : "",
+            liveContributors.length > 0 ? `${liveContributors.join(" and ")} contributed live evidence.` : "",
             status,
           ]
             .filter(Boolean)
@@ -391,39 +399,15 @@ function buildHighlights(events: SessionLogEvent[], outcome: ScenarioOutcome): C
     const connected = typeof p.connected_source_count === "number" ? p.connected_source_count : 0;
     const contributing = typeof p.contributing_source_count === "number" ? p.contributing_source_count : 0;
     const status = typeof p.status_summary === "string" ? p.status_summary : "";
-    const interactionActive =
-      Array.isArray(p.sources) &&
-      p.sources.some(
-        (source) =>
-          source &&
-          typeof source === "object" &&
-          "source_kind" in source &&
-          source.source_kind === "interaction_telemetry" &&
-          "contributes_to_aggregate" in source &&
-          source.contributes_to_aggregate === true,
-      );
+    const liveContributors = liveMonitoringContributorLabels(p.sources);
     const interactionActiveEver = events
       .filter((event) => event.event_type === "human_monitoring_snapshot_recorded")
-      .some((event) => {
-        const sources = event.payload.sources;
-        return (
-          Array.isArray(sources) &&
-          sources.some(
-            (source) =>
-              source &&
-              typeof source === "object" &&
-              "source_kind" in source &&
-              source.source_kind === "interaction_telemetry" &&
-              "contributes_to_aggregate" in source &&
-              source.contributes_to_aggregate === true,
-          )
-        );
-      });
+      .some((event) => liveMonitoringContributorLabels(event.payload.sources).length > 0);
     highlights.push({
       highlight_id: `hl_monitoring_${latestMonitoring.event_id}`,
       kind: "human_monitoring",
       label: "Human-monitoring posture",
-      detail: `Mode ${mode}; freshness ${freshness}; connected sources ${connected}; contributing sources ${contributing}.${interactionActiveEver ? " Interaction telemetry contributed live evidence during the run." : ""}${interactionActive ? " It remained current in the latest snapshot." : ""} ${status}`.trim(),
+      detail: `Mode ${mode}; freshness ${freshness}; connected sources ${connected}; contributing sources ${contributing}.${interactionActiveEver ? " Live monitoring sources contributed evidence during the run." : ""}${liveContributors.length > 0 ? ` ${liveContributors.join(" and ")} remained current in the latest snapshot.` : ""} ${status}`.trim(),
     });
   }
 

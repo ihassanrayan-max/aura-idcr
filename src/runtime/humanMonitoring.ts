@@ -32,6 +32,7 @@ export type LegacyRuntimePlaceholderParams = {
 export type HumanMonitoringEvaluationContext = LegacyRuntimePlaceholderParams;
 export type HumanMonitoringAdapterContext = HumanMonitoringEvaluationContext & {
   interaction_telemetry: InteractionTelemetryRuntimeState;
+  camera_cv: CameraCvRuntimeState;
 };
 
 export type HumanMonitoringSourceReading = {
@@ -52,12 +53,49 @@ export type HumanMonitoringSourceWindowState = {
 export type HumanMonitoringRuntimeState = {
   sources: Record<string, HumanMonitoringSourceWindowState>;
   interaction_telemetry: InteractionTelemetryRuntimeState;
+  camera_cv: CameraCvRuntimeState;
 };
 
 export type InteractionTelemetryRuntimeState = {
   next_sequence: number;
   records: InteractionTelemetryRecord[];
   suppressed: boolean;
+};
+
+export type CameraCvLifecycleStatus =
+  | "off"
+  | "initializing"
+  | "active"
+  | "degraded"
+  | "unavailable";
+
+export type CameraCvObservationKind =
+  | "stable_face"
+  | "weak_face"
+  | "no_face"
+  | "multiple_faces";
+
+export type CameraCvObservation = {
+  observation_id: string;
+  sim_time_sec: number;
+  tick_index: number;
+  observation_kind: CameraCvObservationKind;
+  face_count: number;
+  strongest_face_confidence: number;
+  face_center_offset: number;
+  head_motion_delta: number;
+  face_area_ratio: number;
+  note: string;
+};
+
+export type CameraCvRuntimeState = {
+  intent_enabled: boolean;
+  lifecycle_status: CameraCvLifecycleStatus;
+  unavailable_reason?: string;
+  status_note: string;
+  next_sequence: number;
+  observations: CameraCvObservation[];
+  last_refresh_bucket?: string;
 };
 
 export type RecordInteractionTelemetryParams = {
@@ -70,6 +108,37 @@ export type RecordInteractionTelemetryParams = {
   target_id?: string;
   requested_value?: number;
   detail?: string;
+};
+
+export type SetCameraCvIntentParams = {
+  runtime_state: HumanMonitoringRuntimeState;
+  enabled: boolean;
+};
+
+export type UpdateCameraCvLifecycleParams = {
+  runtime_state: HumanMonitoringRuntimeState;
+  lifecycle_status: CameraCvLifecycleStatus;
+  status_note: string;
+  unavailable_reason?: string;
+  clear_observations?: boolean;
+};
+
+export type RecordCameraCvObservationParams = {
+  runtime_state: HumanMonitoringRuntimeState;
+  sim_time_sec: number;
+  tick_index: number;
+  observation_kind: CameraCvObservationKind;
+  face_count: number;
+  strongest_face_confidence: number;
+  face_center_offset: number;
+  head_motion_delta: number;
+  face_area_ratio: number;
+  note: string;
+};
+
+export type CameraCvTransitionResult = {
+  runtime_state: HumanMonitoringRuntimeState;
+  refresh_recommended: boolean;
 };
 
 export type HumanMonitoringSourceAdapter = {
@@ -96,6 +165,8 @@ export type EvaluateHumanMonitoringResult = {
 
 const INTERACTION_TELEMETRY_WINDOW_SEC = 240;
 const INTERACTION_TELEMETRY_MAX_RECORDS = 96;
+const CAMERA_CV_WINDOW_SEC = 120;
+const CAMERA_CV_MAX_OBSERVATIONS = 24;
 const ACTIONABLE_INTERACTION_KINDS = new Set<InteractionTelemetryEventKind>([
   "action_request",
   "action_confirmation",
@@ -112,6 +183,60 @@ function clampWindowedInteractionRecords(
   return records
     .filter((record) => sim_time_sec - record.sim_time_sec <= INTERACTION_TELEMETRY_WINDOW_SEC)
     .slice(-INTERACTION_TELEMETRY_MAX_RECORDS);
+}
+
+function clampWindowedCameraCvObservations(
+  sim_time_sec: number,
+  observations: CameraCvObservation[],
+): CameraCvObservation[] {
+  return observations
+    .filter((observation) => sim_time_sec - observation.sim_time_sec <= CAMERA_CV_WINDOW_SEC)
+    .slice(-CAMERA_CV_MAX_OBSERVATIONS);
+}
+
+function formatCameraCvObservationLabel(observation_kind: CameraCvObservationKind): string {
+  switch (observation_kind) {
+    case "stable_face":
+      return "stable face signal";
+    case "weak_face":
+      return "weak face confidence";
+    case "no_face":
+      return "no face in frame";
+    case "multiple_faces":
+      return "multiple faces detected";
+  }
+}
+
+function formatLiveSourceKind(source_kind: HumanMonitoringSourceKind): string {
+  switch (source_kind) {
+    case "interaction_telemetry":
+      return "interaction telemetry";
+    case "camera_cv":
+      return "webcam monitoring";
+    default:
+      return source_kind;
+  }
+}
+
+function cameraCvRefreshBucket(camera_cv: CameraCvRuntimeState): string {
+  if (!camera_cv.intent_enabled || camera_cv.lifecycle_status === "off") {
+    return "off";
+  }
+
+  if (camera_cv.lifecycle_status === "initializing") {
+    return "initializing";
+  }
+
+  if (camera_cv.lifecycle_status === "unavailable") {
+    return `unavailable:${camera_cv.unavailable_reason ?? "unknown"}`;
+  }
+
+  const latest_observation = camera_cv.observations[camera_cv.observations.length - 1];
+  if (!latest_observation) {
+    return camera_cv.lifecycle_status === "active" ? "awaiting_face" : "degraded";
+  }
+
+  return latest_observation.observation_kind;
 }
 
 function formatInteractionSourceLabel(event_kind: InteractionTelemetryEventKind): string {
@@ -417,9 +542,7 @@ function buildHumanMonitoringSnapshot(params: {
   const connected_live_sources = connected_sources.filter(
     (source) => source.source_kind !== "legacy_runtime_placeholder",
   );
-  const live_source_labels = connected_live_sources.map((source) =>
-    source.source_kind === "interaction_telemetry" ? "interaction telemetry" : source.source_kind,
-  );
+  const live_source_labels = connected_live_sources.map((source) => formatLiveSourceKind(source.source_kind));
   const mode: HumanMonitoringSnapshot["mode"] =
     connected_sources.length === 0
       ? "unavailable"
@@ -490,6 +613,14 @@ export function createHumanMonitoringRuntimeState(): HumanMonitoringRuntimeState
       records: [],
       suppressed: false,
     },
+    camera_cv: {
+      intent_enabled: false,
+      lifecycle_status: "off",
+      status_note: "Webcam monitoring is off until manually enabled.",
+      next_sequence: 0,
+      observations: [],
+      last_refresh_bucket: "off",
+    },
   };
 }
 
@@ -507,6 +638,69 @@ export function setInteractionTelemetrySuppressed(
       ...runtime_state.interaction_telemetry,
       suppressed,
     },
+  };
+}
+
+export function setCameraCvIntent(params: SetCameraCvIntentParams): CameraCvTransitionResult {
+  const current_bucket = cameraCvRefreshBucket(params.runtime_state.camera_cv);
+  const next_camera_cv: CameraCvRuntimeState = params.enabled
+    ? {
+        ...params.runtime_state.camera_cv,
+        intent_enabled: true,
+        lifecycle_status: "initializing",
+        unavailable_reason: undefined,
+        status_note: "Webcam monitoring is requesting local camera access for bounded advisory monitoring.",
+        observations: [],
+      }
+    : {
+        intent_enabled: false,
+        lifecycle_status: "off",
+        unavailable_reason: undefined,
+        status_note: "Webcam monitoring is off until manually enabled.",
+        next_sequence: params.runtime_state.camera_cv.next_sequence,
+        observations: [],
+        last_refresh_bucket: "off",
+      };
+  const next_bucket = cameraCvRefreshBucket(next_camera_cv);
+
+  return {
+    runtime_state: {
+      ...params.runtime_state,
+      camera_cv: {
+        ...next_camera_cv,
+        last_refresh_bucket: next_bucket,
+      },
+    },
+    refresh_recommended: current_bucket !== next_bucket,
+  };
+}
+
+export function updateCameraCvLifecycle(
+  params: UpdateCameraCvLifecycleParams,
+): CameraCvTransitionResult {
+  const current_bucket = cameraCvRefreshBucket(params.runtime_state.camera_cv);
+  const next_camera_cv: CameraCvRuntimeState = {
+    ...params.runtime_state.camera_cv,
+    intent_enabled: params.runtime_state.camera_cv.intent_enabled,
+    lifecycle_status: params.lifecycle_status,
+    unavailable_reason: params.lifecycle_status === "unavailable" ? params.unavailable_reason : undefined,
+    status_note: params.status_note,
+    observations: params.clear_observations ? [] : [...params.runtime_state.camera_cv.observations],
+  };
+  const next_bucket = cameraCvRefreshBucket(next_camera_cv);
+
+  return {
+    runtime_state: {
+      ...params.runtime_state,
+      camera_cv: {
+        ...next_camera_cv,
+        last_refresh_bucket: next_bucket,
+      },
+    },
+    refresh_recommended:
+      current_bucket !== next_bucket ||
+      params.runtime_state.camera_cv.status_note !== params.status_note ||
+      params.runtime_state.camera_cv.unavailable_reason !== params.unavailable_reason,
   };
 }
 
@@ -549,6 +743,62 @@ export function recordInteractionTelemetry(
       suppressed: telemetry_state.suppressed,
       records: clampWindowedInteractionRecords(params.sim_time_sec, next_records),
     },
+  };
+}
+
+export function recordCameraCvObservation(
+  params: RecordCameraCvObservationParams,
+): CameraCvTransitionResult {
+  if (!params.runtime_state.camera_cv.intent_enabled) {
+    return {
+      runtime_state: params.runtime_state,
+      refresh_recommended: false,
+    };
+  }
+
+  const previous_bucket = params.runtime_state.camera_cv.last_refresh_bucket ?? cameraCvRefreshBucket(params.runtime_state.camera_cv);
+  const next_sequence = params.runtime_state.camera_cv.next_sequence + 1;
+  const next_observation: CameraCvObservation = {
+    observation_id: `cam_${String(next_sequence).padStart(4, "0")}`,
+    sim_time_sec: params.sim_time_sec,
+    tick_index: params.tick_index,
+    observation_kind: params.observation_kind,
+    face_count: params.face_count,
+    strongest_face_confidence: roundIndex(params.strongest_face_confidence),
+    face_center_offset: clamp(params.face_center_offset, 0, 1),
+    head_motion_delta: clamp(params.head_motion_delta, 0, 1),
+    face_area_ratio: clamp(params.face_area_ratio, 0, 1),
+    note: params.note,
+  };
+  const next_observations = clampWindowedCameraCvObservations(
+    params.sim_time_sec,
+    [...params.runtime_state.camera_cv.observations, next_observation],
+  );
+  const next_lifecycle_status: CameraCvLifecycleStatus =
+    params.observation_kind === "stable_face" ? "active" : "degraded";
+  const next_status_note =
+    params.observation_kind === "stable_face"
+      ? "Webcam monitoring is active with a stable bounded face-presence signal."
+      : `Webcam monitoring remains advisory because ${params.note}`;
+  const next_camera_cv: CameraCvRuntimeState = {
+    ...params.runtime_state.camera_cv,
+    lifecycle_status: next_lifecycle_status,
+    unavailable_reason: undefined,
+    status_note: next_status_note,
+    next_sequence,
+    observations: next_observations,
+  };
+  const next_bucket = cameraCvRefreshBucket(next_camera_cv);
+
+  return {
+    runtime_state: {
+      ...params.runtime_state,
+      camera_cv: {
+        ...next_camera_cv,
+        last_refresh_bucket: previous_bucket === next_bucket ? previous_bucket : next_bucket,
+      },
+    },
+    refresh_recommended: previous_bucket !== next_bucket,
   };
 }
 
@@ -777,6 +1027,187 @@ function buildInteractionTelemetrySource(
   };
 }
 
+function averageCameraObservationMetric(
+  observations: CameraCvObservation[],
+  selector: (observation: CameraCvObservation) => number,
+): number {
+  if (observations.length === 0) {
+    return 0;
+  }
+
+  return observations.reduce((total, observation) => total + selector(observation), 0) / observations.length;
+}
+
+function buildCameraCvSource(context: HumanMonitoringAdapterContext): HumanMonitoringSourceReading {
+  const camera_cv = context.camera_cv;
+  if (!camera_cv.intent_enabled || camera_cv.lifecycle_status === "off") {
+    return {
+      availability: "not_connected",
+      confidence: 0,
+      status_note: "Webcam monitoring is off until manually enabled.",
+    };
+  }
+
+  if (camera_cv.lifecycle_status === "unavailable") {
+    return {
+      availability: "unavailable",
+      confidence: 0,
+      status_note: camera_cv.status_note,
+    };
+  }
+
+  if (camera_cv.lifecycle_status === "initializing") {
+    return {
+      availability: "degraded",
+      confidence: 18,
+      status_note: camera_cv.status_note,
+      interpretation_input: {
+        workload_index: 22,
+        attention_stability_index: 68,
+        signal_confidence: 18,
+        degraded_mode_active: true,
+        degraded_mode_reason:
+          "Webcam monitoring is still initializing, so visual proxies are not yet stable enough to interpret.",
+        observation_window_ticks: 0,
+        interpretation_note:
+          "Webcam monitoring is still initializing. No medical, fatigue, or emotion inference is being made.",
+        provenance: "canonical_source_pipeline",
+      },
+    };
+  }
+
+  const observations = clampWindowedCameraCvObservations(context.sim_time_sec, camera_cv.observations);
+  const latest_observation = observations[observations.length - 1];
+  if (!latest_observation) {
+    return {
+      availability: "degraded",
+      confidence: 20,
+      status_note:
+        "Webcam monitoring is enabled, but no usable visual observation has been captured yet. Outputs remain bounded advisory proxies only.",
+      interpretation_input: {
+        workload_index: 24,
+        attention_stability_index: 66,
+        signal_confidence: 20,
+        degraded_mode_active: true,
+        degraded_mode_reason:
+          "Webcam monitoring is enabled but still waiting for a usable bounded visual observation window.",
+        observation_window_ticks: 0,
+        interpretation_note:
+          "Webcam monitoring remains in an observation-wait state and is not making cognitive or medical claims.",
+        provenance: "canonical_source_pipeline",
+      },
+    };
+  }
+
+  const stable_observations = observations.filter((observation) => observation.observation_kind === "stable_face");
+  const average_center_offset = averageCameraObservationMetric(stable_observations, (observation) => observation.face_center_offset);
+  const average_head_motion = averageCameraObservationMetric(stable_observations, (observation) => observation.head_motion_delta);
+  const average_face_confidence = averageCameraObservationMetric(observations, (observation) => observation.strongest_face_confidence);
+  const latest_kind = latest_observation.observation_kind;
+  const presence_penalty =
+    latest_kind === "multiple_faces"
+      ? 18
+      : latest_kind === "no_face"
+        ? 16
+        : latest_kind === "weak_face"
+          ? 10
+          : 0;
+  const workload_index = roundIndex(
+    clamp(
+      20 +
+        average_center_offset * 18 +
+        average_head_motion * 24 +
+        presence_penalty +
+        Math.max(3 - stable_observations.length, 0) * 4,
+      16,
+      58,
+    ),
+  );
+  const attention_stability_index = roundIndex(
+    clamp(
+      80 -
+        average_center_offset * 22 -
+        average_head_motion * 28 -
+        presence_penalty * 1.4 -
+        Math.max(2 - stable_observations.length, 0) * 5,
+      38,
+      86,
+    ),
+  );
+
+  let signal_confidence =
+    26 +
+    Math.min(observations.length, 6) * 6 +
+    Math.min(stable_observations.length, 4) * 7 +
+    average_face_confidence * 0.28 -
+    presence_penalty * 1.1 -
+    average_center_offset * 18 -
+    average_head_motion * 18;
+  if (latest_kind !== "stable_face") {
+    signal_confidence -= 8;
+  }
+  const bounded_signal_confidence = roundIndex(clamp(signal_confidence, 18, stable_observations.length >= 3 ? 82 : 72));
+  const degraded_reasons: string[] = [];
+  if (stable_observations.length < 2) {
+    degraded_reasons.push("the stable face window is still short");
+  }
+  if (latest_kind !== "stable_face") {
+    degraded_reasons.push(formatCameraCvObservationLabel(latest_kind));
+  }
+  if (average_center_offset > 0.28) {
+    degraded_reasons.push("the face remains off-center");
+  }
+  if (average_head_motion > 0.22) {
+    degraded_reasons.push("head motion remains elevated");
+  }
+
+  const availability: HumanMonitoringSourceAvailability =
+    latest_kind === "stable_face" && stable_observations.length >= 2 && bounded_signal_confidence >= 68
+      ? "active"
+      : "degraded";
+  const interpretation_note = [
+    `Webcam monitoring captured ${observations.length} recent visual samples.`,
+    latest_kind === "stable_face"
+      ? "Current proxy suggests a face is present with bounded stability and centering information."
+      : `Current proxy is limited by ${formatCameraCvObservationLabel(latest_kind)}.`,
+    "These outputs are advisory visual proxies only and do not claim emotion, fatigue, or medical truth.",
+  ].join(" ");
+
+  return {
+    availability,
+    confidence: bounded_signal_confidence,
+    status_note: [
+      `Webcam monitoring reports ${formatCameraCvObservationLabel(latest_kind)}.`,
+      degraded_reasons.length > 0
+        ? `Confidence reduced because ${degraded_reasons.join("; ")}.`
+        : "Recent bounded face observations are stable enough to contribute advisory context.",
+      "This source remains advisory-only.",
+    ].join(" "),
+    observation_sim_time_sec: latest_observation.sim_time_sec,
+    interpretation_input: {
+      workload_index,
+      attention_stability_index,
+      signal_confidence: bounded_signal_confidence,
+      degraded_mode_active: availability !== "active" || bounded_signal_confidence < 70,
+      degraded_mode_reason:
+        degraded_reasons.length > 0
+          ? `Webcam monitoring confidence is reduced because ${degraded_reasons.join("; ")}.`
+          : "Webcam monitoring currently provides a bounded, stable visual proxy window.",
+      observation_window_ticks: tickSpanFromRecords(
+        observations.map((observation) => ({
+          interaction_id: observation.observation_id,
+          sim_time_sec: observation.sim_time_sec,
+          tick_index: observation.tick_index,
+          event_kind: "runtime_control",
+          ui_region: "runtime_controls",
+        })),
+      ),
+      interpretation_note,
+      provenance: "canonical_source_pipeline",
+    },
+  };
+}
+
 export function calculatePlantSeverityIndex(plant_state: PlantStateSnapshot): number {
   const level = numberValue(plant_state.vessel_water_level_m);
   const pressure = numberValue(plant_state.vessel_pressure_mpa);
@@ -975,9 +1406,19 @@ const interactionTelemetryAdapter: HumanMonitoringSourceAdapter = {
   evaluate: (context) => buildInteractionTelemetrySource(context),
 };
 
+const cameraCvAdapter: HumanMonitoringSourceAdapter = {
+  source_id: "camera_cv",
+  source_kind: "camera_cv",
+  expected_update_interval_sec: 2,
+  stale_after_sec: 8,
+  window_duration_sec: CAMERA_CV_WINDOW_SEC,
+  evaluate: (context) => buildCameraCvSource(context),
+};
+
 export const DEFAULT_HUMAN_MONITORING_SOURCE_ADAPTERS: readonly HumanMonitoringSourceAdapter[] = [
   legacyRuntimePlaceholderAdapter,
   interactionTelemetryAdapter,
+  cameraCvAdapter,
 ];
 
 export function evaluateHumanMonitoring(
@@ -993,6 +1434,13 @@ export function evaluateHumanMonitoring(
         params.runtime_state.interaction_telemetry.records,
       ),
     },
+    camera_cv: {
+      ...params.runtime_state.camera_cv,
+      observations: clampWindowedCameraCvObservations(
+        params.sim_time_sec,
+        params.runtime_state.camera_cv.observations,
+      ),
+    },
   };
   const source_snapshots: HumanMonitoringSourceSnapshot[] = [];
   const readings: Array<{ source_id: string; reading: HumanMonitoringSourceReading }> = [];
@@ -1003,6 +1451,7 @@ export function evaluateHumanMonitoring(
       {
         ...params,
         interaction_telemetry: next_runtime_state.interaction_telemetry,
+        camera_cv: next_runtime_state.camera_cv,
       },
       previous_source_state,
     );
@@ -1032,6 +1481,13 @@ export function evaluateHumanMonitoring(
       sources: source_snapshots,
       interpretation_input,
     }),
-    runtime_state: next_runtime_state,
+    runtime_state: {
+      ...next_runtime_state,
+      camera_cv: {
+        ...next_runtime_state.camera_cv,
+        last_refresh_bucket:
+          next_runtime_state.camera_cv.last_refresh_bucket ?? cameraCvRefreshBucket(next_runtime_state.camera_cv),
+      },
+    },
   };
 }

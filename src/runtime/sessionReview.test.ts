@@ -93,7 +93,7 @@ describe("buildCompletedSessionReview", () => {
     ).toMatch(/Contributing sources:/i);
     expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(/freshness/i);
     expect(ka.highlights.find((highlight) => highlight.kind === "human_monitoring")?.detail).toMatch(
-      /interaction telemetry contributed live evidence during the run/i,
+      /live monitoring sources contributed evidence during the run/i,
     );
   });
 

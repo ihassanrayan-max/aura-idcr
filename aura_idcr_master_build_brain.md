@@ -1294,6 +1294,30 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-08
+- Agent/session: GPT-5.4 Packet 3 webcam monitoring session
+- Task worked on: Implemented a thin, opt-in webcam / CV proxy source through the canonical human-monitoring pipeline without bypassing the existing evaluator or disturbing deterministic scenario flow
+- Status: Done
+- What changed:
+  - Updated `src/runtime/humanMonitoring.ts` so `HumanMonitoringRuntimeState` now owns bounded webcam/CV runtime state alongside interaction telemetry, added manual enable/disable, lifecycle/unavailable handling, bounded visual observations, refresh-transition helpers, and registered a real `camera_cv` adapter beside the existing placeholder and interaction sources
+  - Implemented modest advisory webcam heuristics only: stable face presence, weak/no-face handling, multiple-face ambiguity, coarse face centering, and head-motion stability proxies, all mapped into the canonical `interpretation_input` with bounded confidence so webcam evidence cannot dominate the existing monitoring picture
+  - Updated `src/state/sessionStore.ts` so webcam lifecycle and observation changes can trigger a monitoring-only canonical refresh that republishes `human_monitoring` and `operator_state` snapshots/logs without recomputing plant progression, combined risk, support mode, validator state, or scenario outcomes outside the normal tick path
+  - Added `src/ui/useWebcamMonitoring.ts` and wired `src/App.tsx` with a minimal command-bar enable/disable control plus a compact advisory webcam status indicator/detail line, keeping the UI change narrow and avoiding any preview panel or broader layout redesign
+  - Added the local MediaPipe dependency and local assets for the webcam path: `@mediapipe/tasks-vision`, copied package WASM files into `public/mediapipe/`, and stored the BlazeFace short-range model in `public/models/` so the webcam path stays lazy-loaded and local-only rather than CDN/cloud-backed
+  - Updated `src/runtime/sessionReview.ts` so review/key-event summaries now acknowledge live webcam contribution alongside interaction telemetry when it occurred during a run
+  - Extended verification in `src/runtime/humanMonitoring.test.ts`, `src/state/sessionStore.test.tsx`, `src/runtime/sessionReview.test.ts`, and new `src/ui/useWebcamMonitoring.test.tsx` to cover default disconnected behavior, stable webcam contribution, stale aging, permission denial, unsupported environments, monitoring-only refresh behavior, and cleanup on disable
+- What remains:
+  - Packet 3 still intentionally does not add richer plant+human fusion policy, UI-mode switching driven by webcam output, gaze estimation, fatigue claims, emotion detection, worker/off-main-thread processing, or any server/cloud CV path
+  - Webcam enablement currently persists for the active tab session only and restarts locally on session reset; no cross-reload persistence or settings system was added in this packet
+  - The build now emits a Vite chunk-size warning because the lazy MediaPipe bundle is substantial, but the build still passes and the webcam path is already code-split behind explicit manual enable
+- Blockers:
+  - None in-repo after verification
+- Next recommended step:
+  - Future plant+human fusion work should continue to use the canonical freshness/degraded semantics already published by `human_monitoring` rather than introducing webcam-specific downstream logic
+  - If later packets need more performance headroom, the safest follow-up is worker/off-main-thread CV execution or more aggressive asset/code-splitting, not a redesign of the monitoring contracts
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

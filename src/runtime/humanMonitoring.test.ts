@@ -9,8 +9,11 @@ import {
   DEFAULT_HUMAN_MONITORING_SOURCE_ADAPTERS,
   createHumanMonitoringRuntimeState,
   evaluateHumanMonitoring,
+  recordCameraCvObservation,
   recordInteractionTelemetry,
+  setCameraCvIntent,
   setInteractionTelemetrySuppressed,
+  updateCameraCvLifecycle,
 } from "./humanMonitoring";
 
 const basePlantState: PlantStateSnapshot = {
@@ -157,6 +160,46 @@ function buildInteractionRuntimeState(
       detail: "test interaction",
     });
   }
+  return runtime_state;
+}
+
+function buildCameraRuntimeState(params: {
+  lifecycle_status?: "initializing" | "active" | "degraded" | "unavailable";
+  status_note?: string;
+  unavailable_reason?: string;
+  observations?: Array<{
+    sim_time_sec: number;
+    tick_index: number;
+    observation_kind: "stable_face" | "weak_face" | "no_face" | "multiple_faces";
+    face_count: number;
+    strongest_face_confidence: number;
+    face_center_offset: number;
+    head_motion_delta: number;
+    face_area_ratio: number;
+    note: string;
+  }>;
+}) {
+  let runtime_state = createHumanMonitoringRuntimeState();
+  runtime_state = setCameraCvIntent({
+    runtime_state,
+    enabled: true,
+  }).runtime_state;
+
+  runtime_state = updateCameraCvLifecycle({
+    runtime_state,
+    lifecycle_status: params.lifecycle_status ?? "degraded",
+    status_note: params.status_note ?? "Camera connected for test.",
+    unavailable_reason: params.unavailable_reason,
+    clear_observations: true,
+  }).runtime_state;
+
+  for (const observation of params.observations ?? []) {
+    runtime_state = recordCameraCvObservation({
+      runtime_state,
+      ...observation,
+    }).runtime_state;
+  }
+
   return runtime_state;
 }
 
@@ -414,6 +457,113 @@ describe("humanMonitoring interaction telemetry", () => {
       target_id: "review",
     });
     expect(runtime_state.interaction_telemetry.records).toHaveLength(1);
+  });
+
+  it("keeps webcam monitoring disconnected by default until it is manually enabled", () => {
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 10,
+      tick_index: 2,
+    });
+    const cameraSource = snapshot.sources.find((source) => source.source_kind === "camera_cv");
+
+    expect(cameraSource?.availability).toBe("not_connected");
+    expect(cameraSource?.contributes_to_aggregate).toBe(false);
+    expect(cameraSource?.status_note).toMatch(/off until manually enabled/i);
+  });
+
+  it("lets stable webcam observations contribute through the same canonical pipeline", () => {
+    const runtime_state = buildCameraRuntimeState({
+      lifecycle_status: "active",
+      status_note: "Camera active for stable-face test.",
+      observations: [
+        {
+          sim_time_sec: 10,
+          tick_index: 2,
+          observation_kind: "stable_face",
+          face_count: 1,
+          strongest_face_confidence: 82,
+          face_center_offset: 0.12,
+          head_motion_delta: 0.08,
+          face_area_ratio: 0.14,
+          note: "single stable face in frame",
+        },
+        {
+          sim_time_sec: 15,
+          tick_index: 3,
+          observation_kind: "stable_face",
+          face_count: 1,
+          strongest_face_confidence: 84,
+          face_center_offset: 0.1,
+          head_motion_delta: 0.06,
+          face_area_ratio: 0.15,
+          note: "single stable face remains centered",
+        },
+      ],
+    });
+
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 18,
+      tick_index: 3,
+      runtime_state,
+      alarm_set: buildAlarmSet(2, { newly_raised_alarm_ids: [] }),
+    });
+    const cameraSource = snapshot.sources.find((source) => source.source_kind === "camera_cv");
+
+    expect(cameraSource?.availability).toBe("active");
+    expect(cameraSource?.contributes_to_aggregate).toBe(true);
+    expect(snapshot.mode).toBe("live_sources");
+    expect(snapshot.interpretation_input?.contributing_source_ids).toContain("camera_cv");
+    expect(cameraSource?.status_note).toMatch(/webcam monitoring reports stable face signal/i);
+  });
+
+  it("marks webcam permission denial as unavailable without claiming live contribution", () => {
+    const runtime_state = buildCameraRuntimeState({
+      lifecycle_status: "unavailable",
+      unavailable_reason: "permission_denied",
+      status_note: "Camera permission was denied.",
+    });
+
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 12,
+      tick_index: 2,
+      runtime_state,
+    });
+    const cameraSource = snapshot.sources.find((source) => source.source_kind === "camera_cv");
+
+    expect(cameraSource?.availability).toBe("unavailable");
+    expect(cameraSource?.contributes_to_aggregate).toBe(false);
+    expect(cameraSource?.status_note).toMatch(/permission was denied/i);
+  });
+
+  it("ages webcam observations to stale cleanly when the visual source stops updating", () => {
+    const runtime_state = buildCameraRuntimeState({
+      lifecycle_status: "active",
+      status_note: "Camera active before stale test.",
+      observations: [
+        {
+          sim_time_sec: 5,
+          tick_index: 1,
+          observation_kind: "stable_face",
+          face_count: 1,
+          strongest_face_confidence: 80,
+          face_center_offset: 0.1,
+          head_motion_delta: 0.05,
+          face_area_ratio: 0.12,
+          note: "stable face observed",
+        },
+      ],
+    });
+
+    const snapshot = evaluateWithDefaultSources({
+      sim_time_sec: 20,
+      tick_index: 4,
+      runtime_state,
+    });
+    const cameraSource = snapshot.sources.find((source) => source.source_kind === "camera_cv");
+
+    expect(cameraSource?.freshness_status).toBe("stale");
+    expect(cameraSource?.contributes_to_aggregate).toBe(false);
+    expect(snapshot.degraded_state_reason).toMatch(/camera_cv is stale/i);
   });
 
   it("can run interaction telemetry by itself through the same canonical source pipeline", () => {
