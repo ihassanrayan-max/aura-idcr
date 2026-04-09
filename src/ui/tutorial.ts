@@ -3,7 +3,7 @@ import type { WorkspaceId } from "./viewModel";
 
 export type RunPace = "guided" | "live";
 
-export type TutorialPathId = "full" | "operate" | "review";
+export type TutorialPathId = "full" | "operate" | "review" | "monitoring";
 
 export type TutorialTargetId =
   | "command-bar"
@@ -13,17 +13,25 @@ export type TutorialTargetId =
   | "situation-board"
   | "alarm-board"
   | "next-actions"
+  | "ai-briefing-panel"
   | "manual-utility"
   | "support-posture"
   | "storyline-board"
   | "validation-banner"
   | "review-oversight"
   | "review-completed"
-  | "review-comparison";
+  | "review-comparison"
+  | "monitoring-summary"
+  | "monitoring-source-status"
+  | "monitoring-webcam"
+  | "monitoring-extracted-features"
+  | "monitoring-fused-interpretation"
+  | "monitoring-system-impact";
 
 export type TutorialActionId =
   | "workspace:operate"
   | "workspace:review"
+  | "workspace:monitoring"
   | "runtime:run-guided"
   | "runtime:run-live"
   | "runtime:pause"
@@ -39,17 +47,22 @@ export type TutorialActionId =
   | "actions:demo-preset"
   | "actions:confirm-pending"
   | "actions:dismiss-pending"
+  | "ai:generate-briefing"
+  | "monitoring:toggle-webcam"
   | "tutorial:complete-run";
 
 export type TutorialSignal =
   | "workspace-review-opened"
   | "workspace-operate-opened"
+  | "workspace-monitoring-opened"
   | "runtime-guided-started"
   | "runtime-live-started"
   | "runtime-advanced"
   | "alarm-cluster-opened"
   | "lane-action-requested"
   | "validator-demo-requested"
+  | "ai-briefing-generated"
+  | "monitoring-webcam-toggled"
   | "tutorial-run-completed";
 
 export type TutorialContext = {
@@ -329,6 +342,24 @@ const fullFlow: TutorialFlow = {
       },
     },
     {
+      id: "ai-briefing",
+      workspace: "operate",
+      targetId: "ai-briefing-panel",
+      title: "AI Incident Commander",
+      summary: "This panel provides an on-demand, deterministic language model briefing that explains what is happening and what to do next.",
+      shows:
+        "It summarizes the situation, intent, priority actions, and watchouts, anchored strictly to the current plant state.",
+      whyItExists:
+        "Operators benefit from structured, narrative briefings during high-workload events, without needing to extract insight from raw variables or scattered alarms.",
+      whenToCare:
+        "Use this to orient yourself quickly upon arrival, to double-check intent before acting, or to brief a colleague.",
+      decisionSupport:
+        "It connects telemetry to high-level goals. The briefing is advisory, and always points back to canonical evidence.",
+      competitionTieIn:
+        "This demonstrates grounded LLM integration where the AI is an explainer of deterministic state, rather than a black-box actor.",
+      completion: { kind: "manual" },
+    },
+    {
       id: "validator-demo",
       workspace: "operate",
       targetId: "manual-utility",
@@ -506,6 +537,7 @@ const operateFlow: TutorialFlow = {
         "storyline-board",
         "support-posture",
         "next-actions",
+        "ai-briefing",
         "validator-demo",
         "validator-result",
       ].includes(step.id),
@@ -626,10 +658,127 @@ const reviewFlow: TutorialFlow = {
   ],
 };
 
+const monitoringFlow: TutorialFlow = {
+  id: "monitoring",
+  label: "Human Monitoring tour",
+  kickoffSummary:
+    "Keeps the current session state, opens the Human Monitoring workspace, and explains how operator-state proxies and webcam interpretation guide the adaptive posture.",
+  restartMode: "preserve_current_state",
+  steps: [
+    {
+      id: "monitoring-briefing",
+      workspace: "operate",
+      requiresManualWorkspaceSwitch: true,
+      targetId: "workspace-switch",
+      title: "Human Monitoring Workspace",
+      summary: "The monitoring surface makes the system's human-performance interpretation transparent.",
+      shows:
+        "The workspace switch safely moves you to the monitoring surface without losing or disrupting the live scenario.",
+      whyItExists:
+        "Operators and evaluators need to see how the system measures operator state without cluttering the primary Operate view.",
+      whenToCare:
+        "Open Monitoring when you want to audit what the system believes about operator workload, attention, or stress.",
+      decisionSupport:
+        "It separates the 'plant twin' from the 'human twin' interfaces while proving they influence each other.",
+      taskPrompt: "Open the Human Monitoring workspace.",
+      completionLabel: "Waiting for the Human Monitoring workspace.",
+      lockedActionIds: ["workspace:monitoring"],
+      completion: {
+        kind: "condition",
+        autoAdvance: true,
+        isComplete: (context) => hasSignal(context, "workspace-monitoring-opened") && context.workspace === "monitoring",
+      },
+    },
+    {
+      id: "monitoring-summary",
+      workspace: "monitoring",
+      targetId: "monitoring-summary",
+      title: "Monitoring 2.0 Summary",
+      summary: "This region explains what the overall monitoring pipeline is producing right now.",
+      shows:
+        "It displays summary metrics, fused state labels, and exactly which Operate behaviors this state is currently influencing.",
+      whyItExists:
+        "Users need a fast top-level answer for 'Why is the system acting adaptively right now?' without parsing raw computer vision data.",
+      whenToCare:
+        "Check this first to see the final operator-state determination before looking into individual source adapters.",
+      decisionSupport:
+        "It bridges raw monitoring data to the UI adaptation happening in the Operate workspace.",
+      completion: { kind: "manual" },
+    },
+    {
+      id: "monitoring-source-status",
+      workspace: "monitoring",
+      targetId: "monitoring-source-status",
+      title: "Source Status Overview",
+      summary: "A transparent list of connected telemetry adapters driving the interpretation.",
+      shows:
+        "It reveals which adapters (like webcam, interaction telemetry, physiological sensors) are active, degraded, or offline.",
+      whyItExists:
+        "A reliable system must honestly disclose if it is running on partial data or falling back to defaults.",
+      whenToCare:
+        "Use this to audit connection health, resolve tracking issues, or verify that the system detects a lost connection.",
+      decisionSupport:
+        "It makes sensor reliability auditable and provides confidence in the fused results.",
+      completion: { kind: "manual" },
+    },
+    {
+      id: "monitoring-webcam",
+      workspace: "monitoring",
+      targetId: "monitoring-webcam",
+      title: "Webcam / CV Observability",
+      summary: "This shows the local visual preview and bounded CV processing window.",
+      shows:
+        "It provides the precise sample window and extracted observations (like gaze, expressions) derived from local computer vision.",
+      whyItExists:
+        "CV inferences can feel arbitrary. Making the bounding boxes and visual features observable grounds the system's claims.",
+      whenToCare:
+        "Use it to verify if lighting, angle, or occlusion are affecting attention tracking.",
+      decisionSupport:
+        "It builds trust by exposing the \"eye\" of the system while maintaining transparent, bounded local processing.",
+      completion: { kind: "manual" },
+    },
+    {
+      id: "monitoring-extracted-features",
+      workspace: "monitoring",
+      targetId: "monitoring-extracted-features",
+      title: "Extracted Features",
+      summary: "Here, raw signals are turned into meaningful metrics before fusion.",
+      shows:
+        "It lists per-source feature cards capturing localized risk cues such as high interaction rates or extended periods of diverted gaze.",
+      whyItExists:
+        "It provides the intermediate logic step. You can see how raw inputs translate to standardized cues.",
+      whenToCare:
+        "Inspect this to understand which particular behavior triggered an elevated risk assessment.",
+      decisionSupport:
+        "It breaks the 'black box' into understandable, distinct feature calculations.",
+      completion: { kind: "manual" },
+    },
+    {
+      id: "monitoring-fused-interpretation",
+      workspace: "monitoring",
+      targetId: "monitoring-fused-interpretation",
+      title: "Fused Interpretation and Output",
+      summary: "Extracted features are fused into the final operator state and downstream impact.",
+      shows:
+        "It provides the single cross-source interpretation (fused input and final output) and details exactly how this state drives the UI adaptation.",
+      whyItExists:
+        "The system never adapts the UI based on one noisy sensor. Fusion ensures stable, high-confidence output.",
+      whenToCare:
+        "Check this when you want to trace an adaptation choice back to the overall operator state model.",
+      decisionSupport:
+        "It explains the exact pipeline from sensor inputs -> fused state -> downstream impact (like UI decluttering or elevated validation).",
+      competitionTieIn:
+        "This transparent pipeline from sensors to support posture is the core of the human-performance competition story.",
+      completion: { kind: "manual" },
+    },
+  ],
+};
+
 export const tutorialFlows: Record<TutorialPathId, TutorialFlow> = {
   full: fullFlow,
   operate: operateFlow,
   review: reviewFlow,
+  monitoring: monitoringFlow,
 };
 
 export function getTutorialFlow(pathId: TutorialPathId): TutorialFlow {

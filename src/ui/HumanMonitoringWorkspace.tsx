@@ -23,6 +23,7 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
           title="Human Monitoring 2.0"
           subtitle="Inspectable monitoring surface showing source status, extracted features, fused interpretation, final operator-state outputs, and downstream support meaning."
           data-testid="monitoring-summary"
+          data-tutorial-target="monitoring-summary"
         >
           <MonitoringMetricGrid items={model.summaryMetrics} className="metric-strip--compact" />
           <div className="pill-row">
@@ -47,6 +48,7 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
           title="Source Status"
           subtitle="What source adapters are connected, how fresh they are, whether they are degraded, and whether the system is falling back."
           data-testid="monitoring-source-status"
+          data-tutorial-target="monitoring-source-status"
         >
           <div className="monitoring-card-grid">
             {model.sourceCards.map((source) => (
@@ -74,6 +76,7 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
           title="Webcam / CV Observability"
           subtitle="Bounded local visual preview plus the exact CV lifecycle and sample window the monitoring pipeline is using."
           data-testid="monitoring-webcam"
+          data-tutorial-target="monitoring-webcam"
           actions={
             <button type="button" className="ghost-button" disabled={webcamMonitoring.disabled} onClick={webcamMonitoring.toggle}>
               {webcamMonitoring.buttonLabel}
@@ -168,6 +171,7 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
           title="Extracted Features"
           subtitle="Per-source bounded features and risk cues being derived before fusion."
           data-testid="monitoring-extracted-features"
+          data-tutorial-target="monitoring-extracted-features"
         >
           {model.extractedFeatures.length > 0 ? (
             <div className="monitoring-card-grid">
@@ -201,6 +205,7 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
           title="Fused Interpretation Input"
           subtitle="The cross-source interpretation that feeds the final operator-state output."
           data-testid="monitoring-fused-interpretation"
+          data-tutorial-target="monitoring-fused-interpretation"
         >
           {model.fusedInterpretation ? (
             <>
@@ -254,6 +259,7 @@ export function HumanMonitoringWorkspace(props: HumanMonitoringWorkspaceProps) {
           title="Advisory Meaning / System Impact"
           subtitle="How the published monitoring output would influence combined risk, support posture, and operator-facing adaptation."
           data-testid="monitoring-system-impact"
+          data-tutorial-target="monitoring-system-impact"
         >
           <div className="pill-row">
             {model.downstreamImpact.pills.map((pill) => (

@@ -520,10 +520,8 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
   }
 
   function openWorkspace(nextWorkspace: WorkspaceId): void {
-    if (
-      nextWorkspace !== "monitoring" &&
-      !isTutorialActionAllowed(nextWorkspace === "review" ? "workspace:review" : "workspace:operate")
-    ) {
+    const actionId = nextWorkspace === "review" ? "workspace:review" : nextWorkspace === "monitoring" ? "workspace:monitoring" : "workspace:operate";
+    if (!isTutorialActionAllowed(actionId)) {
       return;
     }
 
@@ -531,6 +529,8 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
       recordTutorialSignal("workspace-review-opened");
     } else if (nextWorkspace === "operate") {
       recordTutorialSignal("workspace-operate-opened");
+    } else if (nextWorkspace === "monitoring") {
+      recordTutorialSignal("workspace-monitoring-opened");
     }
 
     store.recordInteractionTelemetry({
@@ -889,7 +889,7 @@ export default function App({ store = defaultStore, autoRun = false }: AppProps)
               role="tab"
               aria-selected={workspace === "monitoring"}
               className={workspace === "monitoring" ? "workspace-switch__button is-active" : "workspace-switch__button"}
-              disabled={tutorialState.mode === "running"}
+              disabled={!isTutorialActionAllowed("workspace:monitoring")}
               onClick={() => openWorkspace("monitoring")}
             >
               Human Monitoring

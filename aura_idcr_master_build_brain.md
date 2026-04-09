@@ -1542,6 +1542,25 @@ Use this section to track meaningful progress across sessions.
 
 ---
 
+- Date: 2026-04-09
+- Agent/session: Codex GPT-5 visual system defense documentation session
+- Task worked on: Created a single defense-ready Markdown dossier that explains the implemented system visually, logically, and STEM-wise for demo, judging, and technical Q&A use
+- Status: Done
+- What changed:
+  - Added `docs/aura_system_visual_defense.md` as a consolidated architecture and defense document grounded in the current repo implementation rather than chat assumptions
+  - Included UML-style and systems visuals in Mermaid for system context, module relationships, closed-loop dataflow, runtime sequencing, support-mode state, validation state, AI-boundary layering, and evaluation/reporting flow
+  - Documented the actual prototype equations and heuristics used in code for the plant twin, alarm logic, reasoning scores, human-monitoring proxies, HPSN-Lite combined risk fusion, support arbitration, action validation, counterfactual scoring, and KPI computation
+  - Added design-defense framing, role/workspace layout explanation, limitations/honesty statements, and likely STEM defense questions with concise repo-truth answers
+- What remains:
+  - The new dossier is documentation-only; it does not change runtime behavior, contracts, UI layout, scenario logic, or evaluation math
+  - If later packets materially change scoring thresholds, plant equations, monitoring signals, or validation bands, this dossier should be updated so the visuals remain source-truth aligned
+- Blockers:
+  - None in-repo for the documentation slice
+- Next recommended step:
+  - Use `docs/aura_system_visual_defense.md` as the shared reference for slides, oral defense prep, and judge-facing architecture explanation instead of reconstructing the logic ad hoc from scattered files
+
+---
+
 ## 26) Final reminder to all future agents
 Do not treat this as a casual brainstorming project.
 This is an implementation-driven build.

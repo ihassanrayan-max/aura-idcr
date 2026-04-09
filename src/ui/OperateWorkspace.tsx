@@ -437,7 +437,71 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
             </div>
           </article>
 
-          <article className="ai-briefing-panel" data-testid="incident-commander-panel">
+
+          <div className="lane-guidance-grid">
+            {model.laneGuidanceCards.map((card) => (
+              <article key={card.id} className={cx("lane-guidance-card", `lane-guidance-card--${card.tone}`)}>
+                <span className="utility-card__label">{card.label}</span>
+                <strong>{card.headline}</strong>
+                <p>{card.body}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="pill-row">
+            {model.laneBadges.map((badge) => (
+              <StatusPill key={badge.label} tone={badge.tone}>
+                {badge.label}
+              </StatusPill>
+            ))}
+          </div>
+          <p className="lane-mode-note">{model.laneSummaryNote}</p>
+
+          <div className={cx("lane-list", presentationPolicy.support_panel_mode_class)}>
+            {model.laneItems.map((item) => (
+              <article
+                key={item.id}
+                className={cx("lane-item", item.emphasis && "lane-item--emphasized")}
+                data-testid="next-action-item"
+              >
+                <div className="section-divider">
+                  <div>
+                    <strong>{item.label}</strong>
+                    <p>{item.kind}</p>
+                  </div>
+                  <div className="pill-row">
+                    {item.badges.map((badge) => (
+                      <StatusPill key={`${item.id}-${badge.label}`} tone={badge.tone}>
+                        {badge.label}
+                      </StatusPill>
+                    ))}
+                  </div>
+                </div>
+                <p>{item.why}</p>
+                {item.whyNow ? <p className="lane-why-now">{item.whyNow}</p> : null}
+                {item.cautions.map((caution) => (
+                  <p key={caution} className="lane-caution">
+                    {caution}
+                  </p>
+                ))}
+                <p className="lane-meta">{item.completionHint}</p>
+                {item.signals ? <p className="lane-meta">Signals: {item.signals}</p> : null}
+                {item.actionId && item.actionLabel ? (
+                  <button
+                    type="button"
+                    className="lane-action-button"
+                    disabled={actionConfirmationPending || !isTutorialActionAllowed("actions:lane-primary")}
+                    onClick={() => onRequestLaneAction(item.actionId!, item.actionValue)}
+                  >
+                    {item.actionLabel}
+                    {item.actionValueLabel ? ` (${item.actionValueLabel})` : ""}
+                  </button>
+                ) : null}
+              </article>
+            ))}
+          </div>
+
+          <article className="ai-briefing-panel" data-testid="incident-commander-panel" data-tutorial-target="ai-briefing-panel">
             <div className="section-divider">
               <div>
                 <span className="utility-card__label">AI Incident Commander</span>
@@ -516,69 +580,6 @@ export function OperateWorkspace(props: OperateWorkspaceProps) {
               </div>
             ) : null}
           </article>
-
-          <div className="lane-guidance-grid">
-            {model.laneGuidanceCards.map((card) => (
-              <article key={card.id} className={cx("lane-guidance-card", `lane-guidance-card--${card.tone}`)}>
-                <span className="utility-card__label">{card.label}</span>
-                <strong>{card.headline}</strong>
-                <p>{card.body}</p>
-              </article>
-            ))}
-          </div>
-
-          <div className="pill-row">
-            {model.laneBadges.map((badge) => (
-              <StatusPill key={badge.label} tone={badge.tone}>
-                {badge.label}
-              </StatusPill>
-            ))}
-          </div>
-          <p className="lane-mode-note">{model.laneSummaryNote}</p>
-
-          <div className={cx("lane-list", presentationPolicy.support_panel_mode_class)}>
-            {model.laneItems.map((item) => (
-              <article
-                key={item.id}
-                className={cx("lane-item", item.emphasis && "lane-item--emphasized")}
-                data-testid="next-action-item"
-              >
-                <div className="section-divider">
-                  <div>
-                    <strong>{item.label}</strong>
-                    <p>{item.kind}</p>
-                  </div>
-                  <div className="pill-row">
-                    {item.badges.map((badge) => (
-                      <StatusPill key={`${item.id}-${badge.label}`} tone={badge.tone}>
-                        {badge.label}
-                      </StatusPill>
-                    ))}
-                  </div>
-                </div>
-                <p>{item.why}</p>
-                {item.whyNow ? <p className="lane-why-now">{item.whyNow}</p> : null}
-                {item.cautions.map((caution) => (
-                  <p key={caution} className="lane-caution">
-                    {caution}
-                  </p>
-                ))}
-                <p className="lane-meta">{item.completionHint}</p>
-                {item.signals ? <p className="lane-meta">Signals: {item.signals}</p> : null}
-                {item.actionId && item.actionLabel ? (
-                  <button
-                    type="button"
-                    className="lane-action-button"
-                    disabled={actionConfirmationPending || !isTutorialActionAllowed("actions:lane-primary")}
-                    onClick={() => onRequestLaneAction(item.actionId!, item.actionValue)}
-                  >
-                    {item.actionLabel}
-                    {item.actionValueLabel ? ` (${item.actionValueLabel})` : ""}
-                  </button>
-                ) : null}
-              </article>
-            ))}
-          </div>
 
           {pendingConfirmation ? (
             <div
